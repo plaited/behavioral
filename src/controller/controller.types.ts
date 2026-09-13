@@ -8,7 +8,7 @@
  * @packageDocumentation
  */
 
-import type { BPEvent, Trigger } from '../behavioral/behavioral.types.ts'
+import type { BPEvent, Disconnect, Trigger } from '../behavioral/behavioral.types.ts'
 import type {
   CONTROLLER_INCOMING_MESSAGE_TYPES,
   CONTROLLER_OUTGOING_MESSAGE_TYPES,
@@ -131,6 +131,13 @@ export type ControllerConstructorArgs = {
   onPageShow?: ControllerExtension<Window, 'pageshow'>
   /** Called on {@link https://developer.mozilla.org/en-US/docs/Web/API/Window/pagehide_event | pagehide}. */
   onPageHide?: ControllerExtension<Window, 'pagehide'>
+  /**
+   * Optional message carrier. When omitted the controller uses its built-in
+   * WebSocket carrier (byte-for-byte the pre-seam behavior). When provided,
+   * the controller sends/receives through it instead of opening a WebSocket —
+   * the injection point a non-WS carrier (e.g. Tauri IPC) plugs into.
+   */
+  transport?: Transport
 }
 
 // ---------------------------------------------------------------------------
@@ -333,3 +340,40 @@ export type ClientMessage =
   | SuccessMessage
   | PageSnapshot
   | ScaleCheckResultMessage
+
+// ---------------------------------------------------------------------------
+// Transport seam
+// ---------------------------------------------------------------------------
+
+/**
+ * A transport status event. `open`/`close` report carrier state; `error`
+ * reports a carrier-level failure for the controller to surface to the agent.
+ *
+ * @public
+ */
+export type TransportEvent =
+  | { type: 'open' }
+  | { type: 'close'; code?: number; reason?: string }
+  | { type: 'error'; error: Error }
+
+/**
+ * The controller's message carrier — the seam a non-WebSocket transport
+ * (Tauri IPC, etc.) plugs into without touching controller logic.
+ *
+ * @remarks
+ * The controller sends outgoing {@link ClientMessage}s via `send`, registers
+ * for incoming {@link ServerMessage}s via `onMessage`, and registers for
+ * carrier status/error events via `onStatus`. The default carrier is the
+ * built-in WebSocket implementation (queueing, flush-on-open, randomized
+ * backoff reconnect live there); an injected transport replaces it wholesale.
+ *
+ * @public
+ */
+export type Transport = {
+  /** Send a ClientMessage to the server. */
+  send: (message: ClientMessage) => void
+  /** Register for incoming ServerMessages. Returns a disconnect. */
+  onMessage: (handler: (message: ServerMessage) => void) => Disconnect
+  /** Register for carrier status/error events. Returns a disconnect. */
+  onStatus: (handler: (event: TransportEvent) => void) => Disconnect
+}

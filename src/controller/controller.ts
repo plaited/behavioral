@@ -12,15 +12,12 @@ import {
   SCALE_RANK,
   SWAP_MODES,
   SWAP_TARGETS,
-  UI_CORE_MAX_RETRIES,
-  UI_CORE_RETRY_STATUS_CODES,
 } from './controller.constants.ts'
 import {
   ElementNotFoundError,
   FormSubmitError,
   PageExtensionError,
   TriggerError,
-  WebSocketError,
   WebSocketMessageError,
 } from './controller.errors.ts'
 import type {
@@ -33,9 +30,11 @@ import type {
   RenderMessage,
   ScaleCheckMessage,
   ServerMessage,
+  Transport,
 } from './controller.types.ts'
 import { DelegatedListener } from './delegated-listener.ts'
 import { swapBoundary } from './swap-boundary.ts'
+import { WebSocketTransport } from './ws-transport.ts'
 
 const delegates = new WeakMap<EventTarget, DelegatedListener>()
 
@@ -73,26 +72,27 @@ const isSubmit = (event: Event): event is SubmitEvent => event instanceof Submit
  *
  * @remarks
  * One instance per page, loaded via an async module script in `<head>`. The
- * controller opens a WebSocket to its serving agent, binds `b-trigger` and
- * `b-form` declarations in the DOM, and applies server-pushed `render`,
- * `attrs`, `dispatch_custom_event`, and `navigate` messages. User
- * interactions emit `ui_event` messages back to the agent, which decides what
- * to render in response — a push-based model distinct from pull-based
- * hypermedia clients.
+ * controller talks to its serving agent over an injectable {@link Transport}
+ * (the default built-in WebSocket carrier), binds `b-trigger` and `b-form`
+ * declarations in the DOM, and applies server-pushed `render`, `attrs`,
+ * `dispatch_custom_event`, and `navigate` messages. User interactions emit
+ * `ui_event` messages back to the agent, which decides what to render in
+ * response — a push-based model distinct from pull-based hypermedia clients.
  *
  * The browser owns document-bound teardown (listeners, sockets, timers) on
- * unload and bfcache freeze; the controller does not force-close the socket on
+ * unload and bfcache freeze; the controller does not force-close the carrier on
  * `pagehide` so a queued snapshot can flush during teardown.
  *
  * @public
  */
 export class Controller {
-  constructor({ extensions, onPageReveal, onPageSwap, onPageHide, onPageShow }: ControllerConstructorArgs) {
+  constructor({ extensions, onPageReveal, onPageSwap, onPageHide, onPageShow, transport }: ControllerConstructorArgs) {
     this.#extensions = extensions
     this.#onPageHide = onPageHide
     this.#onPageReveal = onPageReveal
     this.#onPageShow = onPageShow
     this.#onPageSwap = onPageSwap
+    this.#injectedTransport = transport
   }
   #extensions?: Map<string, ControllerExtension>
   #onPageHide: ControllerConstructorArgs['onPageHide']
@@ -100,90 +100,47 @@ export class Controller {
   #onPageShow: ControllerConstructorArgs['onPageShow']
   #onPageSwap: ControllerConstructorArgs['onPageSwap']
   #disconnectSet = new Set<Disconnect>()
-  #messageQueue: string[] = []
-  #socket: WebSocket | undefined
-  #retryCount = 0
-  #socketListener = new DelegatedListener((event: Event) => {
-    try {
-      const target = event.target
-      if (!(target instanceof WebSocket)) {
-        throw new WebSocketError(`WebSocket listener received event without WebSocket target`, {
-          cause: {
-            eventType: event.type,
-            socketUrl: target instanceof WebSocket ? target.url : null,
-            socketReadyState: target instanceof WebSocket ? target.readyState : null,
-          },
-        })
-      }
-      if (target !== this.#socket) return
-      if (event.type === 'open') {
-        this.#retryCount = 0
-        for (const msg of this.#messageQueue) this.#socket?.send(msg)
-        this.#messageQueue = []
-        this.#socket.removeEventListener('open', this.#socketListener)
-        return
-      }
-      if (event instanceof MessageEvent) {
-        this.#webSocketListener(event)
-        return
-      }
-      if (event instanceof CloseEvent && UI_CORE_RETRY_STATUS_CODES.has(event.code)) this.#webSocketRetry()
-      if (event.type === 'error') {
-        throw new WebSocketError(`WebSocket error on ${target.url} (readyState: ${target.readyState})`, {
-          cause: {
-            eventType: event.type,
-            socketUrl: target instanceof WebSocket ? target.url : null,
-            socketReadyState: target instanceof WebSocket ? target.readyState : null,
-          },
-        })
-      }
-    } catch (err) {
-      const error = err instanceof Error ? err : new WebSocketError('page listener error', { cause: err })
-      this.#reportError(error)
-    }
-  })
-  #connectWebSocket() {
-    this.#closeWebSocket(this.#socket)
-    this.#socket = new WebSocket(self.location.href.replace(/^http/, 'ws'))
-    delegates.set(this.#socket, this.#socketListener)
-    this.#socket.addEventListener('open', this.#socketListener)
-    this.#socket.addEventListener('message', this.#socketListener)
-    this.#socket.addEventListener('error', this.#socketListener)
-    this.#socket.addEventListener('close', this.#socketListener)
-  }
+  #injectedTransport?: Transport
+  #transport: Transport | undefined
+  #transportWired = false
   #addDisconnect(disconnect: Disconnect) {
     this.#disconnectSet.add(disconnect)
   }
-  #closeWebSocket(socket?: WebSocket) {
-    if (!socket) return
-    this.#socket = undefined
-    socket.removeEventListener('open', this.#socketListener)
-    socket.removeEventListener('message', this.#socketListener)
-    socket.removeEventListener('error', this.#socketListener)
-    socket.removeEventListener('close', this.#socketListener)
-    if (socket.readyState !== WebSocket.CLOSED && socket.readyState !== WebSocket.CLOSING) socket.close()
+  /**
+   * @internal
+   * Resolves the active carrier, creating the default WebSocket carrier on
+   * first use (mirroring the pre-seam lazy connect: a send before `connect()`
+   * opens the socket). An injected transport is used as-is. The carrier is
+   * wired for incoming dispatch + status/error reporting exactly once.
+   */
+  #getTransport(): Transport {
+    if (!this.#transport) {
+      this.#transport =
+        this.#injectedTransport ??
+        new WebSocketTransport(self.location.href.replace(/^http/, 'ws'), {
+          registerDisconnect: (cb) => this.#addDisconnect(cb),
+        })
+      this.#wireTransport(this.#transport)
+    }
+    return this.#transport
   }
-  #webSocketRetry() {
-    this.#closeWebSocket(this.#socket)
-    if (this.#retryCount >= UI_CORE_MAX_RETRIES) return
-    const maxDelay = Math.min(9_999, 1_000 * 2 ** this.#retryCount)
-    const id = setTimeout(() => this.#connectWebSocket(), Math.floor(Math.random() * maxDelay))
-    this.#addDisconnect(() => clearTimeout(id))
-    this.#retryCount++
+  /**
+   * @internal
+   * Registers the incoming-dispatch and status/error handlers on the carrier.
+   * Idempotent — safe whether the carrier was injected or lazily created.
+   */
+  #wireTransport(transport: Transport) {
+    if (this.#transportWired) return
+    this.#transportWired = true
+    transport.onMessage((message) => this.#handleIncoming(message))
+    transport.onStatus((event) => {
+      // open/close are carrier state; only errors surface to the agent
+      // (matching the pre-seam listener's catch → #reportError path).
+      if (event.type === 'error') this.#reportError(event.error)
+    })
   }
   #send(message: ClientMessage) {
-    const onOpen = () => {
-      for (const msg of this.#messageQueue) this.#socket?.send(msg)
-      this.#messageQueue = []
-      this.#socket?.removeEventListener('open', onOpen)
-    }
-    if (this.#socket?.readyState === WebSocket.OPEN) {
-      this.#socket.send(JSON.stringify(message))
-      return
-    }
-    this.#messageQueue.push(JSON.stringify(message))
-    if (!this.#socket) this.#connectWebSocket()
-    this.#socket?.addEventListener('open', onOpen)
+    this.#getTransport().send(message)
   }
   #sendSnapshot(type: keyof typeof PAGE_EVENTS) {
     this.#send({
@@ -422,12 +379,18 @@ export class Controller {
       detail: { id, target, effectiveScale, timeStamp: Date.now() },
     })
   }
-  #webSocketListener(event: MessageEvent) {
+  /**
+   * @internal
+   * Incoming dispatch — the carrier delivers a parsed {@link ServerMessage};
+   * this is the pre-seam `#webSocketListener` body minus the JSON.parse (now
+   * in the carrier). Ingress stays ungated here as before — the carrier's
+   * parse is the only admission check today (MINIMAL: the Phase 6
+   * `validateBPEvent` boundary gate is a separate, future admission layer).
+   */
+  #handleIncoming(message: ServerMessage) {
     let id: string | undefined
     try {
-      const raw: unknown = JSON.parse(String(event.data))
-      // oneOf validates type + detail shape; narrow via the tag.
-      const { type, detail } = raw as ServerMessage
+      const { type, detail } = message
       id = detail.id
       switch (type) {
         case CONTROLLER_INCOMING_MESSAGE_TYPES.render: {
@@ -522,7 +485,7 @@ export class Controller {
   }
   async connect() {
     this.#connectPage()
-    this.#connectWebSocket()
+    this.#getTransport()
     this.#bind()
   }
 }
