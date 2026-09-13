@@ -76,7 +76,6 @@
     "@commitlint/config-conventional": "21.2.2",
     "@earendil-works/pi-coding-agent": "0.82.1",
     "@modelcontextprotocol/server": "^2.0.0",
-    "@playwright/cli": "^0.1.17",
     "@tauri-apps/cli": "^2.11.4",
     "@types/bun": "^1.4.1",
     "@webref/css": "^8.7.4",
