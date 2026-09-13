@@ -36,7 +36,26 @@
  * @packageDocumentation
  */
 
-import type { Thread } from '../behavioral/behavioral.types.ts'
+import type { JsonObject, Thread } from '../behavioral/behavioral.types.ts'
+
+/**
+ * Build the once-thread an internal re-entry uses to request the event it
+ * produced (a bridge result, a transform target, or similar).
+ *
+ * @remarks
+ * Re-entry is ordinary thread admission: the caller registers this thread via
+ * `useAddThread(space)` (which stamps its `space`), then fires the contentless
+ * `KICK_EVENT_TYPE` to start the super-step. The requested event is therefore a
+ * request-origin candidate (`ingress` absent), which is what lets listeners
+ * restrict themselves to internal events with `ingressMatch: false`.
+ *
+ * @public
+ */
+export const createReentryThread = ({ type, detail }: { type: string; detail?: JsonObject }): Thread => ({
+  label: `reentry:${type}`,
+  once: true,
+  rules: [{ request: { type, ...(detail === undefined ? {} : { detail }) } }],
+})
 
 /**
  * The turn-loop thread — registered once per `runTurn`. Space-stamped by
@@ -48,7 +67,10 @@ export const TURN_LOOP_THREAD: Thread = {
   label: 'turn-loop',
   rules: [
     {
-      waitFor: [{ type: 'user.prompt' }, { type: 'respond' }],
+      waitFor: [
+        { type: 'user.prompt', ingressMatch: true },
+        { type: 'respond', ingressMatch: false },
+      ],
       interrupt: [{ type: 'turn.end' }],
     },
     {
@@ -56,7 +78,7 @@ export const TURN_LOOP_THREAD: Thread = {
       interrupt: [{ type: 'turn.end' }],
     },
     {
-      waitFor: [{ type: 'model.result' }],
+      waitFor: [{ type: 'model.result', ingressMatch: false }],
       interrupt: [{ type: 'turn.end' }],
     },
     {
@@ -64,7 +86,7 @@ export const TURN_LOOP_THREAD: Thread = {
       interrupt: [{ type: 'turn.end' }],
     },
     {
-      waitFor: [{ type: 'tool.result' }, { type: 'turn.end' }],
+      waitFor: [{ type: 'tool.result', ingressMatch: false }, { type: 'turn.end' }],
       interrupt: [{ type: 'turn.end' }],
     },
   ],
@@ -131,19 +153,19 @@ export const PROGRESSIVE_DISCLOSURE_THREAD: Thread = {
   once: true,
   rules: [
     // 1. Ingress — wait for a user prompt to start the search cycle.
-    { waitFor: [{ type: 'user.prompt' }] },
+    { waitFor: [{ type: 'user.prompt', ingressMatch: true }] },
     // 2. Search (tier 1) — request metadata search; bridge calls discovery tool.
     { request: { type: 'discovery.search' } },
     // 3. Wait for search results — bridge fires discovery.results after I/O.
-    { waitFor: [{ type: 'discovery.results' }], interrupt: [{ type: 'turn.end' }] },
+    { waitFor: [{ type: 'discovery.results', ingressMatch: false }], interrupt: [{ type: 'turn.end' }] },
     // 4. Pick — request a model round; the model picks a candidate from results.
     { request: { type: 'model.respond' } },
     // 5. Wait for the model result — bridge fires model.result with the pick.
-    { waitFor: [{ type: 'model.result' }], interrupt: [{ type: 'turn.end' }] },
+    { waitFor: [{ type: 'model.result', ingressMatch: false }], interrupt: [{ type: 'turn.end' }] },
     // 6. Load (tier 2) — request skill read; bridge calls skill-client/mcp-client.
     { request: { type: 'skill.read' } },
     // 7. Wait for loaded content — bridge fires tool.loaded after I/O.
-    { waitFor: [{ type: 'tool.loaded' }], interrupt: [{ type: 'turn.end' }] },
+    { waitFor: [{ type: 'tool.loaded', ingressMatch: false }], interrupt: [{ type: 'turn.end' }] },
     // 8. Terminate — request turn.end to stop the cycle.
     { request: { type: 'turn.end' } },
   ],

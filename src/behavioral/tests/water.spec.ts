@@ -30,9 +30,8 @@ const mixHotColdRules = [
 test('Add hot water 3 times', () => {
   const actual: string[] = []
   const program = behavioral()
-  const { useAddThread, useTrigger } = program
+  const { useAddThread, trigger } = program
   const addThread = useAddThread()
-  const trigger = useTrigger()
 
   addThread({ label: 'addHot', rules: addHotRules, once: true })
   onSelection(program, (selected) => {
@@ -59,9 +58,8 @@ test('Add hot water 3 times', () => {
 test('Add hot/cold water 3 times', () => {
   const actual: string[] = []
   const program = behavioral()
-  const { useAddThread, useTrigger } = program
+  const { useAddThread, trigger } = program
   const addThread = useAddThread()
-  const trigger = useTrigger()
 
   addThread({ label: 'addHot', rules: addHotRules, once: true })
   addThread({ label: 'addCold', rules: addColdRules, once: true })
@@ -84,9 +82,8 @@ test('Add hot/cold water 3 times', () => {
 test('interleave', () => {
   const actual: string[] = []
   const program = behavioral()
-  const { useAddThread, useTrigger } = program
+  const { useAddThread, trigger } = program
   const addThread = useAddThread()
-  const trigger = useTrigger()
 
   addThread({ label: 'addHot', rules: addHotRules, once: true })
   addThread({ label: 'addCold', rules: addColdRules, once: true })
@@ -111,9 +108,8 @@ test('interleave', () => {
  */
 test('logging', () => {
   const traces: Trace[] = []
-  const { useAddThread, useTrigger, useTrace } = behavioral()
+  const { useAddThread, trigger, useTrace } = behavioral()
   const addThread = useAddThread()
-  const trigger = useTrigger()
   useTrace((trace) => {
     traces.push(trace)
   })

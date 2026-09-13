@@ -1,6 +1,6 @@
 import type { JSONSchemaType } from 'ajv'
 import Ajv2020 from 'ajv/dist/2020'
-import { DETAIL_MATCH, type FRONTIER_STATUS, IDIOMS, type TRACE_MESSAGE_KINDS } from './behavioral.constants.ts'
+import { type FRONTIER_STATUS, IDIOMS, type TRACE_MESSAGE_KINDS } from './behavioral.constants.ts'
 
 /**
  * Shared Ajv instance for the behavioral kernel.
@@ -63,21 +63,28 @@ export const validateBPEvent = ajv.compile(BPEventSchema)
  * A listener declaration inside a thread rule.
  *
  * @property type - Event type to match.
+ * @property ingressMatch - Optional channel restriction. Absent matches either
+ *   channel; `true` matches only external trigger-origin candidates; `false`
+ *   matches only request-origin candidates (threads and internal re-entry).
  * @property detailSchema - Optional JSON Schema the event's `detail` must conform to.
- * @property detailMatch - `'valid'` matches conforming details; `'invalid'` matches non-conforming ones.
+ * @property detailMatch - Optional detail filter. `true` matches conforming
+ *   details; `false` matches non-conforming ones; absent requires conformity
+ *   (the default — an absent flag does NOT mean "match anything").
  *
  * @public
  */
 export type BPListener = {
   type: string
+  ingressMatch?: boolean
   detailSchema?: Record<string, unknown>
-  detailMatch?: (typeof DETAIL_MATCH)[keyof typeof DETAIL_MATCH]
+  detailMatch?: boolean
 }
 
 export const BPListenerSchema: JSONSchemaType<BPListener> = {
   type: 'object',
   properties: {
     type: { type: 'string' },
+    ingressMatch: { type: 'boolean', enum: [true, false], nullable: true },
     detailSchema: {
       type: 'object', // <-- Must be at the top level of detailSchema
       nullable: true,
@@ -95,7 +102,7 @@ export const BPListenerSchema: JSONSchemaType<BPListener> = {
         },
       ],
     },
-    detailMatch: { type: 'string', enum: Object.values(DETAIL_MATCH), nullable: true },
+    detailMatch: { type: 'boolean', enum: [true, false], nullable: true },
   },
   required: ['type'],
   additionalProperties: false,
@@ -117,28 +124,10 @@ type TransformListener = BPListener & {
 const TransformListenerSchema: JSONSchemaType<TransformListener> = {
   type: 'object',
   properties: {
-    type: { type: 'string' },
-    detailSchema: {
-      type: 'object', // <-- Must be at the top level of detailSchema
-      nullable: true,
-      allOf: [
-        { $ref: 'https://json-schema.org/draft/2020-12/schema' },
-        {
-          anyOf: [
-            { required: ['type'] },
-            { required: ['properties'] },
-            { required: ['$ref'] },
-            { required: ['enum'] },
-            { required: ['const'] },
-            { required: ['items'] },
-          ],
-        },
-      ],
-    },
-    detailMatch: { type: 'string', enum: Object.values(DETAIL_MATCH), nullable: true },
+    ...BPListenerSchema.properties,
     query: { type: 'string' },
     target: { type: 'string' },
-  },
+  } as NonNullable<JSONSchemaType<TransformListener>['properties']>,
   required: ['type', 'query', 'target'],
   additionalProperties: false,
 }
@@ -395,6 +384,7 @@ export type PendingBidsTrace = TraceBase & {
 export type TriggerError = TraceBase & {
   kind: typeof TRACE_MESSAGE_KINDS.trigger_error
   error: unknown[]
+  /** The attempted event `space`, echoed for observability even when validation fails. */
   space?: string
 }
 
@@ -526,9 +516,13 @@ export type UseAddThread = (space?: string) => AddThread
  * Injects external events into the behavioral program.
  * Primary interface for external systems to communicate with the program.
  *
- * @param args - Event to trigger, including its `type` and optional `detail`.
+ * @param args - Event to trigger, including its `type`, optional `detail`, and
+ *   optional `space` (absent = root). The event carries its own space; the
+ *   external surface is not partially applied per space.
  *
  * @remarks
+ * - Triggered candidate events carry `ingress: true`, so listeners can require
+ *   or exclude external origin via their `ingressMatch` flag.
  * - Triggered events have highest priority (0)
  * - Can be blocked by active threads
  * - Initiates new execution cycle
@@ -536,8 +530,6 @@ export type UseAddThread = (space?: string) => AddThread
  * @see {@link BPEvent} for event structure
  */
 export type Trigger = <T extends BPEvent>(args: T) => void
-
-export type UseTrigger = (space?: string) => Trigger
 
 export type SendTrace = {
   (value: Trace): void

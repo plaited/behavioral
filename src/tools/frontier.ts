@@ -123,7 +123,22 @@ const matchesSelectedEvent = ({ candidate, selected }: { candidate: CandidateBid
   candidate.space === selected.space &&
   Bun.deepEquals(candidate.detail, selected.detail)
 
-const addIngressTriggerToPending = ({ pending, selected }: { pending: Set<PendingBid>; selected: CandidateBid }) => {
+/**
+ * @internal
+ * Add a synthetic once-thread requesting the selected event so replay can
+ * match it. With `ingress: true` this reconstructs an external trigger
+ * admission; omitting it reconstructs an internal re-entry — the bridge or
+ * transform-daemon once-thread that is not part of the candidate thread set.
+ */
+const addSyntheticRequestThread = ({
+  pending,
+  selected,
+  ingress,
+}: {
+  pending: Set<PendingBid>
+  selected: CandidateBid
+  ingress?: true
+}) => {
   const triggerThread = function* () {
     yield {
       request: {
@@ -140,11 +155,23 @@ const addIngressTriggerToPending = ({ pending, selected }: { pending: Set<Pendin
     pending.add({
       priority: 0,
       generator,
-      ingress: true,
+      ...(ingress === true ? { ingress: true as const } : {}),
       label: selected.type,
       ...yielded.value,
     })
   }
+}
+
+/**
+ * @internal
+ * Whether a selected event is consumed by a pending bid's wait/interrupt/
+ * transform listener. A request-origin selection that is not enabled by the
+ * candidate set is reconstructed as an internal re-entry only when some
+ * pending bid actually consumes it; otherwise the selection is invalid.
+ */
+const pendingBidConsumes = ({ pendingBid, selected }: { pendingBid: PendingBid; selected: CandidateBid }) => {
+  const listeners = [...(pendingBid.waitFor ?? []), ...(pendingBid.interrupt ?? []), ...(pendingBid.transform ?? [])]
+  return listeners.some(isListeningFor(selected))
 }
 
 const getSelectedEvents = ({ messages }: { messages: Trace[] }) =>
@@ -230,12 +257,26 @@ const replayToFrontierRaw = ({
 
   for (const [step, selected] of getSelectedEvents({ messages }).entries()) {
     if (selected.ingress === true) {
-      addIngressTriggerToPending({ pending, selected })
+      addSyntheticRequestThread({ pending, selected, ingress: true })
     }
 
-    const frontier = computeFrontier(pending)
-    const enabled = [...frontier.enabled].sort((left, right) => left.priority - right.priority)
-    const matched = enabled.find((candidate) => matchesSelectedEvent({ candidate, selected }))
+    const findMatch = () =>
+      [...computeFrontier(pending).enabled]
+        .sort((left, right) => left.priority - right.priority)
+        .find((candidate) => matchesSelectedEvent({ candidate, selected }))
+
+    let matched = findMatch()
+    if (
+      !matched &&
+      selected.ingress !== true &&
+      [...pending].some((pendingBid) => pendingBidConsumes({ pendingBid, selected }))
+    ) {
+      // Request-origin re-entry whose producer (bridge/transform daemon) is a
+      // harness thread absent from the candidate set: reconstruct the
+      // once-thread it added and retry the enablement check.
+      addSyntheticRequestThread({ pending, selected })
+      matched = findMatch()
+    }
 
     if (!matched) {
       throw new Error(`Selected event "${selected.type}" was not enabled at replay step ${step}.`)
@@ -258,28 +299,42 @@ const replayToFrontierRaw = ({
   }
 }
 
-const triggerAffectsPendingBid = ({ pendingBid, trigger }: { pendingBid: PendingBid; trigger: BPEvent }) => {
+/**
+ * @internal
+ * How a trigger event would affect a pending bid, split by provenance channel.
+ *
+ * External admission (`ingress: true`) wakes listeners with `ingressMatch`
+ * absent or `true`; internal re-entry (request-origin, `ingress` absent) wakes
+ * listeners with `ingressMatch` absent or `false`. A bid's own matching
+ * `request` is channel-independent. `requestOnly` flags that some listener is
+ * exclusively internal, so an external admission alone would leave it parked.
+ */
+const triggerChannelMatch = ({ pendingBid, trigger }: { pendingBid: PendingBid; trigger: BPEvent }) => {
   if (pendingBid.ingress === true) {
-    return false
+    return { external: false, request: false, requestOnly: false }
   }
 
-  const candidate = {
+  const base = {
     priority: 0,
     type: trigger.type,
     ...(trigger.detail === undefined ? {} : { detail: trigger.detail }),
     ...(trigger.space === undefined ? {} : { space: trigger.space }),
-    ingress: true as const,
   }
+  const externalCandidate: CandidateBid = { ...base, ingress: true }
+  const requestCandidate: CandidateBid = base
+  const listeners = [...(pendingBid.waitFor ?? []), ...(pendingBid.interrupt ?? []), ...(pendingBid.transform ?? [])]
+  const matches = (candidate: CandidateBid) => listeners.some(isListeningFor(candidate))
+  const requestMatches =
+    pendingBid.request !== undefined &&
+    pendingBid.request.type === trigger.type &&
+    pendingBid.request.space === trigger.space &&
+    Bun.deepEquals(pendingBid.request.detail, trigger.detail)
 
-  return (
-    (pendingBid.request !== undefined &&
-      pendingBid.request.type === trigger.type &&
-      pendingBid.request.space === trigger.space &&
-      Bun.deepEquals(pendingBid.request.detail, trigger.detail)) ||
-    pendingBid.waitFor?.some(isListeningFor(candidate)) ||
-    pendingBid.interrupt?.some(isListeningFor(candidate)) ||
-    pendingBid.transform?.some(isListeningFor(candidate))
-  )
+  return {
+    external: requestMatches || matches(externalCandidate),
+    request: matches(requestCandidate),
+    requestOnly: listeners.some((listener) => listener.ingressMatch === false),
+  }
 }
 
 const getRequestSuccessors = ({
@@ -325,32 +380,47 @@ const getTriggerSuccessors = ({
   const successors: SelectionTrace[] = []
 
   for (const trigger of triggers) {
-    if (![...pending].some((pendingBid) => triggerAffectsPendingBid({ pendingBid, trigger }))) {
-      continue
+    let external = false
+    let request = false
+    let requestOnly = false
+    for (const pendingBid of pending) {
+      const match = triggerChannelMatch({ pendingBid, trigger })
+      external ||= match.external
+      request ||= match.request
+      requestOnly ||= match.requestOnly
     }
 
-    const selection = createSelectionTrace({
-      step,
-      instanceId,
-      selected: {
-        priority: 0,
-        type: trigger.type,
-        ...(trigger.detail === undefined ? {} : { detail: trigger.detail }),
-        ...(trigger.space === undefined ? {} : { space: trigger.space }),
-        ingress: true,
-      },
-    })
+    // External admission first (backward compatible). A request-origin
+    // successor is added only when needed: when no external listener matched,
+    // or when an `ingressMatch: false` listener would otherwise stay parked.
+    const channels: (true | undefined)[] = []
+    if (external) channels.push(true)
+    if (request && (requestOnly || !external)) channels.push(undefined)
 
-    try {
-      replayToFrontierRaw({
-        threads,
-        messages: [...messages, selection],
-        space,
+    for (const ingress of channels) {
+      const selection = createSelectionTrace({
+        step,
         instanceId,
+        selected: {
+          priority: 0,
+          type: trigger.type,
+          ...(trigger.detail === undefined ? {} : { detail: trigger.detail }),
+          ...(trigger.space === undefined ? {} : { space: trigger.space }),
+          ...(ingress === true ? { ingress: true as const } : {}),
+        },
       })
-      successors.push(selection)
-    } catch {
-      // selection not valid for this frontier — skip
+
+      try {
+        replayToFrontierRaw({
+          threads,
+          messages: [...messages, selection],
+          space,
+          instanceId,
+        })
+        successors.push(selection)
+      } catch {
+        // selection not valid for this frontier — skip
+      }
     }
   }
 

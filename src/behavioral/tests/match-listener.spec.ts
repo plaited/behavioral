@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test'
+import { describe, expect, test } from 'bun:test'
 import { behavioral } from '../behavioral.ts'
 import { onSelection } from './helpers.ts'
 
@@ -12,9 +12,8 @@ const stringIdSchema = {
 test('match listener: waitFor resumes thread when type and detail schema match', () => {
   const log: string[] = []
   const program = behavioral()
-  const { useAddThread, useTrigger } = program
+  const { useAddThread, trigger } = program
   const addThread = useAddThread()
-  const trigger = useTrigger()
 
   addThread({ label: 'producer', rules: [{ request: { type: 'task', detail: { id: 'job-1' } } }], once: true })
   addThread({
@@ -48,9 +47,8 @@ test('match listener: waitFor resumes thread when type and detail schema match',
 test('match listener: waitFor does not resume when detail schema fails', () => {
   const log: string[] = []
   const program = behavioral()
-  const { useAddThread, useTrigger } = program
+  const { useAddThread, trigger } = program
   const addThread = useAddThread()
-  const trigger = useTrigger()
 
   addThread({ label: 'producer', rules: [{ request: { type: 'task', detail: { id: 101 } } }], once: true })
   addThread({
@@ -81,12 +79,11 @@ test('match listener: waitFor does not resume when detail schema fails', () => {
   expect(log).toEqual(['task'])
 })
 
-test('match listener: detailMatch invalid resumes thread when detail schema fails', () => {
+test('match listener: detailMatch false resumes thread when detail schema fails', () => {
   const log: string[] = []
   const program = behavioral()
-  const { useAddThread, useTrigger } = program
+  const { useAddThread, trigger } = program
   const addThread = useAddThread()
-  const trigger = useTrigger()
 
   addThread({ label: 'producer', rules: [{ request: { type: 'task', detail: { id: 101 } } }], once: true })
   addThread({
@@ -97,7 +94,7 @@ test('match listener: detailMatch invalid resumes thread when detail schema fail
           {
             type: 'task',
             detailSchema: stringIdSchema,
-            detailMatch: 'invalid',
+            detailMatch: false,
           },
         ],
       },
@@ -118,12 +115,11 @@ test('match listener: detailMatch invalid resumes thread when detail schema fail
   expect(log).toEqual(['task', 'ack'])
 })
 
-test('match listener: detailMatch invalid does not resume thread when detail schema passes', () => {
+test('match listener: detailMatch false does not resume thread when detail schema passes', () => {
   const log: string[] = []
   const program = behavioral()
-  const { useAddThread, useTrigger } = program
+  const { useAddThread, trigger } = program
   const addThread = useAddThread()
-  const trigger = useTrigger()
 
   addThread({ label: 'producer', rules: [{ request: { type: 'task', detail: { id: 'job-1' } } }], once: true })
   addThread({
@@ -134,7 +130,7 @@ test('match listener: detailMatch invalid does not resume thread when detail sch
           {
             type: 'task',
             detailSchema: stringIdSchema,
-            detailMatch: 'invalid',
+            detailMatch: false,
           },
         ],
       },
@@ -158,9 +154,8 @@ test('match listener: detailMatch invalid does not resume thread when detail sch
 test('match listener: type mismatch prevents match when source and detail would pass', () => {
   const log: string[] = []
   const program = behavioral()
-  const { useAddThread, useTrigger } = program
+  const { useAddThread, trigger } = program
   const addThread = useAddThread()
-  const trigger = useTrigger()
 
   addThread({ label: 'producer', rules: [{ request: { type: 'other', detail: { id: 'job-1' } } }], once: true })
   addThread({
@@ -194,9 +189,8 @@ test('match listener: type mismatch prevents match when source and detail would 
 test('match listener: sourceSchema request accepts only requested events', () => {
   const log: string[] = []
   const program = behavioral()
-  const { useAddThread, useTrigger } = program
+  const { useAddThread, trigger } = program
   const addThread = useAddThread()
-  const trigger = useTrigger()
 
   addThread({ label: 'producer', rules: [{ request: { type: 'task', detail: { id: 'job-1' } } }], once: true })
   addThread({
@@ -230,9 +224,8 @@ test('match listener: sourceSchema request accepts only requested events', () =>
 test('match listener: trigger and requested events both satisfy matching listeners', () => {
   const log: string[] = []
   const program = behavioral()
-  const { useAddThread, useTrigger } = program
+  const { useAddThread, trigger } = program
   const addThread = useAddThread()
-  const trigger = useTrigger()
 
   addThread({ label: 'producer', rules: [{ request: { type: 'task', detail: { id: 'job-1' } } }], once: true })
   addThread({
@@ -267,9 +260,8 @@ test('match listener: trigger and requested events both satisfy matching listene
 test('match listener: sourceSchema can accept trigger and request', () => {
   const log: string[] = []
   const program = behavioral()
-  const { useAddThread, useTrigger } = program
+  const { useAddThread, trigger } = program
   const addThread = useAddThread()
-  const trigger = useTrigger()
 
   addThread({ label: 'producer', rules: [{ request: { type: 'task', detail: { id: 'job-1' } } }], once: true })
   addThread({
@@ -303,9 +295,8 @@ test('match listener: sourceSchema can accept trigger and request', () => {
 test('match listener: sourceSchema request matches request-origin events only', () => {
   const log: string[] = []
   const program = behavioral()
-  const { useAddThread, useTrigger } = program
+  const { useAddThread, trigger } = program
   const addThread = useAddThread()
-  const trigger = useTrigger()
 
   addThread({ label: 'producer', rules: [{ request: { type: 'task', detail: { id: 'job-1' } } }], once: true })
   addThread({
@@ -343,9 +334,8 @@ test('match listener: sourceSchema request matches request-origin events only', 
 test('match listener: block prevents matching requested event from being selected', () => {
   const log: string[] = []
   const program = behavioral()
-  const { useAddThread, useTrigger } = program
+  const { useAddThread, trigger } = program
   const addThread = useAddThread()
-  const trigger = useTrigger()
 
   addThread({
     label: 'blocker',
@@ -395,9 +385,8 @@ test('match listener: block prevents matching requested event from being selecte
 test('match listener: interrupt terminates thread when matching event is selected', () => {
   const log: string[] = []
   const program = behavioral()
-  const { useAddThread, useTrigger } = program
+  const { useAddThread, trigger } = program
   const addThread = useAddThread()
-  const trigger = useTrigger()
 
   addThread({
     label: 'interruptedThread',
@@ -442,9 +431,8 @@ test('match listener: interrupt terminates thread when matching event is selecte
 test('match listener: detail-schema listeners can express conditional matching', () => {
   const log: string[] = []
   const program = behavioral()
-  const { useAddThread, useTrigger } = program
+  const { useAddThread, trigger } = program
   const addThread = useAddThread()
-  const trigger = useTrigger()
 
   addThread({ label: 'producer', rules: [{ request: { type: 'task', detail: { ok: true } } }], once: true })
   addThread({
@@ -483,9 +471,8 @@ test('match listener: detail-schema listeners can express conditional matching',
 test('match listener: non-selected same-type requesters remain pending until their own request is selected', () => {
   const log: string[] = []
   const program = behavioral()
-  const { useAddThread, useTrigger } = program
+  const { useAddThread, trigger } = program
   const addThread = useAddThread()
-  const trigger = useTrigger()
 
   addThread({
     label: 'first',
@@ -519,9 +506,8 @@ test('match listener: non-selected same-type requesters remain pending until the
 test('match listener: detail schema with valid detail passes', () => {
   const log: string[] = []
   const program = behavioral()
-  const { useAddThread, useTrigger } = program
+  const { useAddThread, trigger } = program
   const addThread = useAddThread()
-  const trigger = useTrigger()
 
   addThread({ label: 'producer', rules: [{ request: { type: 'task', detail: { id: 'job-1' } } }], once: true })
   addThread({
@@ -560,9 +546,8 @@ test('match listener: detail schema with valid detail passes', () => {
 test('match listener: detail schema with invalid detail fails', () => {
   const log: string[] = []
   const program = behavioral()
-  const { useAddThread, useTrigger } = program
+  const { useAddThread, trigger } = program
   const addThread = useAddThread()
-  const trigger = useTrigger()
 
   addThread({ label: 'producer', rules: [{ request: { type: 'task', detail: { id: 101 } } }], once: true })
   addThread({
@@ -596,9 +581,8 @@ test('match listener: detail schema with invalid detail fails', () => {
 test('match listener: 2020-12 prefixItems keyword compiles and matches', () => {
   const log: string[] = []
   const program = behavioral()
-  const { useAddThread, useTrigger } = program
+  const { useAddThread, trigger } = program
   const addThread = useAddThread()
-  const trigger = useTrigger()
 
   addThread({ label: 'producer', rules: [{ request: { type: 'task', detail: { items: [42, 'hello'] } } }], once: true })
   addThread({
@@ -644,9 +628,8 @@ test('match listener: 2020-12 prefixItems keyword compiles and matches', () => {
 test('match listener: 2020-12 prefixItems enforces tuple ordering', () => {
   const log: string[] = []
   const program = behavioral()
-  const { useAddThread, useTrigger } = program
+  const { useAddThread, trigger } = program
   const addThread = useAddThread()
-  const trigger = useTrigger()
 
   // Producer emits tuple [42, 'hello']; consumer expects [number, string]
   addThread({ label: 'producer', rules: [{ request: { type: 'task', detail: { items: ['x', 1] } } }], once: true })
@@ -699,9 +682,8 @@ test('match listener: closed prefixItems tuple rejects extra elements', () => {
   // Distinguishes a closed tuple from an open one (where extras would pass).
   const log: string[] = []
   const program = behavioral()
-  const { useAddThread, useTrigger } = program
+  const { useAddThread, trigger } = program
   const addThread = useAddThread()
-  const trigger = useTrigger()
 
   addThread({
     label: 'producer',
@@ -778,9 +760,8 @@ test('match listener: malformed detailSchema publishes add_thread_error', () => 
 
 test('match listener: malformed detailSchema in one listener rejects the whole thread', () => {
   const seen: import('../behavioral.types.ts').Trace[] = []
-  const { useAddThread, useTrigger, useTrace } = behavioral()
+  const { useAddThread, trigger, useTrace } = behavioral()
   const addThread = useAddThread()
-  const trigger = useTrigger()
 
   useTrace((msg) => {
     seen.push(msg)
@@ -810,4 +791,117 @@ test('match listener: malformed detailSchema in one listener rejects the whole t
   // The thread should not have registered — no running thread means triggering does nothing
   trigger({ type: 'kickoff' })
   expect(log).toEqual([])
+})
+
+// ---------------------------------------------------------------------------
+// Slice 1 — ingress channel matching
+// ---------------------------------------------------------------------------
+
+const runWaitForIngress = ({
+  listenerIngress,
+  origin,
+}: {
+  listenerIngress?: boolean
+  origin: 'request' | 'trigger'
+}): string[] => {
+  const log: string[] = []
+  const program = behavioral()
+  const { useAddThread, trigger } = program
+  const addThread = useAddThread()
+
+  if (origin === 'request') {
+    addThread({ label: 'producer', rules: [{ request: { type: 'task' } }], once: true })
+  }
+  addThread({
+    label: 'consumer',
+    rules: [
+      { waitFor: [{ type: 'task', ...(listenerIngress === undefined ? {} : { ingressMatch: listenerIngress }) }] },
+      { request: { type: 'ack' } },
+    ],
+    once: true,
+  })
+  onSelection(program, (selected) => {
+    if (selected.type === 'task') log.push('task')
+  })
+  onSelection(program, (selected) => {
+    if (selected.type === 'ack') log.push('ack')
+  })
+
+  if (origin === 'trigger') trigger({ type: 'task' })
+  else trigger({ type: 'kickoff' })
+
+  return log
+}
+
+describe('match listener: ingress channel flag (waitFor)', () => {
+  test('absent ingress matches request-origin', () => {
+    expect(runWaitForIngress({ origin: 'request' })).toEqual(['task', 'ack'])
+  })
+
+  test('absent ingress matches trigger-origin', () => {
+    expect(runWaitForIngress({ origin: 'trigger' })).toEqual(['task', 'ack'])
+  })
+
+  test('ingressMatch: false matches request-origin', () => {
+    expect(runWaitForIngress({ listenerIngress: false, origin: 'request' })).toEqual(['task', 'ack'])
+  })
+
+  test('ingressMatch: false does not match trigger-origin', () => {
+    expect(runWaitForIngress({ listenerIngress: false, origin: 'trigger' })).toEqual(['task'])
+  })
+
+  test('ingressMatch: true matches trigger-origin', () => {
+    expect(runWaitForIngress({ listenerIngress: true, origin: 'trigger' })).toEqual(['task', 'ack'])
+  })
+
+  test('ingressMatch: true does not match request-origin', () => {
+    expect(runWaitForIngress({ listenerIngress: true, origin: 'request' })).toEqual(['task'])
+  })
+})
+
+const runBlockIngress = ({
+  listenerIngress,
+  origin,
+}: {
+  listenerIngress: boolean
+  origin: 'request' | 'trigger'
+}): string[] => {
+  const log: string[] = []
+  const program = behavioral()
+  const { useAddThread, trigger } = program
+  const addThread = useAddThread()
+
+  addThread({
+    label: 'blocker',
+    rules: [{ block: [{ type: 'task', ingressMatch: listenerIngress }] }],
+  })
+  if (origin === 'request') {
+    addThread({ label: 'producer', rules: [{ request: { type: 'task' } }], once: true })
+  }
+  onSelection(program, (selected) => {
+    if (selected.type === 'task') log.push('task')
+  })
+
+  if (origin === 'trigger') trigger({ type: 'task' })
+  else trigger({ type: 'kickoff' })
+
+  return log
+}
+
+describe('match listener: ingress channel flag (block)', () => {
+  test('ingressMatch: true block gates a trigger-origin candidate', () => {
+    expect(runBlockIngress({ listenerIngress: true, origin: 'trigger' })).toEqual([])
+  })
+
+  test('ingressMatch: false block does not gate a trigger-origin candidate', () => {
+    expect(runBlockIngress({ listenerIngress: false, origin: 'trigger' })).toEqual(['task'])
+  })
+
+  test('ingressMatch: false block gates a request-origin candidate', () => {
+    expect(runBlockIngress({ listenerIngress: false, origin: 'request' })).toEqual([])
+  })
+
+  test('ingressMatch: true block does not gate a request-origin candidate', () => {
+    expect(runBlockIngress({ listenerIngress: true, origin: 'request' })).toEqual(['task'])
+  })
 })

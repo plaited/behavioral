@@ -12,9 +12,8 @@ const jsonSchema = {
 describe('pending_bids trace', () => {
   test('publishes pending_bids trace with thread states during superstep', () => {
     const seen: Trace[] = []
-    const { useAddThread, useTrigger, useTrace } = behavioral()
+    const { useAddThread, trigger, useTrace } = behavioral()
     const addThread = useAddThread()
-    const trigger = useTrigger()
     useTrace((msg) => {
       seen.push(msg)
     })
@@ -29,9 +28,8 @@ describe('pending_bids trace', () => {
 
   test('pending_bids appears before frontier in the same step', () => {
     const seen: Trace[] = []
-    const { useAddThread, useTrigger, useTrace } = behavioral()
+    const { useAddThread, trigger, useTrace } = behavioral()
     const addThread = useAddThread()
-    const trigger = useTrigger()
     useTrace((msg) => {
       seen.push(msg)
     })
@@ -50,9 +48,8 @@ describe('pending_bids trace', () => {
 
   test('detailSchema in pending_bids trace echoes the input JSON Schema without conversion', () => {
     const seen: Trace[] = []
-    const { useAddThread, useTrigger, useTrace } = behavioral()
+    const { useAddThread, trigger, useTrace } = behavioral()
     const addThread = useAddThread()
-    const trigger = useTrigger()
     useTrace((msg) => {
       seen.push(msg)
     })

@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 import { $ } from 'bun'
-import { TRACE_MESSAGE_KINDS } from '../behavioral.constants.ts'
+import { KICK_EVENT_TYPE, TRACE_MESSAGE_KINDS } from '../behavioral.constants.ts'
 import { behavioral } from '../behavioral.ts'
-import type { JsonObject, SelectionTrace, Trace, TransformTrace } from '../behavioral.types.ts'
+import type { JsonObject, PendingBidsTrace, SelectionTrace, Trace, TransformTrace } from '../behavioral.types.ts'
 
 /**
  * The daemon contract under test — a two-phase external transform loop:
@@ -12,8 +12,10 @@ import type { JsonObject, SelectionTrace, Trace, TransformTrace } from '../behav
  *
  * Phase 2 (execute): the immediately following Selection trace carries the
  * payload (`selected.detail`). The loop evaluates each primed `query` over
- * the payload via jq and re-enters the kernel with the transformed result
- * via `trigger` or `addThread`.
+ * the payload via jq and re-enters the kernel with the transformed result by
+ * adding a `once` re-entry thread (`{ label: 'reentry:<target>', request:
+ * { type: target, detail } }`) and firing the contentless kick — so the target
+ * is a request-origin candidate, never an external trigger.
  */
 
 const jqEval = async (query: string, detail: unknown): Promise<unknown> =>
@@ -26,8 +28,7 @@ function createTransformLoop(
   program: ReturnType<typeof behavioral>,
   dispatch: (target: string, transformed: JsonObject, transformer: Transformer) => void,
 ) {
-  const { useTrigger, useTrace } = program
-  const trigger = useTrigger()
+  const { trigger, useTrace } = program
   const selections: SelectionTrace[] = []
   const transformTraces: TransformTrace[] = []
   let pending: Transformer[] = []
@@ -250,5 +251,62 @@ describe('transform idiom — external two-phase loop', () => {
     await Bun.sleep(20)
 
     expect(transformTraces).toHaveLength(0)
+  })
+})
+
+describe('transform daemon — internal re-entry via once-thread + kick', () => {
+  test('the transform target arrives request-origin and an ingressMatch:false waiter matches', async () => {
+    const program = behavioral()
+    const { useAddThread, trigger } = program
+    const addThread = useAddThread()
+
+    addThread({ label: 'shaper', rules: [{ transform: [{ type: 'order', query: '.order', target: 'ship' }] }] })
+    addThread({
+      label: 'ship-waiter',
+      once: true,
+      rules: [{ waitFor: [{ type: 'ship', ingressMatch: false }] }, { request: { type: 'shipped' } }],
+    })
+
+    const selections: SelectionTrace[] = []
+    const pendingBids: PendingBidsTrace[] = []
+    let pending: Transformer[] = []
+
+    program.useTrace((msg: Trace) => {
+      if (msg.kind === TRACE_MESSAGE_KINDS.transform) {
+        pending = msg.transformers
+        return
+      }
+      if (msg.kind === TRACE_MESSAGE_KINDS.pending_bids) {
+        pendingBids.push(msg)
+        return
+      }
+      if (msg.kind !== TRACE_MESSAGE_KINDS.selection) return
+      selections.push(msg)
+      if (pending.length === 0) return
+      const toProcess = pending
+      pending = []
+      for (const transformer of toProcess) {
+        void jqEval(transformer.query, msg.selected.detail).then((transformed) => {
+          addThread({
+            label: `reentry:${transformer.target}`,
+            once: true,
+            rules: [{ request: { type: transformer.target, detail: transformed as JsonObject } }],
+          })
+          trigger({ type: KICK_EVENT_TYPE })
+        })
+      }
+    })
+
+    trigger({ type: 'order', detail: { order: { id: 'o-4', total: 7 } } })
+    await Bun.sleep(50)
+
+    const ship = selections.find((s) => s.selected.type === 'ship')
+    expect(ship).toBeDefined()
+    // Internal re-entry is request-origin — an ingressMatch:false waiter matches.
+    expect(ship!.selected.ingress).toBeUndefined()
+    expect(selections.some((s) => s.selected.type === 'shipped')).toBe(true)
+    // The reentry thread label is observable in the pending-bids trace.
+    const labels = pendingBids.flatMap((trace) => trace.threads.map((thread) => thread.label))
+    expect(labels).toContain('reentry:ship')
   })
 })

@@ -1,10 +1,12 @@
 import { describe, expect, test } from 'bun:test'
-import { TRACE_MESSAGE_KINDS } from '../../behavioral/behavioral.constants.ts'
-import type { Thread, Trace } from '../../behavioral/behavioral.types.ts'
+import { KICK_EVENT_TYPE, TRACE_MESSAGE_KINDS } from '../../behavioral/behavioral.constants.ts'
+import { behavioral } from '../../behavioral/behavioral.ts'
+import type { SelectionTrace, Thread, Trace } from '../../behavioral/behavioral.types.ts'
 import { frontierReplay, frontierVerify } from '../../tools/frontier.ts'
 import { createScriptedModelTools } from '../../tools/model.ts'
 import type { DispatchableTool } from '../dispatch.ts'
 import { createKernel } from '../kernel.ts'
+import { TURN_LOOP_THREAD } from '../threads.ts'
 
 const tool = (name: string, fn: (input: unknown) => Promise<unknown>): DispatchableTool =>
   Object.defineProperty(fn, 'name', { value: name, configurable: true }) as DispatchableTool
@@ -172,6 +174,96 @@ describe('gate integration — frontierVerify on a captured trace thread set', (
       expect(replayResult.isError).toBeFalsy()
       expect(replayResult.frontier).not.toBeNull()
       expect(replayResult.frontier!.status).toBe('idle')
+    } finally {
+      await kernel.shutdown()
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Internal re-entry — once-thread + contentless kick
+// ---------------------------------------------------------------------------
+
+const functionCallItem = (name: string, callId: string, args: object) => ({
+  id: `fc_${callId}`,
+  type: 'function_call' as const,
+  status: 'completed' as const,
+  call_id: callId,
+  name,
+  arguments: JSON.stringify(args),
+})
+
+describe('internal re-entry — once-thread + kick', () => {
+  test('bridge results are request-origin and the turn loop keeps running', async () => {
+    const kernel = createKernel({
+      modelTools: createScriptedModelTools({
+        script: [
+          { items: [functionCallItem('echo', 'call_1', { q: 'a' })], status: 'completed' },
+          { items: [assistantMessage('done')], status: 'completed' },
+        ],
+      }),
+      dispatchTools: { echo: echoTool },
+    })
+    try {
+      const result = await kernel.runTurn({ space: 's', prompt: 'go' })
+      expect(result.status).toBe('completed')
+      expect(result.iterations).toBe(2)
+      const internal = result.trace.filter(
+        (t): t is SelectionTrace =>
+          t.kind === TRACE_MESSAGE_KINDS.selection &&
+          (t.selected.type === 'model.result' || t.selected.type === 'tool.result'),
+      )
+      expect(internal.length).toBeGreaterThanOrEqual(2)
+      for (const trace of internal) expect(trace.selected.ingress).toBeUndefined()
+    } finally {
+      await kernel.shutdown()
+    }
+  })
+
+  test('an external tool.result does not wake the loop ingressMatch:false listener', () => {
+    const program = behavioral()
+    const addThread = program.useAddThread('s')
+    const trigger = program.trigger
+    const selectedTypes: string[] = []
+    program.useTrace((msg) => {
+      if (msg.kind === TRACE_MESSAGE_KINDS.selection) selectedTypes.push(msg.selected.type)
+    })
+    addThread(TURN_LOOP_THREAD)
+
+    trigger({ type: 'user.prompt', detail: { prompt: 'go' }, space: 's' })
+    // The loop advanced through its request-origin 'model.respond' request and
+    // is now parked on waitFor[{ model.result, ingressMatch: false }].
+    expect(selectedTypes).toContain('model.respond')
+
+    trigger({ type: 'model.result', space: 's' })
+    expect(selectedTypes).toContain('model.result')
+    // The external model.result was admitted but did not wake the loop.
+    expect(selectedTypes).not.toContain('tool.dispatch')
+  })
+
+  test('each re-entry emits a detail-free kick followed by the result event', async () => {
+    const kernel = createKernel({
+      modelTools: createScriptedModelTools({
+        script: [
+          { items: [functionCallItem('echo', 'call_1', { q: 'a' })], status: 'completed' },
+          { items: [assistantMessage('done')], status: 'completed' },
+        ],
+      }),
+      dispatchTools: { echo: echoTool },
+    })
+    try {
+      const result = await kernel.runTurn({ space: 's', prompt: 'go' })
+      const selections = result.trace.filter((t): t is SelectionTrace => t.kind === TRACE_MESSAGE_KINDS.selection)
+      const kickIndices = selections.flatMap((trace, index) => (trace.selected.type === KICK_EVENT_TYPE ? [index] : []))
+      expect(kickIndices.length).toBeGreaterThan(0)
+      for (const index of kickIndices) {
+        const kick = selections[index]!
+        expect(kick.selected.detail).toBeUndefined()
+        expect(kick.selected.ingress).toBe(true)
+        const next = selections[index + 1]
+        expect(next).toBeDefined()
+        expect(next!.selected.type).not.toBe(KICK_EVENT_TYPE)
+      }
     } finally {
       await kernel.shutdown()
     }

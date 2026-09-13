@@ -6,9 +6,9 @@ import {
   type RunningBid,
   type SendTrace,
   type Trace,
+  type Trigger,
   type UseAddThread,
   type UseTrace,
-  type UseTrigger,
   validateBPEvent,
   validateThread,
 } from './behavioral.types.ts'
@@ -84,7 +84,16 @@ const createSubject = (): SendTrace => {
  * The program's execution is driven by events - either requested by threads or triggered
  * externally. It will continue executing super-steps as long as there are events to select
  * and threads to run. If no events can be selected (either because all requests are blocked
- * or there are no requests), the program will pause until an external event is triggered.
+ * or there are no requests), the program will pause until an event is admitted via `trigger`.
+ *
+ * **Channel invariant:** a selected event carries `ingress: true` iff it was admitted
+ * externally through `trigger`; everything internal (dispatch-bridge results, transform
+ * targets, `threads.registered`) arrives as a thread request added through `useAddThread`.
+ * Re-entering code adds a `once` thread requesting the event, then fires the contentless
+ * {@link KICK_EVENT_TYPE} kick to start the super-step. Listeners restrict themselves to a
+ * channel with the optional `ingressMatch` flag (`true` = external only, `false` = internal only,
+ * absent = either). `trigger` is therefore external admission plus the contentless kick,
+ * nothing else; an external actor triggering the kick is harmless by construction.
  */
 export const behavioral = (options?: { instanceId?: string }) => {
   const instanceId = options?.instanceId ?? ueid('bp_')
@@ -226,14 +235,17 @@ export const behavioral = (options?: { instanceId?: string }) => {
    * @internal
    * Implementation of the public `trigger` function.
    */
-  const useTrigger: UseTrigger = (space) => (event) => {
+  const trigger: Trigger = (event) => {
+    // Read before validation: the Ajv type-guard narrows `event` to `never` in
+    // the failure branch, so the attempted space must be captured up front.
+    const attemptedSpace = event.space
     if (!validateBPEvent(event)) {
       return sendTrace({
         kind: TRACE_MESSAGE_KINDS.trigger_error,
         timestamp: Date.now(),
         instanceId,
         error: validateBPEvent.errors ?? [],
-        space,
+        ...(typeof attemptedSpace === 'string' ? { space: attemptedSpace } : {}),
       })
     }
     const thread = function* () {
@@ -242,7 +254,7 @@ export const behavioral = (options?: { instanceId?: string }) => {
       }
     }
     running.add({
-      space,
+      space: event.space,
       priority: 0,
       generator: thread(),
       ingress: true,
@@ -312,7 +324,7 @@ export const behavioral = (options?: { instanceId?: string }) => {
     /** Add thread to program. */
     useAddThread,
     /** Function to inject external events into the program. */
-    useTrigger,
+    trigger,
     /** Hook to subscribe to internal state traces for monitoring/debugging. */
     useTrace,
   })

@@ -20,9 +20,8 @@ describe('useTrace — listener isolation and subscription semantics', () => {
 
   test('a listener that throws synchronously does not prevent later listeners', () => {
     captureConsoleError()
-    const { useTrace, useAddThread, useTrigger } = behavioral()
+    const { useTrace, useAddThread, trigger } = behavioral()
     const addThread = useAddThread()
-    const trigger = useTrigger()
 
     const received: string[] = []
     useTrace(() => {
@@ -42,9 +41,8 @@ describe('useTrace — listener isolation and subscription semantics', () => {
 
   test('a listener that throws has its error surfaced via console.error', () => {
     captureConsoleError()
-    const { useTrace, useAddThread, useTrigger } = behavioral()
+    const { useTrace, useAddThread, trigger } = behavioral()
     const addThread = useAddThread()
-    const trigger = useTrigger()
 
     useTrace(() => {
       throw new Error('listener 1 threw')
@@ -61,9 +59,8 @@ describe('useTrace — listener isolation and subscription semantics', () => {
 
   test('a rejecting async listener does not produce an unhandled rejection', () => {
     captureConsoleError()
-    const { useTrace, useAddThread, useTrigger } = behavioral()
+    const { useTrace, useAddThread, trigger } = behavioral()
     const addThread = useAddThread()
-    const trigger = useTrigger()
 
     useTrace(async () => {
       throw new Error('async listener rejection')
@@ -76,9 +73,8 @@ describe('useTrace — listener isolation and subscription semantics', () => {
 
   test('the engine keeps stepping after a listener throws mid-superstep', () => {
     captureConsoleError()
-    const { useAddThread, useTrigger, useTrace } = behavioral()
+    const { useAddThread, trigger, useTrace } = behavioral()
     const addThread = useAddThread()
-    const trigger = useTrigger()
 
     useTrace(() => {
       throw new Error('poison listener')
@@ -101,9 +97,8 @@ describe('useTrace — listener isolation and subscription semantics', () => {
   })
 
   test('listeners receive traces in subscription order', () => {
-    const { useTrace, useAddThread, useTrigger } = behavioral()
+    const { useTrace, useAddThread, trigger } = behavioral()
     const addThread = useAddThread()
-    const trigger = useTrigger()
 
     const order: string[] = []
     useTrace(() => {
@@ -125,9 +120,8 @@ describe('useTrace — listener isolation and subscription semantics', () => {
   })
 
   test('disconnect removes the listener', () => {
-    const { useTrace, useAddThread, useTrigger } = behavioral()
+    const { useTrace, useAddThread, trigger } = behavioral()
     const addThread = useAddThread()
-    const trigger = useTrigger()
 
     let calls = 0
     const disconnect = useTrace(() => {
@@ -146,9 +140,8 @@ describe('useTrace — listener isolation and subscription semantics', () => {
   })
 
   test('self-disconnect inside a listener takes effect on subsequent broadcasts', () => {
-    const { useTrace, useAddThread, useTrigger } = behavioral()
+    const { useTrace, useAddThread, trigger } = behavioral()
     const addThread = useAddThread()
-    const trigger = useTrigger()
 
     const seen: number[] = []
     let disconnect: () => void
@@ -178,9 +171,8 @@ describe('useTrace — listener isolation and subscription semantics', () => {
   })
 
   test('re-entrancy: a listener calling trigger does not corrupt the superstep', () => {
-    const { useAddThread, useTrigger, useTrace } = behavioral()
+    const { useAddThread, trigger, useTrace } = behavioral()
     const addThread = useAddThread()
-    const trigger = useTrigger()
 
     const selections: string[] = []
     let injected = false

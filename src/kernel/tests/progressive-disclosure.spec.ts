@@ -30,13 +30,15 @@ const BRIDGE_TRIGGERS = [
   { type: 'turn.end', space: SPACE },
 ]
 
-// Build a happy-path reference trace: the events the thread requests + the
-// bridge-triggered events, in the order the engine selects them. This is the
+// Build a happy-path reference trace: the events the thread requests plus the
+// bridge-produced events, in the order the engine selects them. This is the
 // selection trace frontierReplay consumes to prove the thread reaches its
-// target frontier. Triggered events carry `ingress: true` (priority 0) and the
-// space stamp — matching what the engine stamps on trigger-fired events.
-// Thread-requested events carry no `detail` (the thread's requests are
-// type-only; the bridge fills detail at runtime).
+// target frontier. Only the external user.prompt carries `ingress: true`;
+// bridge results arrive as request-origin candidates (the bridge adds a
+// once-thread requesting them and kicks the super-step), so the replay
+// reconstructs those once-threads from the pending set. Thread-requested events
+// carry no `detail` (the thread's requests are type-only; the bridge fills
+// detail at runtime).
 const buildReferenceTrace = (): SelectionTrace[] => {
   const sel = (type: string, priority: number, ingress: boolean, detail?: JsonObject): SelectionTrace => ({
     kind: TRACE_MESSAGE_KINDS.selection,
@@ -52,20 +54,20 @@ const buildReferenceTrace = (): SelectionTrace[] => {
     },
   })
   return [
-    // ingress — user.prompt wakes the thread (trigger → ingress, with detail)
+    // ingress — user.prompt wakes the thread (external trigger → ingress, with detail)
     sel('user.prompt', 0, true, { prompt: 'search for weather skill' }),
     // thread requests discovery.search (tier 1 metadata — no detail in request)
     sel('discovery.search', 1, false),
-    // bridge fires discovery.results (trigger → ingress)
-    sel('discovery.results', 0, true, { count: 1 }),
+    // bridge re-enters with discovery.results (request-origin once-thread + kick)
+    sel('discovery.results', 0, false, { count: 1 }),
     // thread requests model.respond (model picks — no detail in request)
     sel('model.respond', 1, false),
-    // bridge fires model.result (trigger → ingress)
-    sel('model.result', 0, true, { pick: 'weather-skill' }),
+    // bridge re-enters with model.result (request-origin)
+    sel('model.result', 0, false, { pick: 'weather-skill' }),
     // thread requests skill.read (tier 2 — no detail in request)
     sel('skill.read', 1, false),
-    // bridge fires tool.loaded (trigger → ingress)
-    sel('tool.loaded', 0, true, { name: 'weather' }),
+    // bridge re-enters with tool.loaded (request-origin)
+    sel('tool.loaded', 0, false, { name: 'weather' }),
     // thread requests turn.end (terminate — no detail)
     sel('turn.end', 1, false),
   ]

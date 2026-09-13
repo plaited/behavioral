@@ -10,9 +10,8 @@ const onType = (type: string) => ({
 describe(TRACE_MESSAGE_KINDS.deadlock, () => {
   test('publishes deadlock trace when candidates exist but none are selectable', () => {
     const traces: Trace[] = []
-    const { useAddThread, useTrigger, useTrace } = behavioral()
+    const { useAddThread, trigger, useTrace } = behavioral()
     const addThread = useAddThread()
-    const trigger = useTrigger()
 
     useTrace((trace: Trace) => {
       traces.push(trace)
@@ -65,9 +64,8 @@ describe(TRACE_MESSAGE_KINDS.deadlock, () => {
   test('publishes selection trace when enabled candidates exist and keeps priority selection behavior', () => {
     const traces: Trace[] = []
     const selected: string[] = []
-    const { useAddThread, useTrigger, useTrace } = behavioral()
+    const { useAddThread, trigger, useTrace } = behavioral()
     const addThread = useAddThread()
-    const trigger = useTrigger()
 
     useTrace((trace: Trace) => {
       traces.push(trace)
@@ -99,9 +97,8 @@ describe(TRACE_MESSAGE_KINDS.deadlock, () => {
 
   test('selection trace reports the chosen candidate event', () => {
     const traces: Trace[] = []
-    const { useAddThread, useTrigger, useTrace } = behavioral()
+    const { useAddThread, trigger, useTrace } = behavioral()
     const addThread = useAddThread()
-    const trigger = useTrigger()
 
     useTrace((trace: Trace) => {
       traces.push(trace)

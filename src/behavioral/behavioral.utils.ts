@@ -19,12 +19,13 @@ import { ajv } from './behavioral.types.ts'
  * @internal
  * Creates a checker function to determine if a given BPListener matches a CandidateBid.
  */
-export const isListeningFor = ({ type, detail, space }: CandidateBid) => {
+export const isListeningFor = ({ type, detail, space, ingress }: CandidateBid) => {
   return (listener: RegisteredBPListener | RegisteredTransformListener): boolean => {
     const spaceMatches = listener.space ? space === listener.space : true
     const schemaMatches = listener.detailSchema ? detailValidators.get(listener)!(detail) : true
-    const detailMatches = listener.detailMatch === 'invalid' ? !schemaMatches : schemaMatches
-    return listener.type === type && spaceMatches && detailMatches
+    const detailMatches = listener.detailMatch === false ? !schemaMatches : schemaMatches
+    const ingressMatches = listener.ingressMatch === undefined || listener.ingressMatch === (ingress === true)
+    return listener.type === type && spaceMatches && detailMatches && ingressMatches
   }
 }
 

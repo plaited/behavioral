@@ -20,7 +20,7 @@ import {
   type OAuthClientProvider,
   StreamableHTTPClientTransport,
 } from '@modelcontextprotocol/client'
-import { TRACE_MESSAGE_KINDS } from '../behavioral/behavioral.constants.ts'
+import { KICK_EVENT_TYPE, TRACE_MESSAGE_KINDS } from '../behavioral/behavioral.constants.ts'
 import { behavioral } from '../behavioral/behavioral.ts'
 import type { BPEvent, Disconnect, Frontier, Thread, Trace } from '../behavioral/behavioral.types.ts'
 import { createMcpClientTool, type McpClientTool } from '../tools/mcp-client.ts'
@@ -29,7 +29,7 @@ import { createScriptedModelTools, DEFAULT_SCRIPTED_RESPONSE } from '../tools/mo
 import type { FunctionCallItem, InputItem, OutputItem, Usage } from '../tools/open-responses.schemas.ts'
 import { read } from '../tools/read.ts'
 import { createDispatchBridge, type DispatchableTool, type DispatchBridge } from './dispatch.ts'
-import { TURN_LOOP_THREAD } from './threads.ts'
+import { createReentryThread, TURN_LOOP_THREAD } from './threads.ts'
 
 export { TurnResultSchema } from './kernel.schemas.ts'
 
@@ -242,7 +242,7 @@ const runTurnImpl = ({
 }): Promise<TurnResult> => {
   const program = behavioral()
   const addThread = program.useAddThread(space)
-  const trigger = program.useTrigger(space)
+  const trigger = program.trigger
   const trace: Trace[] = []
 
   // Kernel-owned trajectory: the user message + every appended model output and
@@ -257,30 +257,41 @@ const runTurnImpl = ({
   addThread(TURN_LOOP_THREAD)
   for (const thread of threads ?? []) addThread(thread)
 
-  // Defer bridge triggers past the current synchronous super-step so the
-  // action channel never re-enters the engine from inside a sendTrace listener.
-  // The event carries `space` so the engine's `eventMatchesCandidate` matches
-  // the ingress request (candidates are space-stamped from the running entry).
-  const fire = (event: BPEvent): void => {
-    queueMicrotask(() => trigger({ ...event, space }))
+  // Internal re-entry: register a once-thread requesting the event, then start
+  // the super-step with a contentless kick. `addThread` is inert, so without
+  // the kick nothing would advance; the kick is priority 0, carries no detail,
+  // and matches no listener, so the requested event follows in the next
+  // super-step as a request-origin candidate (`ingress` absent). Both calls are
+  // deferred past the current super-step via `queueMicrotask` so the action
+  // channel never re-enters the engine from inside a `sendTrace` listener.
+  const reenter = (event: BPEvent): void => {
+    queueMicrotask(() => {
+      addThread(
+        createReentryThread({
+          type: event.type,
+          ...(event.detail === undefined ? {} : { detail: event.detail }),
+        }),
+      )
+      trigger({ type: KICK_EVENT_TYPE, space })
+    })
   }
 
   // The dispatch bridge: the action channel. Fires on selection traces for the
   // coordination events the thread requests; does its async I/O outside the
-  // super-step and re-enters via `fire`. Never throws into the space.
+  // super-step and re-enters via `reenter`. Never throws into the space.
   const bridge = async (selectedType: string): Promise<void> => {
     try {
       if (selectedType === 'model.respond') {
         if (iterations >= maxIterations) {
           turnStatus = 'incomplete'
-          fire({ type: 'turn.end', detail: { reason: 'max_iterations' } })
+          reenter({ type: 'turn.end', detail: { reason: 'max_iterations' } })
           return
         }
         iterations += 1
         const out = await modelRespond({ provider, modelId, input: items as InputItem[] })
         if ('isError' in out) {
           turnStatus = 'failed'
-          fire({ type: 'turn.end', detail: { reason: 'model_error', message: out.message } })
+          reenter({ type: 'turn.end', detail: { reason: 'model_error', message: out.message } })
           return
         }
         lastOutput = {
@@ -290,7 +301,7 @@ const runTurnImpl = ({
         }
         items.push(...out.items)
         if (out.usage !== undefined) turnUsage = out.usage
-        fire({ type: 'model.result', detail: { status: out.status } })
+        reenter({ type: 'model.result', detail: { status: out.status } })
         return
       }
       if (selectedType === 'model.result') {
@@ -303,7 +314,7 @@ const runTurnImpl = ({
       }
       if (selectedType === 'tool.dispatch') {
         if (pendingDispatch.length === 0) {
-          fire({ type: 'turn.end', detail: { status: lastOutput?.status ?? 'completed' } })
+          reenter({ type: 'turn.end', detail: { status: lastOutput?.status ?? 'completed' } })
           return
         }
         for (const call of pendingDispatch) {
@@ -311,16 +322,16 @@ const runTurnImpl = ({
           items.push(output)
         }
         pendingDispatch = []
-        fire({ type: 'tool.result', detail: {} })
+        reenter({ type: 'tool.result', detail: {} })
         return
       }
       if (selectedType === 'tool.result') {
-        fire({ type: 'respond', detail: {} })
+        reenter({ type: 'respond', detail: {} })
         return
       }
     } catch (err) {
       turnStatus = 'failed'
-      fire({
+      reenter({
         type: 'turn.end',
         detail: { reason: 'bridge_error', message: err instanceof Error ? err.message : String(err) },
       })
@@ -366,7 +377,7 @@ const runTurnImpl = ({
 const runThreadsImpl = ({ space, threads }: { space: string; threads: Thread[] }): Promise<RunThreadsResult> => {
   const program = behavioral()
   const addThread = program.useAddThread(space)
-  const trigger = program.useTrigger(space)
+  const trigger = program.trigger
   const trace: Trace[] = []
 
   // Capture all trace messages.
@@ -376,20 +387,20 @@ const runThreadsImpl = ({ space, threads }: { space: string; threads: Thread[] }
 
   for (const thread of threads) addThread(thread)
 
-  // Kick the engine: addThread adds threads to `running` but does not call
-  // step(). Trigger `threads.registered` (priority 0, selected first) to start
-  // the super-step cycle. The engine then selects every available event from
-  // the candidate threads and settles at deadlock/idle.
+  // Start the super-step via the once-thread + kick route: register a
+  // `threads.registered` request thread, then fire the contentless kick.
+  // `addThread` is inert — without the kick the engine would never step.
   //
   // `threads.registered` is a documented harness event — it appears in the
-  // trace as the first selection and is part of the contract, not noise. Two
-  // ways to use it:
+  // trace as a request-origin selection and is part of the contract, not noise.
+  // Two ways to use it:
   //  1. Candidate threads can `waitFor` it as an ingress signal (the same way
   //     the turn loop waits for `user.prompt`).
   //  2. Consumers replaying the trace against a different thread set (e.g.
   //     `frontierReplay`) must filter it out — it is not part of the candidate
   //     program's event vocabulary.
-  trigger({ type: 'threads.registered', detail: { count: threads.length }, space })
+  addThread(createReentryThread({ type: 'threads.registered', detail: { count: threads.length } }))
+  trigger({ type: KICK_EVENT_TYPE, space })
 
   // Extract the final frontier from the last frontier trace.
   const frontierTraces = trace.filter(

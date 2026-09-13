@@ -9,9 +9,8 @@ describe('useTrace', () => {
   test('does not alter event selection order', () => {
     const events: string[] = []
     const program = behavioral()
-    const { useAddThread, useTrigger } = program
+    const { useAddThread, trigger } = program
     const addThread = useAddThread()
-    const trigger = useTrigger()
 
     const { disconnect } = traceCollector(program)
 
@@ -31,9 +30,8 @@ describe('useTrace', () => {
   test('second listener still receives after first disconnects', () => {
     const tracesA: Trace[] = []
     const tracesB: Trace[] = []
-    const { useAddThread, useTrigger, useTrace } = behavioral()
+    const { useAddThread, trigger, useTrace } = behavioral()
     const addThread = useAddThread()
-    const trigger = useTrigger()
 
     const disconnectA = useTrace((msg: Trace) => {
       tracesA.push(msg)
@@ -63,9 +61,8 @@ describe('useTrace', () => {
   test('re-subscribing after full disconnect still works', () => {
     const tracesA: Trace[] = []
     const tracesB: Trace[] = []
-    const { useAddThread, useTrigger, useTrace } = behavioral()
+    const { useAddThread, trigger, useTrace } = behavioral()
     const addThread = useAddThread()
-    const trigger = useTrigger()
 
     const disconnectA = useTrace((msg: Trace) => {
       tracesA.push(msg)

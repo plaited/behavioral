@@ -68,8 +68,7 @@ const onPlayerMoveIn = (player: 'X' | 'O', [a, b, c]: WinningLine) => ({
 test('taking a square', () => {
   // Create a new bProgram instance.
   const program = behavioral()
-  const { useTrigger } = program
-  const trigger = useTrigger()
+  const { trigger } = program
 
   // Initialize the board with all squares available for this test.
   board = new Set(squares)
@@ -118,9 +117,8 @@ const enforceTurns: ThreadArgs = {
 test('take turns', () => {
   // Create a new bProgram instance.
   const program = behavioral()
-  const { useAddThread, useTrigger } = program
+  const { useAddThread, trigger } = program
   const addThread = useAddThread()
-  const trigger = useTrigger()
 
   addThread({ label: 'enforceTurns', ...enforceTurns })
   // Initialize the board.
@@ -180,9 +178,8 @@ for (const square of squares) {
 test('squares taken', () => {
   // Create a new bProgram instance.
   const program = behavioral()
-  const { useAddThread, useTrigger } = program
+  const { useAddThread, trigger } = program
   const addThread = useAddThread()
-  const trigger = useTrigger()
 
   addThread({ label: 'enforceTurns', ...enforceTurns })
   for (const [key, threadArgs] of Object.entries(squaresTaken)) {
@@ -261,9 +258,8 @@ const detectWins = (player: 'X' | 'O') =>
 test('detect winner', () => {
   // Create a new bProgram instance.
   const program = behavioral()
-  const { useAddThread, useTrigger } = program
+  const { useAddThread, trigger } = program
   const addThread = useAddThread()
-  const trigger = useTrigger()
 
   addThread({ label: 'enforceTurns', ...enforceTurns })
   for (const [key, threadArgs] of Object.entries(squaresTaken)) {
@@ -328,9 +324,8 @@ const stopGame: ThreadArgs = {
 test('stop game', () => {
   // Create a new bProgram instance.
   const program = behavioral()
-  const { useAddThread, useTrigger } = program
+  const { useAddThread, trigger } = program
   const addThread = useAddThread()
-  const trigger = useTrigger()
 
   addThread({ label: 'enforceTurns', ...enforceTurns })
   for (const [key, threadArgs] of Object.entries(squaresTaken)) {
@@ -410,9 +405,8 @@ for (const square of squares) {
 test('defaultMoves', () => {
   // Create a new bProgram instance.
   const program = behavioral()
-  const { useAddThread, useTrigger } = program
+  const { useAddThread, trigger } = program
   const addThread = useAddThread()
-  const trigger = useTrigger()
 
   addThread({ label: 'enforceTurns', ...enforceTurns })
   for (const [key, threadArgs] of Object.entries(squaresTaken)) {
@@ -478,9 +472,8 @@ const startAtCenter: ThreadArgs = {
 test('start at center', () => {
   // Create a new bProgram instance.
   const program = behavioral()
-  const { useAddThread, useTrigger } = program
+  const { useAddThread, trigger } = program
   const addThread = useAddThread()
-  const trigger = useTrigger()
 
   addThread({ label: 'enforceTurns', ...enforceTurns })
   for (const [key, threadArgs] of Object.entries(squaresTaken)) {
@@ -571,9 +564,8 @@ const preventCompletionOfLineWithTwoXs = () => {
 test('prevent completion of line with two Xs', () => {
   // Create a new bProgram instance.
   const program = behavioral()
-  const { useAddThread, useTrigger } = program
+  const { useAddThread, trigger } = program
   const addThread = useAddThread()
-  const trigger = useTrigger()
 
   addThread({ label: 'enforceTurns', ...enforceTurns })
   for (const [key, threadArgs] of Object.entries(squaresTaken)) {

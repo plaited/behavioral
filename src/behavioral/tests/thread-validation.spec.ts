@@ -165,7 +165,7 @@ describe('validateThread — idiom combinations', () => {
 
   // ── detailMatch variants ────────────────────────────────────────────────
 
-  test('detailMatch: valid', () => {
+  test('detailMatch: true', () => {
     expect(
       validateThread({
         label: 'x',
@@ -175,7 +175,7 @@ describe('validateThread — idiom combinations', () => {
               {
                 type: 'a',
                 detailSchema: { type: 'object', properties: { n: { type: 'number' } } },
-                detailMatch: 'valid',
+                detailMatch: true,
               },
             ],
           },
@@ -184,7 +184,7 @@ describe('validateThread — idiom combinations', () => {
     ).toBe(true)
   })
 
-  test('detailMatch: invalid', () => {
+  test('detailMatch: false', () => {
     expect(
       validateThread({
         label: 'x',
@@ -194,13 +194,64 @@ describe('validateThread — idiom combinations', () => {
               {
                 type: 'a',
                 detailSchema: { type: 'object', properties: { n: { type: 'number' } } },
-                detailMatch: 'invalid',
+                detailMatch: false,
               },
             ],
           },
         ],
       }),
     ).toBe(true)
+  })
+
+  test('detailMatch: null rejected', () => {
+    expect(validateThread({ label: 'x', rules: [{ waitFor: [{ type: 'a', detailMatch: null }] }] })).toBe(false)
+  })
+
+  test("detailMatch: 'valid' rejected (closed vocabulary)", () => {
+    expect(validateThread({ label: 'x', rules: [{ waitFor: [{ type: 'a', detailMatch: 'valid' }] }] })).toBe(false)
+  })
+
+  test("detailMatch: 'invalid' rejected (closed vocabulary)", () => {
+    expect(validateThread({ label: 'x', rules: [{ waitFor: [{ type: 'a', detailMatch: 'invalid' }] }] })).toBe(false)
+  })
+
+  // ── ingress channel flag ────────────────────────────────────────────────
+
+  test('waitFor with ingressMatch: true', () => {
+    expect(validateThread({ label: 'x', rules: [{ waitFor: [{ type: 'a', ingressMatch: true }] }] })).toBe(true)
+  })
+
+  test('waitFor with ingressMatch: false', () => {
+    expect(validateThread({ label: 'x', rules: [{ waitFor: [{ type: 'a', ingressMatch: false }] }] })).toBe(true)
+  })
+
+  test('waitFor without ingress still valid (backward compat)', () => {
+    expect(validateThread({ label: 'x', rules: [{ waitFor: [onType('a')] }] })).toBe(true)
+  })
+
+  test('block with ingressMatch: true', () => {
+    expect(validateThread({ label: 'x', rules: [{ block: [{ type: 'a', ingressMatch: true }] }] })).toBe(true)
+  })
+
+  test('transform with ingressMatch: false', () => {
+    expect(
+      validateThread({
+        label: 'x',
+        rules: [{ transform: [{ type: 'a', query: '.', target: 'b', ingressMatch: false }] }],
+      }),
+    ).toBe(true)
+  })
+
+  test('ingressMatch: null rejected', () => {
+    expect(validateThread({ label: 'x', rules: [{ waitFor: [{ type: 'a', ingressMatch: null }] }] })).toBe(false)
+  })
+
+  test('non-boolean ingressMatch rejected', () => {
+    expect(validateThread({ label: 'x', rules: [{ waitFor: [{ type: 'a', ingressMatch: 'yes' }] }] })).toBe(false)
+  })
+
+  test('listener field ingress rejected (renamed to ingressMatch)', () => {
+    expect(validateThread({ label: 'x', rules: [{ waitFor: [{ type: 'a', ingress: true }] }] })).toBe(false)
   })
 
   // ── multiple listeners per idiom ────────────────────────────────────────
