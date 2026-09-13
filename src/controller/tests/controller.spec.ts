@@ -5,66 +5,44 @@
  *
  * A Bun HTTP + WebSocket fixture server (./fixtures/serve.ts) serves SSR'd pages
  * that load the bundled controller and drives them with scripted server messages
- * over a real WebSocket. A real browser (playwright-cli / Chromium) loads the
- * page; assertions read the DOM and the server-captured client messages
- * (ui_event, error, success, snapshot, form posts).
+ * over a real WebSocket. A real browser (Bun.WebView — Chromium via the chrome
+ * backend, headless, spawned in-process) loads the page; assertions read the DOM
+ * via `view.evaluate` and the server-captured client messages (ui_event, error,
+ * success, snapshot, form posts).
  *
  * No happy-dom, no FakeWebSocket. The controller is tested in the environment
  * it ships in.
+ *
+ * Harness notes:
+ * - The chrome backend is forced (`url: false`: always spawn a fresh headless
+ *   Chrome, never attach to a running browser) so the harness is identical on
+ *   macOS dev machines and Linux CI (where webkit is unavailable and chrome is
+ *   the only backend) — and so close-code/page-event semantics match what CI
+ *   observes (the webkit/WKWebView backend maps server close codes 1012/1013
+ *   to 1005, which the controller's retry set never sees).
+ * - `navigate()` resolves on the main frame's `load` event; a deferred module's
+ *   top-level await does NOT block the load event, so post-load page state can
+ *   still be settling — the specs poll where that matters.
+ * - One evaluate/click in flight at a time per view (Bun.WebView throws
+ *   ERR_INVALID_STATE on concurrent same-slot ops); the specs await sequentially.
+ * - Ephemeral storage is the default; each test gets a fresh view disposed via
+ *   `await using`. Chrome is spawned once per Bun process; each view is a tab.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { type FixtureServer, startServer } from './fixtures/serve.ts'
 
 let fixture: FixtureServer | undefined
-const SESSION = 'controller-test'
-const BROWSER_NOT_OPEN = `The browser '${SESSION}' is not open`
-const BROWSER = '--browser=chromium'
-
-const runCli = async (...args: string[]) => {
-  const proc = Bun.spawn(['bunx', '@playwright/cli', `-s=${SESSION}`, ...args], { stdout: 'pipe', stderr: 'pipe' })
-  setTimeout(() => proc.kill(), 60_000)
-  const [stdout, stderr] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()])
-  await proc.exited
-  return `${stdout}${stderr}`.trim()
-}
-
-const cli = async (...args: string[]) => {
-  const first = await runCli(...args)
-  if (first.includes(BROWSER_NOT_OPEN) && args[0] !== 'open' && args[0] !== 'close') {
-    await runCli('open', BROWSER)
-    return runCli(...args)
-  }
-  return first
-}
-
-const parseResult = (output: string) => {
-  const match = output.match(/### Result\n([\s\S]*?)(?:\n### |$)/)
-  if (!match) return { ok: false as const, value: undefined }
-  const raw = (match[1] ?? '').trim()
-  if (raw === '') return { ok: true as const, value: undefined }
-  // The CLI serializes the JS return value as JSON (e.g. `"active"`, `0`,
-  // `false`). Parse it back so callers receive the real type.
-  try {
-    return { ok: true as const, value: JSON.parse(raw) }
-  } catch {
-    return { ok: true as const, value: raw }
-  }
-}
-
-const evalJs = async (expr: string) => {
-  // Retry transient CLI failures (no `### Result` block — daemon busy or
-  // browser briefly unavailable). A real `undefined` return emits a
-  // `### Result\nundefined` block and is NOT retried.
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const out = await cli('eval', expr)
-    const result = parseResult(out)
-    if (result.ok) return result.value
-    await sleep(200)
-  }
-  throw new Error(`evalJs: CLI returned no result after 5 attempts: ${expr}`)
-}
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+/** Open a fresh WebView on a fixture page; resolves on the page's load event. */
+const open = async (path: string): Promise<Bun.WebView> => {
+  if (!fixture) throw new Error('Fixture server not started.')
+  // Surface page-side console output (errors especially) in the test runner.
+  const view = new Bun.WebView({ backend: { type: 'chrome', url: false }, console: globalThis.console })
+  await view.navigate(`http://localhost:${fixture.port}${path}`)
+  return view
+}
 
 /** Poll a browser read until it returns a value (or throws on timeout). */
 const waitFor = async <T>(read: () => Promise<T | undefined>, timeoutMs = 8000): Promise<T> => {
@@ -78,17 +56,6 @@ const waitFor = async <T>(read: () => Promise<T | undefined>, timeoutMs = 8000):
   return value
 }
 
-const goto = async (path: string) => {
-  if (!fixture) throw new Error('Fixture server not started.')
-  await cli('goto', `http://localhost:${fixture.port}${path}`)
-  // Wait for the controller connect script to appear in the DOM, confirming
-  // the full page HTML has been parsed (body content + script tags).
-  await waitFor(async () => {
-    const has = await evalJs('() => !!document.querySelector("script[src*=\'.behavioral/connect\']")')
-    return has === true ? true : undefined
-  }, 8_000)
-}
-
 const getFixture = (): FixtureServer => {
   if (!fixture) throw new Error('Fixture server is not initialized.')
   return fixture
@@ -96,29 +63,23 @@ const getFixture = (): FixtureServer => {
 
 beforeAll(async () => {
   fixture = startServer(0)
-  await cli('open', BROWSER)
-}, 30000)
+})
 
 afterAll(async () => {
-  try {
-    await runCli('close')
-  } catch {
-    // ignore
-  }
   if (fixture) {
     await fixture.stop()
     fixture = undefined
   }
-}, 15000)
+})
 
 // ─── Connect & render ────────────────────────────────────────────────────────
 
 describe('controller: connect & render', () => {
   test('page loads the bundled controller, connects, and renders a server message', async () => {
-    await goto('/control-island.html')
+    await using view = await open('/control-island.html')
     // The server sends a render on open; the DOM must reflect it.
     const text = await waitFor(async () => {
-      const t = await evalJs("() => document.getElementById('ws-rendered')?.textContent")
+      const t = await view.evaluate<string | undefined>("document.getElementById('ws-rendered')?.textContent")
       return t && t !== 'undefined' ? t : undefined
     })
     expect(text).toContain('Hello from WebSocket')
@@ -128,12 +89,12 @@ describe('controller: connect & render', () => {
     // control-island.html ships no @view-transition rule. The controller no
     // longer injects one (the stylesheet-adoption feature is removed), so no
     // stylesheet — static or adopted — should contain the rule after connect.
-    await goto('/control-island.html')
+    await using view = await open('/control-island.html')
     // Give any would-be injection time to run; the controller's connect path
     // is synchronous after the connect script loads.
     await sleep(500)
-    const count = await evalJs(
-      "() => Array.from(document.styleSheets).concat(document.adoptedStyleSheets).reduce((n, s) => { try { return n + Array.from(s.cssRules).filter(r => r.cssText.includes('@view-transition')).length } catch { return n } }, 0)",
+    const count = await view.evaluate<number>(
+      "Array.from(document.styleSheets).concat(document.adoptedStyleSheets).reduce((n, s) => { try { return n + Array.from(s.cssRules).filter(r => r.cssText.includes('@view-transition')).length } catch { return n } }, 0)",
     )
     expect(Number(count)).toBe(0)
   }, 20_000)
@@ -143,29 +104,47 @@ describe('controller: connect & render', () => {
 
 describe('controller: render swap modes', () => {
   test('all six swap modes produce the correct DOM structure', async () => {
-    await goto('/test/swap-test')
-    expect(await evalJs("() => document.getElementById('inner-result')?.textContent")).toContain('inner replaced')
-    expect(await evalJs('() => document.querySelector(\'[b-target="main"]\')?.firstElementChild?.id')).toContain(
-      'afterbegin-result',
+    await using view = await open('/test/swap-test')
+    // The swap messages arrive as one burst on WS open; navigate() resolves
+    // on load, which can precede the WS connect. Poll for the first applied
+    // render before asserting (all six are applied in the same burst).
+    await waitFor(
+      async () =>
+        (await view.evaluate<string | undefined>("document.getElementById('inner-result')?.textContent"))
+          ? true
+          : undefined,
+      8000,
     )
-    expect(await evalJs('() => document.querySelector(\'[b-target="main"]\')?.lastElementChild?.id')).toContain(
-      'beforeend-result',
+    expect(await view.evaluate<string | undefined>("document.getElementById('inner-result')?.textContent")).toContain(
+      'inner replaced',
     )
-    expect(await evalJs("() => document.getElementById('afterend-result')?.textContent")).toContain('after main')
-    expect(await evalJs("() => document.getElementById('beforebegin-result')?.textContent")).toContain('before main')
-    expect(await evalJs("() => document.getElementById('outer-result')?.textContent")).toContain('outer replaced')
+    expect(
+      await view.evaluate<string | undefined>('document.querySelector(\'[b-target="main"]\')?.firstElementChild?.id'),
+    ).toContain('afterbegin-result')
+    expect(
+      await view.evaluate<string | undefined>('document.querySelector(\'[b-target="main"]\')?.lastElementChild?.id'),
+    ).toContain('beforeend-result')
+    expect(
+      await view.evaluate<string | undefined>("document.getElementById('afterend-result')?.textContent"),
+    ).toContain('after main')
+    expect(
+      await view.evaluate<string | undefined>("document.getElementById('beforebegin-result')?.textContent"),
+    ).toContain('before main')
+    expect(await view.evaluate<string | undefined>("document.getElementById('outer-result')?.textContent")).toContain(
+      'outer replaced',
+    )
   }, 15000)
 
   test('binds triggers on swapped-in fragments', async () => {
     // The action-test fixture renders a button with a b-trigger; clicking it
     // must emit a ui_event the server receives and acknowledge with a render.
-    await goto('/test/action-test')
+    await using view = await open('/test/action-test')
     await waitFor(async () => {
-      const has = await evalJs("() => !!document.getElementById('test-btn')")
+      const has = await view.evaluate<boolean>("!!document.getElementById('test-btn')")
       return has ? true : undefined
     }, 5000)
-    await evalJs("() => document.getElementById('test-btn').click()")
-    await waitFor(async () => getFixture().uiEvents.find((e) => e.source === 'action-test'), 5000)
+    await view.evaluate<void>("document.getElementById('test-btn').click()")
+    await waitFor(() => Promise.resolve(getFixture().uiEvents.find((e) => e.source === 'action-test')), 5000)
     const ev = getFixture().uiEvents.find((e) => e.source === 'action-test')
     expect((ev?.message as { detail?: { event?: { type?: string } } })?.detail?.event?.type).toBe('test_click')
   }, 20000)
@@ -175,16 +154,16 @@ describe('controller: render swap modes', () => {
 
 describe('controller: attrs handler', () => {
   test('sets string, removes null, toggles boolean, coerces number', async () => {
-    await goto('/test/attrs-test')
-    const sel = "() => document.querySelector('[b-target=main]')"
+    await using view = await open('/test/attrs-test')
+    const sel = "document.querySelector('[b-target=main]')"
     await waitFor(async () => {
-      const cls = await evalJs(`${sel}?.getAttribute('class')`)
+      const cls = await view.evaluate<string | undefined>(`${sel}?.getAttribute('class')`)
       return cls?.includes('active') ? true : undefined
     }, 5000)
-    expect(await evalJs(`${sel}?.getAttribute('class')`)).toContain('active')
-    expect(await evalJs(`${sel}?.hasAttribute('data-removable')`)).toBe(false)
-    expect(await evalJs(`${sel}?.hasAttribute('disabled')`)).toBe(true)
-    expect(await evalJs(`${sel}?.getAttribute('data-count')`)).toBe('42')
+    expect(await view.evaluate<string | undefined>(`${sel}?.getAttribute('class')`)).toContain('active')
+    expect(await view.evaluate<boolean | undefined>(`${sel}?.hasAttribute('data-removable')`)).toBe(false)
+    expect(await view.evaluate<boolean | undefined>(`${sel}?.hasAttribute('disabled')`)).toBe(true)
+    expect(await view.evaluate<string | undefined>(`${sel}?.getAttribute('data-count')`)).toBe('42')
   }, 15000)
 })
 
@@ -194,15 +173,15 @@ describe('controller: all-matches targeting', () => {
   test('attrs applies to every element with the matching b-target', async () => {
     // attrs-multi ships three [b-target="card"]; one attrs command must set the
     // class on all of them (querySelectorAll, not querySelector first-match).
-    await goto('/test/attrs-multi')
+    await using view = await open('/test/attrs-multi')
     await waitFor(async () => {
-      const n = await evalJs(
-        "() => Array.from(document.querySelectorAll('[b-target=card]')).filter(el => el.classList.contains('active')).length",
+      const n = await view.evaluate<number>(
+        "Array.from(document.querySelectorAll('[b-target=card]')).filter(el => el.classList.contains('active')).length",
       )
       return n === 3 ? n : undefined
     }, 10_000)
-    const count = await evalJs(
-      "() => Array.from(document.querySelectorAll('[b-target=card]')).filter(el => el.classList.contains('active')).length",
+    const count = await view.evaluate<number>(
+      "Array.from(document.querySelectorAll('[b-target=card]')).filter(el => el.classList.contains('active')).length",
     )
     expect(count).toBe(3)
   }, 20_000)
@@ -210,15 +189,15 @@ describe('controller: all-matches targeting', () => {
   test('render (innerHTML) applies to every element with the matching b-target', async () => {
     // render-multi ships two [b-target="slot"]; an innerHTML render must
     // replace the inner content of both, not just the first.
-    await goto('/test/render-multi')
+    await using view = await open('/test/render-multi')
     await waitFor(async () => {
-      const n = await evalJs(
-        "() => Array.from(document.querySelectorAll('[b-target=slot]')).filter(el => el.textContent?.includes('filled')).length",
+      const n = await view.evaluate<number>(
+        "Array.from(document.querySelectorAll('[b-target=slot]')).filter(el => el.textContent?.includes('filled')).length",
       )
       return n === 2 ? n : undefined
     }, 10_000)
-    const count = await evalJs(
-      "() => Array.from(document.querySelectorAll('[b-target=slot]')).filter(el => el.textContent?.includes('filled')).length",
+    const count = await view.evaluate<number>(
+      "Array.from(document.querySelectorAll('[b-target=slot]')).filter(el => el.textContent?.includes('filled')).length",
     )
     expect(count).toBe(2)
   }, 20_000)
@@ -227,18 +206,18 @@ describe('controller: all-matches targeting', () => {
     // render-prefix ships [b-target="user-name"], [b-target="user-email"],
     // and [b-target="other"]. A render with match='^=' and target='user' must
     // fill the two user-* slots and leave 'other' untouched.
-    await goto('/test/render-prefix')
+    await using view = await open('/test/render-prefix')
     await waitFor(async () => {
-      const n = await evalJs(
-        "() => Array.from(document.querySelectorAll('[b-target^=user]')).filter(el => el.textContent?.includes('hi')).length",
+      const n = await view.evaluate<number>(
+        "Array.from(document.querySelectorAll('[b-target^=user]')).filter(el => el.textContent?.includes('hi')).length",
       )
       return n === 2 ? n : undefined
     }, 10_000)
-    const filled = await evalJs(
-      "() => Array.from(document.querySelectorAll('[b-target^=user]')).filter(el => el.textContent?.includes('hi')).length",
+    const filled = await view.evaluate<number>(
+      "Array.from(document.querySelectorAll('[b-target^=user]')).filter(el => el.textContent?.includes('hi')).length",
     )
     expect(filled).toBe(2)
-    const other = await evalJs("() => document.querySelector('[b-target=other]')?.textContent")
+    const other = await view.evaluate<string | undefined>("document.querySelector('[b-target=other]')?.textContent")
     expect(other).toContain('untouched')
   }, 20_000)
 })
@@ -247,9 +226,9 @@ describe('controller: all-matches targeting', () => {
 
 describe('controller: dispatch_custom_event handler', () => {
   test('dispatches a CustomEvent on the target with detail', async () => {
-    await goto('/test/dispatch-test')
+    await using view = await open('/test/dispatch-test')
     const detail = await waitFor(async () => {
-      const d = await evalJs('() => window.__pingDetail')
+      const d = await view.evaluate<string | undefined>('window.__pingDetail')
       return d && d !== 'null' && d !== 'undefined' ? d : undefined
     }, 5000)
     expect(detail).toContain('ok')
@@ -261,10 +240,10 @@ describe('controller: dispatch_custom_event handler', () => {
 
 describe('controller: navigate handler', () => {
   test('navigates the browser to the given url via assign', async () => {
-    await goto('/test/navigate-test')
+    await using view = await open('/test/navigate-test')
     // The server sends a navigate to /test/swap-test; the browser must follow it.
     const url = await waitFor(async () => {
-      const u = await evalJs('() => window.location.pathname')
+      const u = await view.evaluate<string>('window.location.pathname')
       return u?.includes('swap-test') ? u : undefined
     }, 5000)
     expect(url).toContain('/test/swap-test')
@@ -275,13 +254,13 @@ describe('controller: navigate handler', () => {
 
 describe('controller: b-trigger routing', () => {
   test('click emits a ui_event with the action type and element attributes', async () => {
-    await goto('/test/action-test')
+    await using view = await open('/test/action-test')
     await waitFor(async () => {
-      const has = await evalJs("() => !!document.getElementById('test-btn')")
+      const has = await view.evaluate<boolean>("!!document.getElementById('test-btn')")
       return has ? true : undefined
     }, 5000)
     const before = getFixture().uiEvents.filter((e) => e.source === 'action-test').length
-    await evalJs("() => document.getElementById('test-btn').click()")
+    await view.evaluate<void>("document.getElementById('test-btn').click()")
     const ev = await waitFor(
       () =>
         Promise.resolve(
@@ -304,12 +283,28 @@ describe('controller: b-trigger routing', () => {
 
 describe('controller: extensions', () => {
   test('extension module is invoked for its matching b-trigger and triggers a BP event', async () => {
-    await goto('/module-fixture.html')
-    await waitFor(async () => {
-      const has = await evalJs("() => !!document.getElementById('module-ext-btn')")
-      return has ? true : undefined
-    }, 5000)
-    await evalJs("() => document.getElementById('module-ext-btn').click()")
+    // module-fixture's buttons are static HTML, so DOM presence does not prove
+    // the connect module has bound its delegated listener. The controller's
+    // WebSocket connects inside connect() right after #bind, so a fresh
+    // module-fixture connection observed by the fixture proves binding is
+    // done — otherwise the click can fire before the listener exists and be
+    // lost (a race the old harness's CLI round-trip latency masked). The
+    // connection count is snapshotted BEFORE the view is created: under the
+    // chrome backend the WS handshake can complete before the load event
+    // resolves, so a snapshot taken after open() would already include this
+    // page's connection and the >-before wait would never fire.
+    const beforeConnections = getFixture().connections.filter((c) => c.source === 'module-fixture').length
+    await using view = await open('/module-fixture.html')
+    await waitFor(
+      () =>
+        Promise.resolve(
+          getFixture().connections.filter((c) => c.source === 'module-fixture').length > beforeConnections
+            ? true
+            : undefined,
+        ),
+      5000,
+    )
+    await view.evaluate<void>("document.getElementById('module-ext-btn').click()")
     const ev = await waitFor(
       () => Promise.resolve(getFixture().uiEvents.find((e) => e.source === 'module-fixture')),
       5000,
@@ -323,12 +318,21 @@ describe('controller: extensions', () => {
   }, 20000)
 
   test('standard b-trigger still emits a BP event alongside extensions', async () => {
-    await goto('/module-fixture.html')
-    await waitFor(async () => {
-      const has = await evalJs("() => !!document.getElementById('module-b-trigger-btn')")
-      return has ? true : undefined
-    }, 5000)
-    await evalJs("() => document.getElementById('module-b-trigger-btn').click()")
+    // Same readiness wait as above (snapshot before open): the fresh
+    // module-fixture connection proves the delegated listener is bound before
+    // the click.
+    const beforeConnections = getFixture().connections.filter((c) => c.source === 'module-fixture').length
+    await using view = await open('/module-fixture.html')
+    await waitFor(
+      () =>
+        Promise.resolve(
+          getFixture().connections.filter((c) => c.source === 'module-fixture').length > beforeConnections
+            ? true
+            : undefined,
+        ),
+      5000,
+    )
+    await view.evaluate<void>("document.getElementById('module-b-trigger-btn').click()")
     const ev = await waitFor(
       () =>
         Promise.resolve(
@@ -348,12 +352,12 @@ describe('controller: extensions', () => {
 
 describe('controller: form submit', () => {
   test('POSTs the form data to the server with the b-form-trigger header', async () => {
-    await goto('/test/form-test')
+    await using view = await open('/test/form-test')
     await waitFor(async () => {
-      const has = await evalJs("() => !!document.getElementById('controller-form')")
+      const has = await view.evaluate<boolean>("!!document.getElementById('controller-form')")
       return has ? true : undefined
     }, 5000)
-    await evalJs("() => document.querySelector('#controller-form button[type=submit]').click()")
+    await view.evaluate<void>("document.querySelector('#controller-form button[type=submit]').click()")
     const post = await waitFor(() => Promise.resolve(getFixture().formPosts.at(-1)), 5000)
     expect(post.trigger).toBe('register')
     expect(post.body.name).toBe('Ada')
@@ -365,9 +369,16 @@ describe('controller: form submit', () => {
 
 describe('controller: WebSocket retry', () => {
   test('reconnects after a retryable close code and renders on the retried connection', async () => {
-    await goto('/test/retry-test')
+    // Backend note: the webkit backend would NOT pass this — WKWebView maps a
+    // server-initiated close with code 1012 (and 1013) to close code 1005
+    // (wasClean: true), which the controller's retry set {1006, 1012, 1013}
+    // never observes, so the retried connection would never be established.
+    // The chrome backend forwards 1012 verbatim — one reason this harness
+    // forces `backend: { type: 'chrome' }` everywhere (matching Linux CI,
+    // where webkit is unavailable).
+    await using view = await open('/test/retry-test')
     const text = await waitFor(async () => {
-      const t = await evalJs("() => document.getElementById('retry-success')?.textContent")
+      const t = await view.evaluate<string | undefined>("document.getElementById('retry-success')?.textContent")
       return t && t !== 'undefined' ? t : undefined
     }, 10000)
     expect(text).toContain('Reconnected')
@@ -378,15 +389,26 @@ describe('controller: WebSocket retry', () => {
 
 describe('controller: error reporting & success acks', () => {
   test('acks a successful server message with a success envelope', async () => {
-    // attrs-test sends 4 attrs messages, each acked.
-    await goto('/test/attrs-test')
+    // attrs-test sends 4 attrs messages, each acked. The view is held open
+    // (WS + page events alive) until the server-side waits below settle.
+    await using view = await open('/test/attrs-test')
+    void view
     await waitFor(() => Promise.resolve(getFixture().successes.find((s) => s.source === 'attrs-test')), 8000)
     const acks = getFixture().successes.filter((s) => s.source === 'attrs-test')
     expect(acks.length).toBeGreaterThanOrEqual(1)
   }, 15000)
 
   test('server receives a snapshot on pageshow', async () => {
-    await goto('/test/lifecycle-test')
+    // View is held open (WS + page events alive) for the server-side waits
+    // below.
+    await using view = await open('/test/lifecycle-test')
+    void view
+    // Backend note: the webkit backend would NOT pass this — WKWebView fires
+    // pageshow during a deferred module's top-level await (it does not wait for
+    // module TLA completion the way Chromium does), so the controller's page
+    // listeners (registered after the connect module's TLA) miss the first
+    // document's pageshow. Chromium fires pageshow after deferred module
+    // evaluation completes, which is where this harness runs.
     const snap = await waitFor(
       () => Promise.resolve(getFixture().snapshots.find((s) => s.source === 'lifecycle-test')),
       5000,
@@ -400,7 +422,8 @@ describe('controller: error reporting & success acks', () => {
 
 describe('controller: scaleCheck handler', () => {
   test('into target without own b-scale inherits nearest ancestor scale', async () => {
-    await goto('/test/scale-check-test')
+    await using view = await open('/test/scale-check-test')
+    void view
     const result = await waitFor(
       () => Promise.resolve(getFixture().scaleCheckResults.find((s) => s.source === 'scale-check-test')),
       8000,
@@ -409,7 +432,8 @@ describe('controller: scaleCheck handler', () => {
   }, 15000)
 
   test('outerHTML uses parent scale, ignores target own b-scale', async () => {
-    await goto('/test/scale-check-parent-test')
+    await using view = await open('/test/scale-check-parent-test')
+    void view
     const result = await waitFor(
       () => Promise.resolve(getFixture().scaleCheckResults.find((s) => s.source === 'scale-check-parent-test')),
       8000,

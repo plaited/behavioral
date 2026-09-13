@@ -229,6 +229,8 @@ export type FixtureServer = {
   server: ReturnType<typeof Bun.serve>
   port: number
   stop: () => Promise<void>
+  /** One entry per accepted WebSocket connection, in arrival order. */
+  connections: { source: string }[]
   uiEvents: { source: string; message: Record<string, unknown> }[]
   errors: { source: string; message: Record<string, unknown> }[]
   successes: { source: string; message: Record<string, unknown> }[]
@@ -244,6 +246,7 @@ export type FixtureServer = {
  */
 export const startServer = (port = 0): FixtureServer => {
   const state = {
+    connections: [] as { source: string }[],
     uiEvents: [] as { source: string; message: Record<string, unknown> }[],
     errors: [] as { source: string; message: Record<string, unknown> }[],
     successes: [] as { source: string; message: Record<string, unknown> }[],
@@ -273,6 +276,7 @@ export const startServer = (port = 0): FixtureServer => {
     websocket: {
       data: {} as { source: string },
       open(ws) {
+        state.connections.push({ source: ws.data.source })
         switch (ws.data.source) {
           case 'swap-fixture':
             ws.send(
@@ -414,6 +418,9 @@ export const startServer = (port = 0): FixtureServer => {
   return {
     server,
     port: server.port!,
+    get connections() {
+      return state.connections
+    },
     get uiEvents() {
       return state.uiEvents
     },
