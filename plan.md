@@ -75,14 +75,23 @@ ingress + a plugin-shipped behavior surface.
   dead (cold-per-turn, mid-turn stdin triggers); deployed-headless parked as
   the server-side complement (Workers/DO or containers, TS-native either way).
   The atproto pack stays deferred with its "future GUI" trigger now named.
-- **In-flight / next:** (0) **Controller transport replacement — pulled
-  forward 2026-09-12**: seam extraction in `controller.ts` (construct/connect,
-  `#send`, incoming dispatch, error/close → injected `Transport`), Tauri IPC
-  carrier primary, WS hardwiring removed, tests updated — validation is
-  **real-IPC** via a minimal Rust Tauri stub-relay scaffold + an in-repo
-  socket-bridge e2e (WebDriver rejected 2026-09-13; bridge build decision
-  resolved same day — see OQ and Decision Log 2026-09-13)
-  (see Decision Log 2026-09-12 "Transport work pulled forward"). Then the
+- **In-flight / next:** (0) **Controller transport seam — LANDED
+  2026-09-13** (red 1b32de04 + green 9f306044; see Decision Log 2026-09-13
+  "Transport seam landed"). Remaining transport-workstream tasks, in order
+  (reordered 2026-09-13, see Decision Log "Bun.WebView swap pulled
+  forward"): (1) **Bun.WebView harness swap — LANDED 2026-09-13** (see
+  Decision Log "Bun.WebView harness landed on the chrome backend";
+  commits d2d025ca + e7905525): both browser specs green under Bun.WebView,
+  @playwright/cli removed, the seam's runtime green delivered — the
+  seam-landing open item (browser specs never ran green) is resolved.
+  Then (2) Tauri IPC carrier — NEXT
+  (`@tauri-apps/api`: invoke/Channel/listen), then (3) WS removal +
+  serve-fixture rewrite (in-memory transport — now smaller, harness
+  stable), then (4) the desktop-carrier integration test (in-repo
+  Unix-socket bridge + minimal Rust stub relay). The seam-landing open
+  item (browser specs never ran green in this env) resolves via task (1),
+  not an env fix — fixing the Playwright env would be throwaway work
+  against a harness already scheduled for replacement. Then the
   autoresearch loop prerequisites, Q8/E, in order:
   (1) fill the default plugin content (`plugin.json` `sh.behavioral` extension
   + `mcp.json` you-web); (2) author the real **core thread** in `threads/` (the
@@ -93,7 +102,9 @@ ingress + a plugin-shipped behavior surface.
   ingress registry (Q1/B); Slice F (provision discovery primitives); the dev
   server (Q5).
 - **Known pre-existing test failures (not from recent work):** controller
-  specs (Playwright browser-launch timeouts in this env). The
+  specs — **resolved 2026-09-13** by the Bun.WebView harness swap
+  (d2d025ca; the sharper diagnosis: `@playwright/cli open` crashed as a
+  daemon under Node 26, failures at browser-launch, not import/build). The
   `match-listener.spec.ts:596` `prefixItems` failure is **resolved** — it was
   an AJV strict-mode tuple-compile rejection (bare `prefixItems` without
   `minItems`/`maxItems` disambiguates to `add_thread_error`, so the consumer
@@ -102,6 +113,119 @@ ingress + a plugin-shipped behavior surface.
 
 
 ## Decision Log
+
+### 2026-09-13 — Bun.WebView swap pulled forward to the next task
+
+- The pilot pulled the Bun.WebView harness swap out of the WS-removal task
+  and made it the immediate next task. Rationale: the @playwright/cli env is
+  broken (daemon crash under Node 26), so an env fix is throwaway work
+  against a harness already scheduled for replacement; the swap restores
+  runtime verification exactly where the workstream needs it next (the
+  landed seam + every subsequent carrier task touches controller.ts); and
+  the swap was never technically dependent on WS removal — harness (how
+  tests drive the browser) is orthogonal to carrier (what the controller
+  speaks). This supersedes the "swap belongs to the WS-removal task" timing
+  in the 2026-09-13 e2e-harness entry below and in the resolved e2e-driver
+  OQ. The WS-removal task shrinks to carrier + fixture-transport work.
+- Task shape: spike-gated. Step 1 is a time-boxed port of ONE spec path
+  (navigate → click → evaluate, console capture, WS connects from
+  WKWebView against the Bun.serve fixture). If the spike hits an
+  experimental-API blocker, STOP and report — the fallback (fixing the
+  Playwright env) is the pilot's decision, not forced. On success: port
+  both spec files mechanically — `evalJs('() => expr')` becomes
+  `view.evaluate('expr')` (Bun.WebView wraps scripts as `await (<script>)`,
+  so arrow wrappers evaluate to functions → serialize to undefined — strip
+  them); keep evaluate-based `el.click()` calls as-is for byte-for-byte
+  test semantics (native `view.click(selector)` adoption is optional
+  polish); audit for `type()` key-event assumptions (type() is InsertText,
+  no keydown/keyup — use press()); one evaluate/click in flight at a time.
+  On full green: drop the `@playwright/cli` devDep in a separate
+  chore(deps) commit. Scope guard: no transport/carrier/WS changes, serve
+  fixtures unchanged, controller.ts untouched unless a runtime failure
+  reveals a seam bug (then a distinct minimal `fix(controller)` commit,
+  reported as a finding).
+
+### 2026-09-13 — Bun.WebView harness landed on the chrome backend
+
+- Spike passed all four mechanics against the existing serve fixture
+  (navigate/load, WKWebView→fixture WS connect, evaluate round-trip,
+  console capture). Two WebKit platform findings then forced the backend
+  decision, both verified with minimal standalone repros: (a) WKWebView
+  maps a server-initiated close of 1012 (and 1013) to close code 1005
+  (wasClean) — the controller's retry set {1006, 1012, 1013} never
+  observes the close, so the retry test cannot pass on webkit; (b) WKWebView
+  fires pageshow during a deferred module's top-level await (it does not
+  wait for module-TLA completion the way Chromium does), so the
+  controller's page listeners — registered after the connect module's
+  TLA — miss the first document's pageshow; the snapshot-on-pageshow test
+  cannot pass on webkit either. Both findings stay documented inline in
+  controller.spec.ts as the auditable reason for the backend choice.
+- Decision: both specs' open() helpers force `backend: { type: 'chrome',
+  url: false }` — always spawn a fresh headless Chrome, never attach to a
+  running browser. Rationale: Linux CI can only run the chrome backend
+  (webkit is macOS-only), so chrome-everywhere makes dev and CI semantics
+  identical, and both webkit-blocked tests pass on Chromium.
+- Landed as d2d025ca (test(controller): port browser harness to
+  Bun.WebView): evalJs('() => expr') → view.evaluate('expr') with arrow
+  wrappers stripped; evaluate-clicks kept byte-for-byte; per-test
+  `await using` views (ephemeral storage); page console surfaced. Two
+  wait-level fixes beyond the mechanical port: a swap-burst poll
+  (navigate resolves on load, which can precede the WS connect) and an
+  additive `connections` observable on the serve fixture — a fresh
+  module-fixture connection proves the delegated listener is bound
+  before a click, with the count snapshotted BEFORE the view is created
+  (under chrome the WS handshake can complete before the load event
+  resolves, so a post-open snapshot already includes the page's
+  connection and the wait never fires — this was the one flake found,
+  root-caused and fixed before landing).
+- Same push: e7905525 chore(deps): remove @playwright/cli (package.json +
+  bun.lock + ci.yml — every use gone) and ed33109b chore(ci) (comment-only
+  cleanup). CI needs no browser provisioning: ubuntu-latest runner images
+  ship Google Chrome preinstalled (verified via actions/runner-images),
+  which Bun finds via PATH. Verified fallback if that ever changes:
+  `bunx playwright install chromium --only-shell --with-deps` — Bun's
+  chrome backend also drives playwright's chrome-headless-shell from the
+  ms-playwright cache (tested directly).
+- Gates: tsc clean; all four controller specs 29/29, stable across
+  repeated full-suite runs.
+
+### 2026-09-13 — Transport seam landed (TDD, main tree)
+
+- Landed as 5 commits on dev on top of 94e8ebd8: docs(plan) 88ae85de,
+  chore(deps) 4c787dad, docs(worktree removal) 5a2c36fd, red
+  test(controller) 1b32de04, green feat(controller) 9f306044. Footprint
+  verified against 94e8ebd8..HEAD: exactly the 9 expected files —
+  AGENTS.md, package.json, bun.lock, plan.md, controller.ts,
+  controller.types.ts, + new ws-transport.ts, transport-seam.spec.ts,
+  transport-serve.ts. No constants/kernel/tools/CLI changes.
+- **Shape:** `Transport` contract in controller.types.ts —
+  `send(ClientMessage)`, `onMessage(ServerMessage)`, `onStatus(open|close|
+  error TransportEvent)` returning `Disconnect`;
+  `ControllerConstructorArgs.transport?: Transport`. `WebSocketTransport`
+  (ws-transport.ts) owns the socket, send-queue (flush-on-open), and
+  randomized-backoff reconnect — moved out of the controller; frames parsed
+  to ServerMessage in the carrier (parse failures → WebSocketMessageError,
+  carrier failures → WebSocketError, both surfaced via onStatus);
+  reconnect-teardown registered via injected `registerDisconnect` so pagehide
+  semantics are unchanged. Four touchpoints: lazy carrier resolution
+  (injected or built-in), `#send` delegates, `#handleIncoming` is the old
+  `#webSocketListener` body minus JSON.parse, onStatus → `#reportError`.
+- **Ingress note (corrects the handoff prompt's touchpoint-(c) wording):**
+  ServerMessage ingress was NEVER gated by validateBPEvent pre-seam — the
+  old listener did JSON.parse + blind `as ServerMessage` cast + switch.
+  `#handleIncoming` is faithful to that (byte-for-byte default wins over
+  prompt prose); a validateBPEvent admission layer is future Phase 6 work,
+  marked with a MINIMAL comment in controller.ts. validateBPEvent on the
+  egress `ui_event` trigger path is untouched and unrelated.
+- **Verification gap (open):** red phase failed for the right reason at
+  tsc level; runtime red/green of the browser specs is unobservable in this
+  env (@playwright/cli daemon crash under Node 26). Gates: tsc clean;
+  delegated-listener.spec.ts 5/5 (the runnable check). Seam runtime behavior
+  rests on types + that check + inspection until the env issue is fixed or
+  the Bun.WebView swap (WS-removal task) replaces the harness.
+  **RESOLVED 2026-09-13:** the swap landed (d2d025ca) — transport-seam.spec.ts
+  3/3 and controller.spec.ts 19/19 runtime green under Bun.WebView; no seam
+  bug found (this is the seam's first runtime validation).
 
 ### 2026-09-13 — e2e harness: WebDriver rejected; Bun.WebView for DOM specs,
 socket-bridge for real-IPC
@@ -1028,7 +1152,24 @@ repo and risks staleness.
   the grounded tauri-playwright mechanics above); no third-party capability
   requirements (`withGlobalTauri`, `playwright:default` moot); the `/pw-poll`
   same-origin pattern is a design reference, not a dependency. Bun.WebView
-  swap for the DOM-spec layer confirmed as later-phase (WS-removal task).
+  swap for the DOM-spec layer: pulled forward to the NEXT task 2026-09-13
+  (supersedes the earlier later-phase timing — see Decision Log "Bun.WebView
+  swap pulled forward").
+- **b-form file transfer in the desktop webview — OPEN (charted 2026-09-13,
+  does not affect the seam).** `#bindForms` POSTs multipart FormData to
+  `window.location.href` (HTTP, never through the controller transport — the
+  `form_submit` ClientMessage type has no construction site in controller.ts
+  and stays frozen-but-unwired). Post-to-self works only where an HTTP origin
+  serves the page; a Tauri webview is `tauri://localhost` static assets — no
+  server to receive the POST. Resolution paths by agent location: **local
+  agent** — no upload at all; the form carries a path reference and the cold
+  Bun process reads the file from disk (large bytes never cross the webview
+  boundary; Transport contract stays message-only); **hosted agent** — POST
+  to the remote agent's HTTP ingress (the atproto blob-upload pattern,
+  reference by CID). Tauri custom-protocol POST handler: parked fallback.
+  Server-side ceiling today: `req.formData()` buffers the whole body —
+  streaming multipart -> `Bun.file` is the upgrade path if genuinely-large
+  uploads are needed against a local HTTP host.
 
 ## Phases
 
