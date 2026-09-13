@@ -20,10 +20,11 @@ would brick the agent. The *behavioral policy* layer (guards, conventions,
 space-local behaviors, skills) is minimal and improvable; the *loop machinery*
 is the stable floor beneath it.
 
-Built on the plaited behavioral runtime (`src/runtime/behavioral.ts` after
-Phase -2; today `src/main/behavioral.ts`). No pi SDK. No TUI. No ACP (deferred).
-The agent is a `plaited` CLI command; the dev client is pi's `!`/`!!` shell
-escapes; validation is Bun test.
+Built on the in-repo behavioral runtime (`src/behavioral/behavioral.ts`, the
+BP engine: data-threads, super-step scheduler, trace union). No pi SDK. No
+TUI. No ACP (deferred). The agent is a `behavioral` CLI command
+(`bin/behavioral.ts`); the dev client is pi's `!`/`!!` shell escapes;
+validation is Bun test.
 
 ## Current State
 
@@ -49,7 +50,7 @@ ingress + a plugin-shipped behavior surface.
   `ueid()`, errors as data), `oauth/` (keychain + v2 provider), `threads.ts`
   (the scaffolding turn-loop thread, MINIMAL — moves into the default plugin
   once plugin-loading lands, Q3/C).
-- **CLI — landed.** `plaited turn '{"space","prompt"}'` runs a turn cold and
+- **CLI — landed.** `behavioral turn '{"space","prompt"}'` runs a turn cold and
   prints JSON (deterministic against the scripted model seam — the Harbor /
   autoresearch seam). No daemon, no TUI.
 - **Harbor tasks (`tasks/`) — landed.** Two skill-authoring tasks
@@ -65,7 +66,24 @@ ingress + a plugin-shipped behavior surface.
   (Q3); skill gating default-allow host-side (Q4); generative-UI dev server
   (Q5); space = project folder, isolation invariant (Q6). Phase 6 rewritten to
   cold invocation + gated ingress + dev server.
-- **In-flight / next (the autoresearch loop prerequisites, Q8/E, in order):**
+- **Decisions this session (2026-09-12, see Decision Log + the Desktop/Rust
+  decision map in Open Questions):** finish the TS agent first; Rust conversion
+  dead as a general plan (Rust lives only in the Tauri shell/relay, and someday
+  the atproto client logic); desktop = Tauri app — the eventual atproto client —
+  with the controller dropping WebSockets entirely for Tauri IPC (transport
+  seam refactor charted; implementation parked behind TS-first); daemon stays
+  dead (cold-per-turn, mid-turn stdin triggers); deployed-headless parked as
+  the server-side complement (Workers/DO or containers, TS-native either way).
+  The atproto pack stays deferred with its "future GUI" trigger now named.
+- **In-flight / next:** (0) **Controller transport replacement — pulled
+  forward 2026-09-12**: seam extraction in `controller.ts` (construct/connect,
+  `#send`, incoming dispatch, error/close → injected `Transport`), Tauri IPC
+  carrier primary, WS hardwiring removed, tests updated — validation is
+  **real-IPC** via a minimal Rust Tauri stub-relay scaffold + an in-repo
+  socket-bridge e2e (WebDriver rejected 2026-09-13; bridge build decision
+  resolved same day — see OQ and Decision Log 2026-09-13)
+  (see Decision Log 2026-09-12 "Transport work pulled forward"). Then the
+  autoresearch loop prerequisites, Q8/E, in order:
   (1) fill the default plugin content (`plugin.json` `sh.behavioral` extension
   + `mcp.json` you-web); (2) author the real **core thread** in `threads/` (the
   loop's subject); (3) kernel primitives to run an arbitrary thread + capture
@@ -84,6 +102,230 @@ ingress + a plugin-shipped behavior surface.
 
 
 ## Decision Log
+
+### 2026-09-13 — e2e harness: WebDriver rejected; Bun.WebView for DOM specs,
+socket-bridge for real-IPC
+
+- The pilot rejects WebDriver (tauri-driver) for the e2e leg. Research
+  grounded against two sources: `Bun.WebView` docs (bun.sh) and
+  srsholmes/tauri-playwright (GitHub, read 2026-09-13).
+- **Layer mapping (the two test layers take different tools):**
+  (1) DOM-level controller specs (layer 1, today `bunx @playwright/cli
+  --browser=chromium` + serve fixture) → candidate replacement is
+  **`Bun.WebView`**: on macOS its webkit backend IS WKWebView — the engine
+  the Tauri app ships in — so post-WS-removal it satisfies controller.spec.ts
+  "tested in the environment it ships in" more faithfully than Chromium; it
+  runs inside bun:test (no spawned Playwright session → sidesteps the known
+  browser-launch timeout). (2) real-IPC integration (layer 2) → a
+  **tauri-playwright-style socket bridge**, NOT CDP and NOT Bun.WebView:
+  WKWebView has no CDP (why plain Playwright can't attach on macOS), and
+  Bun.WebView creates its own webview — it can never host the Tauri core
+  (invoke/Channel/emit), so it cannot serve layer 2 at all.
+- **tauri-playwright mechanics (grounded):** Rust plugin
+  (`tauri-plugin-playwright`, optional behind an `e2e-testing` cargo feature)
+  embeds a Unix-socket server in the app; npm package gives a
+  Playwright-compatible tauriPage/locator/expect API; commands run via
+  `webview.eval()`, results return through real Tauri IPC (`pw_result` invoke
+  + same-origin HTTP poll). Proven on macOS real WKWebView (their CI), MIT,
+  changesets-published (npm + crates), active through 2026-06. Its `browser`
+  mode (mocked Tauri IPC in Chromium) is the rejected
+  `@tauri-apps/api/mocks` pattern — skip it; the in-memory transport is our
+  mock-free equivalent. Caveats if adopted as a package: `withGlobalTauri:
+  true` requirement (verify vs the `@tauri-apps/api` plan), `playwright:default`
+  capability in the stub relay's capability file, and its JS bridge polls a
+  same-origin `/pw-poll` route designed for a Vite proxy — our Bun.serve static
+  host must proxy that route to the plugin's HTTP callback server.
+- **Bun.WebView caveats (accepted as experimental, logged):** webkit backend
+  has no CDP (`cdp()` throws — specs only need navigate/click/evaluate/press,
+  fine); `type()` is the InsertText paste path — NO keydown/keyup, so specs
+  asserting on key events must use `press()` (spec audit needed at swap time);
+  engine is platform-divergent (Chrome/Blink on Linux/Windows — "ships in"
+  literal only on macOS; tests are macOS-local today); WKWebView persistent
+  storage needs macOS 15.2+ (ephemeral default fine).
+- **Timing constraint:** the transport-seam task keeps the existing
+  Playwright harness green (byte-for-byte default WS carrier). The Bun.WebView
+  swap belongs to the WS-removal task, when the harness is rewritten anyway
+  and the in-memory transport slots in as a second real carrier in the same
+  Bun-native harness. The socket-bridge e2e belongs to the desktop-carrier
+  task that follows. Recommendation (navigator): adopt the
+  @srsholmes/tauri-playwright package first, fall back to an in-repo minimal
+  Unix-socket harness modeled on its server.rs only if integration friction
+  bites — decision is the pilot's in that task.
+- **Resolution (same day):** the pilot chose **(b) in-repo** — a minimal
+  Unix-socket harness modeled on the package's server.rs. Greenfield size,
+  debuggability, no third-party concerns; the package remains a reference.
+  The Bun.WebView DOM-spec swap is confirmed later-phase (WS-removal task).
+  See the resolved OQ entry.
+
+### 2026-09-13 — Worktrees dropped as a repo workflow
+
+- The pilot drops the agent-worktree convention for this repo. Task work
+  (including the transport seam TDD) proceeds directly in the main working
+  tree; red/green TDD commits land on `dev` (a short-lived local branch is
+  optional at the pilot's discretion, merged locally — no worktree scaffolding).
+- Rationale: the worktree ceremony bought isolation this single-pilot local
+  repo does not need; `.worktrees/` is confirmed empty and no stale
+  worktree branches exist in this repo.
+- Follow-up docs commit (after the pending plan/deps commits): remove the
+  **Agent worktrees** and **Worktree lifecycle** bullets from the "Git as
+  Context" section of `AGENTS.md`, delete the empty `.worktrees/` dir.
+  No executable behavior changes → docs commit, no test gate required.
+
+### 2026-09-12 — Transport work pulled forward into the TS phase (scoped)
+
+- The pilot starts the controller transport replacement NOW, not post-TS:
+  replace WebSockets in `controller.ts` with the Tauri IPC carrier
+  (`tauri::ipc::Channel` + `emit`/`listen`), updating tests to validate it.
+  Scope bounded to `src/controller/` (+ tests/fixtures); the Tauri Rust shell
+  and the rest of the desktop layer remain post-TS.
+- Coupling verified against the import graph: nothing imports `controller.ts`
+  outside `src/controller/`; the only external consumers of controller surface
+  are `src/tools/html.ts` + `html.schemas.ts` (constants `B_*`/`SCALE` +
+  `swapBoundary` — untouched by the swap); zero references to the message
+  unions or `CONTROLLER_*` message types outside `src/controller/`;
+  controller→behavioral dependency is type-only (`BPEvent`, `Trigger`,
+  `Disconnect`). The message protocol and constants are the frozen ABI.
+- Open: what "validate Tauri IPC" means before a Rust core exists —
+  **RESOLVED (2026-09-12): real-IPC.** The pilot prefers a minimal Rust
+  Tauri scaffold exercised end-to-end (tauri-driver/WebDriver) as a valid
+  integration test. Consequences accepted: (a) Rust enters the repo NOW as a
+  bounded test harness — a stub relay (one `controller_message` command, a
+  Channel for streaming ServerMessages, event emit), NOT the real relay and
+  NOT the desktop shell — scope-guard: no atproto, no process spawning, no
+  shell features; it exists to validate the carrier against real
+  `tauri::ipc::Channel`/`emit`/`listen` behavior, and the real relay replaces
+  its guts later without changing the carrier; (b) toolchain surface grows:
+  cargo workspace (suggested: `desktop/` outside `src/`), tauri CLI,
+  tauri-driver in the test path — Rust gates (fmt/clippy/test) enter the
+  quality gate for this surface; CI needs a macOS/webview-capable runner for
+  the e2e leg; (c) test matrix: unit (in-memory transport + DOM specs),
+  integration (webview loads the controller bundle with the Tauri carrier →
+  real invoke/Channel roundtrip against the stub relay). This partially
+  supersedes "desktop parked behind TS-first": a bounded slice of the desktop
+  Rust is now live TS-phase work; the rest (shell, real relay, atproto
+  client) stays post-TS.
+- Refinement (same day): **Bun + package.json stay the sole command drivers** —
+  rustc/cargo/tauri invocations hang off package.json scripts / Bun shell
+  scripts (per repo Bun-first convention), keeping the project's Rust surface
+  minimal and the driver story single. **`desktop/` folder agreed** (run
+  `bun tauri init` from `desktop/` so the crate lands at `desktop/src-tauri/`,
+  keeping all Rust under `desktop/`). **No Vite — Bun is the bundler**
+  (`bun add -D @tauri-apps/cli`, `@tauri-apps/api` in the root package.json;
+  `bun build --target=browser` produces the static web assets). Grounded
+  against the Tauri docs (2026-09-12): Tauri is a **static web host** —
+  `frontendDist` = bun build output; `beforeBuildCommand` = `bun run` script;
+  dev flow = `bun build --watch` + a small `Bun.serve` static server as
+  `devUrl`, or skip dev-mode entirely for the e2e harness (tauri-driver needs
+  the built binary anyway). **SSR reconciliation:** the docs' "no SSR" means
+  no webapp/framework server rendering (Next/Nuxt-style) in the webview —
+  it does NOT conflict with this repo's SSR, which is agent-side (html tools
+  render fragments during turns, pushed via the controller protocol); the
+  webview hosts a static controller bundle. Setup path per the manual-setup
+  doc: `bun add -D @tauri-apps/cli` → `bun tauri init` (supports `--ci` with
+  `--app-name/--frontend-dist/--dev-url/--before-dev-command/
+  --before-build-command` for non-interactive setup) → stub relay commands.
+  The Vite-specific watch-ignore step is skipped (no Vite).
+- Setup landed (2026-09-12): `@tauri-apps/cli@^2.11.4` added as a devDep
+  (package.json + bun.lock dirty, uncommitted). Commit plan as TWO commits:
+  `docs(plan)` for plan.md only; `chore(deps)` for package.json + bun.lock.
+  `@tauri-apps/api` is deliberately NOT installed yet — the carrier task needs
+  it, the seam task needs nothing new. Seam-test harness question resolved:
+  keep the real-browser Playwright harness (controller.spec.ts's documented
+  philosophy: "No happy-dom, no FakeWebSocket. The controller is tested in
+  the environment it ships in"). The in-memory transport in the seam spec is
+  not a "FakeWebSocket" — it is a second real carrier proving the seam is
+  carrier-agnostic; controller.spec.ts keeps testing the shipping WS carrier
+  against a real server+browser.
+
+### 2026-09-12 — Desktop = Tauri; controller drops WebSockets as its carrier
+
+- The pilot confirms Tauri as the desktop pattern, accepting the overhead +
+  controller modification as the price. The local-PWA pattern stays logged as
+  a researched fallback, not the plan.
+- **Controller drops WebSockets** — not dual-carrier. Rationale: the eventual
+  atproto client would be a Tauri app anyway (the serverless Statusphere post
+  is the *server-side* pattern; a client for that ecosystem is a desktop app),
+  so the WS carrier has no long-run home. Consequences accepted: the controller
+  transport seam refactor (construct/connect, `#send`, incoming dispatch,
+  error/close → injected `Transport`) with a Tauri IPC carrier as primary; the
+  WS hardwiring is removed rather than kept as default.
+- **Test/fixture consequence (open):** controller specs + the serve fixture
+  speak WS today — they need a carrier replacement. Candidate: an in-memory/
+  mock transport in specs (simpler than real-WS testing), serve fixture
+  repurposed or removed.
+- **Location transparency (noted, valuable):** with the controller speaking
+  only IPC to the Rust core, the Rust relay chooses the agent's location per
+  turn — local cold Bun process (stdin/stdout NDJSON) or a remote hosted agent
+  (HTTPS/WS from the Rust side). Same controller, same message protocol;
+  the desktop-client and deployed/headless paths become one architecture
+  differing only at the relay.
+- Still parked behind TS-first; the one pre-payable item during TS work is the
+  transport seam extraction (cheap before a second carrier exists).
+
+### 2026-09-12 — TS-first; desktop layer and Rust conversion deferred (exploration closed)
+
+- The pilot closes the speculative exploration: **finish the TypeScript
+  agent first, without a desktop layer**; decide Rust conversion and Tauri
+  integration only after. TS-first is the stated rationale (pilot fluency);
+  all desktop/Rust branches below are **documented options, not commitments**.
+- Exploratory conclusions carried forward for the eventual decision:
+  - Tauri never required the Rust conversion — thin shell + cold Bun process is
+    the baseline pattern; the Rust port is a separate, later question.
+  - Cold-per-turn stands (no daemon resurrection) even in a desktop world.
+  - Ingress shape (pilot-confirmed, matches existing types): controller
+    messages → `trigger()`; `UiEventMessage.detail.event` is already a `BPEvent`,
+    so the relay is `trigger(detail.event)` through the existing `validateBPEvent`
+    gate; the kernel's trigger path already adds a request-thread to `running`
+    with `ingress: true` (blockable by active threads).
+  - Egress shape (tentative, pilot leans A): **A — egress-as-selection** — UI
+    updates are requested `ui.*` events whose selections the relay maps 1:1 to
+    controller messages (`render`/`attrs`/`navigate`/`dispatch_custom_event`/
+    `scale_check`); single ABI both directions (stdin: NDJSON BPEvents,
+    stdout: NDJSON trace stream). B — direct pipe from tool results — rejected
+    in principle (bypasses the frontier, ungovernable UI).
+  - Bun is not displaced: skills stay Bun-executable regardless of any Rust
+    port; `HTMLRewriter` is already lol-html underneath, so an eventual port
+    has engine parity available via the `lol_html` crate.
+
+### 2026-09-12 — Cold turn ABI: mid-turn stdin triggers
+
+- Resolves the Q-T2 successor branch. A running turn accepts external
+  triggers mid-flight: NDJSON `BPEvent`s on stdin, relayed from webview
+  `invoke` by the Tauri core, admitted through the kernel's existing
+  `trigger()` gate. No new validation surface — stdin is a process trust
+  boundary, and `validateBPEvent` already runs at `trigger`; UI triggers are
+  external (`ingress: true`), so listener `ingressMatch` flags and thread
+  `block` semantics apply to them unchanged (a UI click can be blocked by an
+  active thread — the deadlock trace's candidate set is how the UI observes
+  that).
+- Successor sub-question: **after-stop rule** — a trigger arriving after the
+  turn's stop condition (open, see Open Questions).
+- Q-T3 (transport) is taken as resolved by the pilot's stated position + this
+  decision: webview leg is Tauri IPC (`Channel` for trace/render streaming,
+  `invoke` for trigger relay), Rust core is a per-turn spawner/relay, the agent
+  stays a Bun cold process. No listening port. Q-T1 likewise resolved by
+  implication: the desktop owes window + native integration (IPC, capability
+  ACLs), not merely a browser tab. Both entries invite a pilot veto.
+
+### 2026-09-12 — Desktop app: cold-per-turn, no daemon resurrection (Q-T2 → A)
+
+- The pilot drops the daemon for the Tauri desktop app: the app does **not**
+  host a long-lived agent process. Each user action spawns a cold `behavioral
+  turn`-style process; traces/renders stream to the webview while it runs; the
+  process exits at turn end. The "Explicitly deferred" long-running hosted
+  agent (REST+WS, per-user spaces) **stays deferred** — a GUI is no longer its
+  un-deferring trigger.
+- Consequences: (1) Q-T3a's proxy shrinks — no long-lived duplex proxy, just
+  per-turn `std::process::Command` + line-delimited JSON trace stream relayed to
+  a `tauri::ipc::Channel`; (2) the app is inert between turns — the desktop UI
+  is a rendered transcript plus a turn launcher, not a live control surface;
+  (3) the open-next branch is **mid-turn ingress**: whether a running turn
+  accepts external triggers on stdin (kernel `trigger()` is callable any time;
+  preserves the controller's intra-turn interactivity) or ingress is
+  prompt-only at spawn (simplest, coarsest).
+- Transport (Q-T3) still open on the webview leg (IPC vs WS); the Tauri-IPC
+  security rationale (no listening port, capability ACLs) stands and now has
+  no daemon to attach to.
 
 ### 2026-09-12 — Ingress channels: `trigger` is external-only; internal re-entry via threads
 
@@ -675,6 +917,118 @@ repo and risks staleness.
   to `src/ui/` as a library and wrap in a pack later. `html-rewriter.utils.ts`
   validators stay library imports in either case (pass-through wrapper =
   Runtime-Wiring-Style violation).
+
+- **Desktop/Rust decision map (2026-09-12 — DECIDED, implementation parked
+  behind TS-first).** The shape decisions are recorded in the Decision Log
+  (2026-09-12: "TS-first", "Cold turn ABI", "Desktop = Tauri; controller
+  drops WebSockets"). This map holds the decided shape plus the remaining
+  open sub-items and parked conditionals:
+  - **Decided shape:** Tauri desktop app (the eventual atproto client); webview
+    runs the TS controller; Rust core = shell + per-turn spawner/relay (local
+    cold Bun process via stdin/stdout NDJSON) +, someday, atproto client logic
+    (OAuth/PDS/Jetstream — Rust side, atrium-rs); no daemon-as-agent-state; no
+    listening port on the desktop path. The same controller + message protocol
+    serve a future remote hosted agent by swapping the relay target —
+    location transparency via IPC-only controller.
+  - **Local-PWA pattern — researched fallback (parked):** if Tauri is ever
+    abandoned: `behavioral serve` serves the UI at `http://localhost` (installable
+    per MDN; localhost is a secure context); same-origin localhost→localhost is
+    exempt from Chrome 142 Local Network Access gating, so the WS transport
+    would work unpatched; the cost is process lifecycle (installed app can't
+    start its server — Jupyter-style UX or launchd) and losing the closed-ingress
+    story.
+  - **Transport (webview leg) — DECIDED:** controller **drops WebSockets
+    entirely** (not dual-carrier; the WS carrier has no long-run home once the
+    atproto client is Tauri). Controller change shape (grounded against
+    controller.ts — hardwired today at `#socket: WebSocket`,
+    `#connectWebSocket()` from `self.location.href`, `#send()` +
+    `#messageQueue` flush-on-open, randomized-backoff reconnect): extract a
+    minimal transport seam (construct/connect, `#send`, incoming dispatch,
+    error/close) into an injected `Transport` in `ControllerConstructorArgs`;
+    Tauri carrier primary (`#send` → `invoke('controller_message')`, incoming
+    → `listen`/`Channel`, reconnect logic deleted); WS hardwiring removed.
+    **Open sub-items:** (1) test/fixture carrier replacement — controller specs
+    + serve fixture speak WS today; recommended: in-memory loopback transport
+    in specs (simpler + more deterministic than real-WS testing); (2) relay
+    policy for page-lifecycle snapshots (pagereveal/pageshow/pagehide/pageswap)
+    that fire when no turn is running — drop vs queue-as-next-turn-opener
+    (navigator recommends queue-as-opener, consistent with the Q-T4
+    dissolution's no-silent-drops rule).
+  - **Ingress — settled:** controller messages → `trigger()` (existing
+    `validateBPEvent` gate; `ingress: true` request-threads; blockable;
+    transform/once-thread re-entry unchanged). Q-T4 (after-stop rule)
+    dissolved — the relay arbitrates process lifetime; mid-lifetime triggers
+    legitimately re-open super-steps until the stop condition re-evaluates.
+  - **Egress — pilot-confirmed pattern A (egress-as-selection):** UI updates
+    are requested `ui.*` events whose selections the relay maps 1:1 to
+    controller messages (`render`/`attrs`/`navigate`/`dispatch_custom_event`/
+    `scale_check`); direct-pipe B rejected in principle. Tool-result →
+    `ui.render` request bridging already exists as the dispatch bridge's
+    once-thread re-entry (`tool.result`).
+  - **Rust conversion (if ever taken up):** data-threads port mechanically
+    (the pasted plaited-era code-thread spec does not — no stable Rust
+    generators, breaks the model-authors-threads loop); determinism requires
+    `IndexMap`/`Vec` + a frozen trace/thread JSON ABI (equal-priority
+    tie-breaking is `pending` insertion order + stable sort); AJV→`jsonschema`
+    parity is its own test surface; skills/html/Bun stay JS-tier regardless.
+  - **Deployed headless, multi-client (2026-09-12, new driver — parked).** The
+    pilot raises performance "as a participant in serverless atproto"
+    (Cloudflare Workers). Findings from the Serverless Statusphere post: (a) the
+    author chose Rust for **library compatibility** (TS atproto libs' `error`
+    redirect mode vs the edge runtime), not performance, and recommends TS as
+    the natural path; (b) Rust-on-Workers is WASM — single-threaded per isolate,
+    no subprocess, no native sockets, same isolate overhead — so native-Rust
+    perf intuition doesn't transfer; (c) the turn loop is model-bound (seconds)
+    vs kernel super-steps (microseconds) — language is not the scaling lever at
+    any plausible client count; (d) the deferred hosted-agent item maps 1:1 onto
+    **Durable Object per space** (single-threaded coordinated state, WS
+    hibernation ≈ quiescence) and cold-per-turn maps onto isolate-per-invocation
+    — the daemon drop is what makes the agent serverless-compatible; (e) Workers
+    rules out bash/file tools (no subprocess, no real FS) — deployment shape is
+    a **tool-surface question before a language question**; (f) the one
+    CPU-bound piece is the autoresearch gate (`frontier-replay`/`verify` — pure,
+    deterministic functions of trace JSON) — the strangler target if measured
+    compute ever matters, portable without conversion.
+  - **Un-deferring triggers:** a GUI does not un-defer the ACP adapter or the
+    long-running hosted agent; both stay in "Explicitly deferred" unless the
+    pilot explicitly reverses.
+
+  Parked Rust-port branches (activate only if a conversion is later taken up;
+  Q-R4's resolution stands in any world):
+  - Q-R1: which BP semantics would a Rust engine implement — the current
+    `src/behavioral` contract (AJV-validated data threads, ingress channels,
+    spaces, transform idiom, trace union) or the pasted plaited-era spec (code
+    generators, `EventMatcher` functions, `addRules`/`destroy`, `maxCycleDepth`)?
+    The two contradict on priority (registration order vs numeric), thread
+    authorship (code vs data), and error handling (deregister-on-throw vs
+    declarative-only). Data-threads port mechanically; code-threads don't.
+  - Q-R2: determinism contract — candidate collection order is `pending` Set
+    insertion order and `sort` is stable, so equal-priority tie-breaking is
+    insertion-ordered; a Rust port needs `IndexMap`/`Vec` and a frozen trace/
+    thread JSON contract set as the TS↔Rust ABI.
+  - Q-R3: skills runtime — skills are Bun-executable TS scripts authored by
+    the agent; a Rust harness either keeps Bun as a subprocess runtime or the
+    authoring loop breaks.
+  - Q-R4 (resolved in principle): `html.ts` rewriter layer already runs on
+    lol-html (Bun's `HTMLRewriter` binding) → `lol_html` crate at engine parity;
+    custom remainder is `validateAndEscapeHtmlRaw`, `applySwap`/`swapBoundary`,
+    scale-check, css-tree validation (no Rust equivalent). Q-R4b: html tools
+    in the Rust core (hand-ported validators) vs the Bun sidecar (zero port).
+  - Q-R5: migration strategy — big-bang vs strangler (contracts-first, Rust
+    `behavioral-core` with trace parity tests, then kernel/dispatch, then CLI,
+    tools fleet last).
+- **e2e driver for the real-IPC leg — RESOLVED (2026-09-13): build in-repo.**
+  A minimal Unix-socket harness modeled on tauri-playwright's server.rs, NOT
+  the third-party package. Pilot's reasons: greenfield project this size —
+  extra code/maintenance is insignificant; in-repo means debugging without
+  third-party concerns; consistent with the minimal-deps directive. The
+  package stays logged as a reference implementation (and fallback if the
+  in-repo bridge stalls). Consequences: the bridge code is ours to own
+  (small: socket listener + eval command loop + result Channel/invoke, per
+  the grounded tauri-playwright mechanics above); no third-party capability
+  requirements (`withGlobalTauri`, `playwright:default` moot); the `/pw-poll`
+  same-origin pattern is a design reference, not a dependency. Bun.WebView
+  swap for the DOM-spec layer confirmed as later-phase (WS-removal task).
 
 ## Phases
 
@@ -1502,7 +1856,10 @@ all operator choices the design must remain compatible with.
 - atproto identity/sync/lexicon packs (agent DID + user DID, trace commits as
   signed records, cloud-mirror PDS, behavioral-rendering lexicon for a future GUI) —
   bind later via the pack seam; no core dependency. Gated on atproto spaces
-  stabilizing out of alpha.
+  stabilizing out of alpha. **(2026-09-12: the pilot has stated the eventual
+  client intent — a Tauri atproto client — so the "future GUI" trigger is now
+  named; the server-side pattern reference is the Serverless Statusphere post.
+  Still deferred until TS agent completion.)**
 - Dataset/corpus eval service (aggregate analysis over many persisted trace logs —
   the third leg alongside the per-thread symbolic gate and the iterative
   autoresearch loop). All three consume the same trace-log artifact; the corpus
