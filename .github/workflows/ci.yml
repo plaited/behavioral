@@ -19,11 +19,6 @@ jobs:
         with:
           bun-version: latest
       - name: Install dependencies
-        # No browser provisioning: the controller specs use Bun.WebView's chrome
-        # backend, and GitHub ubuntu-latest runner images ship Google Chrome
-        # preinstalled (Bun finds it via PATH / standard install locations).
-        # If a runner image ever drops preinstalled Chrome, restore with:
-        #   bunx playwright install chromium --only-shell --with-deps
         run: |
           bun install
       - name: Run check
