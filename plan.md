@@ -85,6 +85,56 @@ ingress + a plugin-shipped behavior surface.
 
 ## Decision Log
 
+### 2026-09-12 — Ingress channels: `trigger` is external-only; internal re-entry via threads
+
+- Amends the 2024-09-03 action-channel direction ("do async I/O, `trigger` results
+  back"): the dispatch bridge no longer re-enters via `trigger`. Internal results
+  (`model.result`, `tool.result`, `turn.end`, `discovery.results`, …) arrive as
+  ordinary `once` threads added through `useAddThread(space)` whose single rule
+  `request`s the event. `ingress: true` is then exclusive *by construction* to the
+  external `trigger` surface — no second API, no private handle to guard.
+- The two injection paths map onto the two existing gates: event admission
+  (`trigger`) is controlled by listener `ingress` flags (+ the Phase 6 public-event
+  registry at the boundary); thread admission (`useAddThread`) is controlled by the
+  Phase 5 Layer 1 frontier gate. An outside actor that tries to inject requests as
+  synthetic threads gets caught by thread admission, not the event vocabulary.
+- Listener flags are a uniform `*Match` family of optional booleans: `ingressMatch`
+  (renamed from `ingress` — parallel to `detailMatch`) and `detailMatch`
+  (migrated from the `'valid'`/`'invalid'` vocabulary to booleans). Shared schema
+  shape for both: `{ type: 'boolean', enum: [true, false], nullable: true }` —
+  `nullable` is required by `JSONSchemaType` for optional properties; the `enum`
+  rejects `null` loudly at registration (a null flag must be an `add_thread_error`,
+  never a silently-dead waiter or a silently-inert block guard).
+  - `ingressMatch`: absent = matches any channel (backward compatible); `true` =
+    external-trigger-origin only; `false` = request-origin only. Backpressure on
+    external events is an `ingressMatch: true` block listener.
+  - `detailMatch`: `true` = `'valid'` (match conforming details); `false` =
+    `'invalid'` (match non-conforming); **absent keeps the conforming-required
+    default** — absent does NOT become unrestricted.
+  - Matching lands in the single `isListeningFor` seam, so waitFor/block/interrupt/
+    transform get both flags uniformly.
+  - Rename scope: the listener FIELD only. The bid/candidate provenance stamps
+    (`RunningBid.ingress`, `CandidateBid.ingress`, trace `selected.ingress`,
+    `frontier.ts` replay branches) remain `ingress`.
+- `useTrigger(space)` → `trigger(event)`: the event carries `space` (absent = root),
+  no partial application on the external surface. Asymmetry is principled:
+  registration is a space-scoped *capability* (partial application); event
+  admission is unscoped-but-flagged *data* (listeners decide via ingress + space).
+- Internal re-entry steps via a **contentless trigger kick**: the re-entering
+  code adds its `once` thread (`request`ing the result event) through
+  `useAddThread`, then calls `trigger({ type: <kick> })` to start the
+  super-step. `useAddThread` stays inert (idle-until-trigger quiescence is
+  preserved — pure-requesting programs like tic-tac-toe/water do not
+  self-start at registration); the program advances only when an event enters
+  via `trigger`. Contract: nothing ever listens to, waits for, or blocks the
+  kick type — it carries no detail and no semantics; an external actor
+  triggering it is harmless by construction. The kick becomes permanent event
+  vocabulary (append-only log, replay, reference traces) — name it deliberately.
+- Docs deliverable: `references/behavioral.md` action-channel paragraph (~lines
+  120–139), the listener table, and the `trigger_error` row (~205) must update in the
+  same commit; the `useAddThread`-doesn't-step gotcha paragraph may flip (see Open
+  Questions).
+
 ### 2026-09-09 — Architecture diagram lives in README (WIP research phase)
 
 - Pilot asked for a graphic of the harness flow (model-as-tool + behavioral-thread
@@ -545,6 +595,14 @@ repo and risks staleness.
   handler iterates for `$root`. **Pending: not yet implemented.**
 
 ## Open Questions
+
+- **Phase-text fold pending pilot approval (the ingress refactor has landed).**
+  Phase 1 ("results re-trigger respond", stream-adapter handler "triggers each
+  as a b-event as-is"), Phase 3.5 Slice F, Phase 5 (permission flow triggers),
+  and the 2024-09-03 action-channel open-question text all describe internal
+  re-entry via `trigger` — fold to the once-thread + kick wording (see
+  Decision Log 2026-09-12). All other ingress open questions are resolved in
+  the Decision Log entry.
 
 - **The autoresearch loop's task-success metric (Q8/C) — RESOLVED (2026-09-09).**
   The per-candidate keep/discard gate is **`frontier-verify` (safety) AND

@@ -16,7 +16,7 @@ different purpose.
 The capture primitive is `useTrace`, returned by `behavioral()` (in-repo at
 `src/behavioral/behavioral.ts` — not a public package export; there is no
 root `@behavioral/sh` export). The engine returns three hooks:
-`{ useAddThread, useTrigger, useTrace }`.
+`{ useAddThread, trigger, useTrace }`.
 
 ```ts
 import { behavioral } from '../../behavioral/behavioral.ts'
@@ -65,7 +65,7 @@ import { behavioral } from '../../behavioral/behavioral.ts'
 
 // 1. Construct the program. No generic parameter — the Trace union is closed.
 const program = behavioral()
-const { useTrace, useAddThread, useTrigger } = program
+const { useTrace, useAddThread, trigger } = program
 
 // 2. Subscribe a capture listener. It receives the engine's Trace variants
 //    in publication order.
@@ -88,7 +88,7 @@ useTrace((msg) => {
 ```
 
 The behavioral program itself (threads, triggers) is wired with `useAddThread`
-/ `useTrigger` as usual — see [behavioral](./behavioral.md). The capture layer
+/ `trigger` as usual — see [behavioral](./behavioral.md). The capture layer
 is orthogonal: it observes the program's execution via `useTrace` and bridges
 the agent SDK's lifecycle into the same sink via the SDK's own subscription.
 
@@ -180,4 +180,4 @@ implementation.
 
 - [frontier-analysis](./frontier-analysis.md) — divergence analysis over a captured `Thread[]` + messages.
 - [Auto-research](./autoresearch.md) — the iterative hill-climb use of the same capture primitives.
-- [behavioral](./behavioral.md) — wiring the behavioral program itself (`useAddThread`, `useTrigger`, `useTrace`).
+- [behavioral](./behavioral.md) — wiring the behavioral program itself (`useAddThread`, `trigger`, `useTrace`).

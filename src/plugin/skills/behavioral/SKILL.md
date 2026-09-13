@@ -45,7 +45,7 @@ only when the task calls for it.
 
 | When the task involves… | Read |
 |-------------------------|------|
-| Behavioral programs — b-threads, `useAddThread`/`useTrigger`/`useTrace`, the super-step model, the action-channel pattern | [`references/behavioral.md`](./references/behavioral.md) |
+| Behavioral programs — b-threads, `useAddThread`/`trigger`/`useTrace`, the super-step model, the action-channel pattern | [`references/behavioral.md`](./references/behavioral.md) |
 | Deadlock/livelock verification — frontier analysis over the closed state graph | [`references/frontier-analysis.md`](./references/frontier-analysis.md) |
 | UI layer — the browser Controller protocol (`render`/`attrs`/`scale_check`, `ui_event`/`snapshot`/`error`/`success`/`scale_check_result`/`form_submit`) and the stateless SSR html tools (`html-render`/`html-update-attributes`/`html-scale-check`) | [`references/controller.md`](./references/controller.md) |
 | Capturing/grading an agent run — eval trace primitives, divergence analysis | [`references/eval.md`](./references/eval.md) |

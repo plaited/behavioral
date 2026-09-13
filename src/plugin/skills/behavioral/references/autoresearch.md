@@ -36,7 +36,7 @@ behavioral does not ship the loop.
 The capture primitive is `useTrace`, returned by `behavioral()` (in-repo at
 `src/behavioral/behavioral.ts` — not a public package export; there is no
 root `@behavioral/sh` export). The engine returns three hooks:
-`{ useAddThread, useTrigger, useTrace }`. The `Trace` union is closed — there
+`{ useAddThread, trigger, useTrace }`. The `Trace` union is closed — there
 is no generic parameter and no `sendTrace`; agent-lifecycle events are
 captured via the agent SDK's own subscription, correlated with engine traces
 by timestamp.
@@ -80,13 +80,13 @@ async function runOneExperiment(
   budgetMs: number,
 ): Promise<{ events: Array<{ kind: string; timestamp: number }>; metric: number }> {
   const program = behavioral()
-  const { useTrace, useAddThread, useTrigger } = program
+  const { useTrace, useAddThread, trigger } = program
 
   const events = []
   useTrace((msg) => { events.push(msg) })  // callback is the sink
 
   for (const t of threads) useAddThread()(t)
-  for (const trig of triggers) useTrigger()(trig)
+  for (const trig of triggers) trigger(trig)
   // ...capture agent-lifecycle events via the agent SDK's own subscription,
   //    written to the same `events` sink, correlated by timestamp...
 
