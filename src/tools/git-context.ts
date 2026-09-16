@@ -1,13 +1,14 @@
 /**
- * Structured git context tool.
+ * Structured git context tools.
  *
  * @remarks
- * Four modes via the `mode` discriminant: status, history, worktrees, and
- * context. Returns structured JSON instead of raw git output so agents can
- * consume results directly without parsing.
+ * Four `useTool` units — git-status, git-history, git-worktrees, and the
+ * combined git-context — returning structured JSON instead of raw git
+ * output so agents can consume results directly without parsing.
  *
- * Verbatim port of the removed `src/cli/git-context.ts` (Zod CLI) to a
- * `useTool` unit with AJV schemas. Input/output shapes are unchanged.
+ * Ported from the removed `src/cli/git-context.ts` (Zod CLI): same logic and
+ * output shapes minus the old `mode` discriminant, which the per-tool split
+ * makes redundant.
  *
  * @internal
  */
@@ -21,14 +22,10 @@ import { useTool } from './use-tool.ts'
 // Constants
 // ============================================================================
 
+export const GIT_STATUS_TOOL_NAME = 'git-status'
+export const GIT_HISTORY_TOOL_NAME = 'git-history'
+export const GIT_WORKTREES_TOOL_NAME = 'git-worktrees'
 export const GIT_CONTEXT_TOOL_NAME = 'git-context'
-
-const GIT_MODES = {
-  status: 'status',
-  history: 'history',
-  worktrees: 'worktrees',
-  context: 'context',
-} as const
 
 const DEFAULT_HISTORY_LIMIT = 20
 const MAX_HISTORY_LIMIT = 200
@@ -112,7 +109,6 @@ export type GitDirtySummary = {
 
 export type GitStatusOutput = {
   ok: true
-  mode: 'status'
   repoRoot: string
   branch: string | null
   head: string
@@ -124,7 +120,6 @@ export type GitStatusOutput = {
 
 export type GitHistoryOutput = {
   ok: true
-  mode: 'history'
   repoRoot: string
   base: string
   baseHead: string | null
@@ -144,7 +139,6 @@ export type GitHistoryOutput = {
 
 export type GitWorktreesOutput = {
   ok: true
-  mode: 'worktrees'
   repoRoot: string
   currentWorktree: string
   worktrees: GitWorktreeEntry[]
@@ -154,7 +148,6 @@ export type GitWorktreesOutput = {
 
 export type GitContextOutput = {
   ok: true
-  mode: 'context'
   repoRoot: string
   branch: string | null
   head: string
@@ -177,26 +170,24 @@ export type GitContextOutput = {
   suggestedNextCommands: string[]
 }
 
-export type GitContextInput =
-  | { mode: 'status'; cwd?: string }
-  | {
-      mode: 'history'
-      cwd?: string
-      base: string
-      paths?: string[]
-      limit?: number
-    }
-  | { mode: 'worktrees'; cwd?: string }
-  | {
-      mode: 'context'
-      cwd?: string
-      base: string
-      paths?: string[]
-      limit?: number
-      includeWorktrees?: boolean
-    }
+export type GitStatusInput = { cwd?: string }
 
-export type GitContextToolOutput = GitStatusOutput | GitHistoryOutput | GitWorktreesOutput | GitContextOutput
+export type GitHistoryInput = {
+  cwd?: string
+  base: string
+  paths?: string[]
+  limit?: number
+}
+
+export type GitWorktreesInput = { cwd?: string }
+
+export type GitContextInput = {
+  cwd?: string
+  base: string
+  paths?: string[]
+  limit?: number
+  includeWorktrees?: boolean
+}
 
 // ============================================================================
 // Schemas
@@ -280,7 +271,6 @@ const GitStatusOutputSchema = {
   type: 'object',
   properties: {
     ok: { type: 'boolean', const: true },
-    mode: { type: 'string', const: GIT_MODES.status },
     repoRoot: { type: 'string', minLength: 1 },
     branch: { type: 'string', nullable: true },
     head: { type: 'string', minLength: 1 },
@@ -289,7 +279,7 @@ const GitStatusOutputSchema = {
     warnings: { type: 'array', items: { type: 'string' } },
     suggestedNextCommands: { type: 'array', items: { type: 'string' } },
   },
-  required: ['ok', 'mode', 'repoRoot', 'branch', 'head', 'upstream', 'dirty', 'warnings', 'suggestedNextCommands'],
+  required: ['ok', 'repoRoot', 'branch', 'head', 'upstream', 'dirty', 'warnings', 'suggestedNextCommands'],
   additionalProperties: false,
 } as const
 
@@ -297,7 +287,6 @@ const GitHistoryOutputSchema = {
   type: 'object',
   properties: {
     ok: { type: 'boolean', const: true },
-    mode: { type: 'string', const: GIT_MODES.history },
     repoRoot: { type: 'string', minLength: 1 },
     base: { type: 'string', minLength: 1 },
     baseHead: { type: 'string', nullable: true },
@@ -321,7 +310,6 @@ const GitHistoryOutputSchema = {
   },
   required: [
     'ok',
-    'mode',
     'repoRoot',
     'base',
     'baseHead',
@@ -341,14 +329,13 @@ const GitWorktreesOutputSchema = {
   type: 'object',
   properties: {
     ok: { type: 'boolean', const: true },
-    mode: { type: 'string', const: GIT_MODES.worktrees },
     repoRoot: { type: 'string', minLength: 1 },
     currentWorktree: { type: 'string', minLength: 1 },
     worktrees: { type: 'array', items: GitWorktreeEntrySchema },
     warnings: { type: 'array', items: { type: 'string' } },
     suggestedNextCommands: { type: 'array', items: { type: 'string' } },
   },
-  required: ['ok', 'mode', 'repoRoot', 'currentWorktree', 'worktrees', 'warnings', 'suggestedNextCommands'],
+  required: ['ok', 'repoRoot', 'currentWorktree', 'worktrees', 'warnings', 'suggestedNextCommands'],
   additionalProperties: false,
 } as const
 
@@ -356,7 +343,6 @@ const GitContextOutputSchema = {
   type: 'object',
   properties: {
     ok: { type: 'boolean', const: true },
-    mode: { type: 'string', const: GIT_MODES.context },
     repoRoot: { type: 'string', minLength: 1 },
     branch: { type: 'string', nullable: true },
     head: { type: 'string', minLength: 1 },
@@ -385,7 +371,6 @@ const GitContextOutputSchema = {
   },
   required: [
     'ok',
-    'mode',
     'repoRoot',
     'branch',
     'head',
@@ -408,59 +393,45 @@ const GitContextOutputSchema = {
 const GitStatusInputSchema = {
   type: 'object',
   properties: {
-    mode: { type: 'string', const: GIT_MODES.status },
     cwd: { type: 'string', minLength: 1 },
   },
-  required: ['mode'],
+  required: [],
   additionalProperties: false,
 } as const
 
 const GitHistoryInputSchema = {
   type: 'object',
   properties: {
-    mode: { type: 'string', const: GIT_MODES.history },
     cwd: { type: 'string', minLength: 1 },
     base: { type: 'string', minLength: 1 },
     paths: { type: 'array', items: { type: 'string', minLength: 1 }, default: [] },
     limit: { type: 'integer', minimum: 1, maximum: MAX_HISTORY_LIMIT, default: DEFAULT_HISTORY_LIMIT },
   },
-  required: ['mode', 'base'],
+  required: ['base'],
   additionalProperties: false,
 } as const
 
 const GitWorktreesInputSchema = {
   type: 'object',
   properties: {
-    mode: { type: 'string', const: GIT_MODES.worktrees },
     cwd: { type: 'string', minLength: 1 },
   },
-  required: ['mode'],
+  required: [],
   additionalProperties: false,
 } as const
 
 const GitContextInputSchema = {
   type: 'object',
   properties: {
-    mode: { type: 'string', const: GIT_MODES.context },
     cwd: { type: 'string', minLength: 1 },
     base: { type: 'string', minLength: 1 },
     paths: { type: 'array', items: { type: 'string', minLength: 1 }, default: [] },
     limit: { type: 'integer', minimum: 1, maximum: MAX_HISTORY_LIMIT, default: DEFAULT_HISTORY_LIMIT },
     includeWorktrees: { type: 'boolean', default: false },
   },
-  required: ['mode', 'base'],
+  required: ['base'],
   additionalProperties: false,
 } as const
-
-export const GitContextToolInputSchema = {
-  oneOf: [GitStatusInputSchema, GitHistoryInputSchema, GitWorktreesInputSchema, GitContextInputSchema],
-  description: 'Git context input — run git status, history, worktrees, or combined context via the mode discriminant',
-} as unknown as JSONSchemaType<GitContextInput>
-
-export const GitContextToolOutputSchema = {
-  oneOf: [GitStatusOutputSchema, GitHistoryOutputSchema, GitWorktreesOutputSchema, GitContextOutputSchema],
-  description: 'Git context output — one of four mode-specific result shapes',
-} as unknown as JSONSchemaType<GitContextToolOutput>
 
 // ============================================================================
 // Helpers
@@ -1012,7 +983,6 @@ const collectStatus = async ({ cwd }: { cwd: string }): Promise<GitStatusOutput>
 
   return {
     ok: true,
-    mode: GIT_MODES.status,
     repoRoot,
     branch,
     head,
@@ -1147,7 +1117,6 @@ const collectHistory = async ({
 
   return {
     ok: true,
-    mode: GIT_MODES.history,
     repoRoot,
     base,
     baseHead,
@@ -1193,7 +1162,6 @@ const collectWorktreeContext = async ({ cwd }: { cwd: string }): Promise<GitWork
 
   return {
     ok: true,
-    mode: GIT_MODES.worktrees,
     repoRoot,
     currentWorktree: toRepoPath({ repoRoot, absolutePath: currentWorktree }),
     worktrees,
@@ -1206,13 +1174,7 @@ const collectWorktreeContext = async ({ cwd }: { cwd: string }): Promise<GitWork
   }
 }
 
-const collectContext = async (input: {
-  cwd?: string
-  base: string
-  paths?: string[]
-  limit?: number
-  includeWorktrees?: boolean
-}): Promise<GitContextOutput> => {
+const collectContext = async (input: GitContextInput): Promise<GitContextOutput> => {
   const cwd = resolve(input.cwd ?? process.cwd())
 
   const [status, history] = await Promise.all([
@@ -1228,7 +1190,6 @@ const collectContext = async (input: {
 
   return {
     ok: true,
-    mode: GIT_MODES.context,
     repoRoot: history.repoRoot,
     branch: status.branch,
     head: status.head,
@@ -1253,41 +1214,61 @@ const collectContext = async (input: {
 }
 
 // ============================================================================
-// Tool
+// Tools
 // ============================================================================
 
-const runGitMode = async (input: GitContextInput): Promise<GitContextToolOutput> => {
-  const cwd = resolve(input.cwd ?? process.cwd())
+const resolveCwd = (cwd?: string): string => resolve(cwd ?? process.cwd())
 
-  switch (input.mode) {
-    case GIT_MODES.status:
-      return collectStatus({ cwd })
-    case GIT_MODES.history:
-      return collectHistory({
-        cwd,
-        base: input.base,
-        paths: input.paths,
-        limit: input.limit,
-      })
-    case GIT_MODES.worktrees:
-      return collectWorktreeContext({ cwd })
-    case GIT_MODES.context:
-      return collectContext(input)
-  }
-}
+/** git status — branch, HEAD, upstream, and dirty file lists as structured JSON. */
+export const gitStatus = useTool(
+  {
+    name: GIT_STATUS_TOOL_NAME,
+    description:
+      'Run git status — branch, HEAD, upstream, and staged/unstaged/untracked file lists as structured JSON, with dirty and missing-upstream warnings plus suggested next git commands.',
+    inputSchema: GitStatusInputSchema as unknown as JSONSchemaType<GitStatusInput>,
+    outputSchema: GitStatusOutputSchema as unknown as JSONSchemaType<GitStatusOutput>,
+  },
+  (input) => collectStatus({ cwd: resolveCwd(input.cwd) }),
+)
 
-/**
- * Structured git context — status, history, worktrees, or combined context as
- * JSON instead of raw git output, so agents consume results directly without
- * parsing.
- */
+/** git history — merge-base, commits, changed files, and per-path history against a base ref. */
+export const gitHistory = useTool(
+  {
+    name: GIT_HISTORY_TOOL_NAME,
+    description:
+      'Run git history against a base ref — merge-base, commits since base, changed files, and per-path history as structured JSON, with broad-change and deleted-file warnings plus suggested next git commands.',
+    inputSchema: GitHistoryInputSchema as unknown as JSONSchemaType<GitHistoryInput>,
+    outputSchema: GitHistoryOutputSchema as unknown as JSONSchemaType<GitHistoryOutput>,
+  },
+  (input) =>
+    collectHistory({
+      cwd: resolveCwd(input.cwd),
+      base: input.base,
+      paths: input.paths,
+      limit: input.limit,
+    }),
+)
+
+/** git worktrees — parsed worktree list with lock/prune metadata. */
+export const gitWorktrees = useTool(
+  {
+    name: GIT_WORKTREES_TOOL_NAME,
+    description:
+      'List git worktrees — parsed porcelain entries with lock/prune metadata, on-disk existence checks, and the current worktree flagged, as structured JSON.',
+    inputSchema: GitWorktreesInputSchema as unknown as JSONSchemaType<GitWorktreesInput>,
+    outputSchema: GitWorktreesOutputSchema as unknown as JSONSchemaType<GitWorktreesOutput>,
+  },
+  (input) => collectWorktreeContext({ cwd: resolveCwd(input.cwd) }),
+)
+
+/** git context — combined status + history against a base ref in one call. */
 export const gitContext = useTool(
   {
     name: GIT_CONTEXT_TOOL_NAME,
     description:
-      'Structured git context for agents — one of four modes via the mode discriminant: status (branch, HEAD, upstream, staged/unstaged/untracked files), history (merge-base, commits, changed files, per-path history), worktrees (parsed worktree list with lock/prune metadata), or context (combined status + history + optional worktrees). Returns JSON instead of raw git output.',
-    inputSchema: GitContextToolInputSchema,
-    outputSchema: GitContextToolOutputSchema,
+      'Combined git context — status (branch, HEAD, upstream, dirty files) plus history against a base ref (merge-base, commits, changed files, per-path history) in one call, with optional worktrees included.',
+    inputSchema: GitContextInputSchema as unknown as JSONSchemaType<GitContextInput>,
+    outputSchema: GitContextOutputSchema as unknown as JSONSchemaType<GitContextOutput>,
   },
-  runGitMode,
+  collectContext,
 )

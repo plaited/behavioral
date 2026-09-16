@@ -25,8 +25,12 @@ describe('behavioral tools', () => {
     expect(code).toBe(0)
     expect(stderr).toContain('Usage: tools')
     expect(stderr).toContain('frontier-replay')
+    expect(stderr).toContain('git-status')
+    expect(stderr).toContain('git-history')
+    expect(stderr).toContain('git-worktrees')
     expect(stderr).toContain('git-context')
-    expect(stderr).toContain('typescript-lsp')
+    expect(stderr).toContain('typescript-execute')
+    expect(stderr).toContain('typescript-discover')
     expect(stderr).toContain('plugin-loader')
   })
 
@@ -37,27 +41,28 @@ describe('behavioral tools', () => {
     const output = JSON.parse(stdout)
     expect(output.command).toBe('tools')
     expect(Array.isArray(output.tools)).toBe(true)
-    expect(output.tools.length).toBeGreaterThanOrEqual(26)
-    const gitContext = output.tools.find((t: { name: string }) => t.name === 'git-context')
-    expect(gitContext?.description).toBeString()
+    expect(output.tools.length).toBeGreaterThanOrEqual(30)
+    const gitHistory = output.tools.find((t: { name: string }) => t.name === 'git-history')
+    expect(gitHistory?.description).toBeString()
     const names = output.tools.map((t: { name: string }) => t.name)
     expect(new Set(names).size).toBe(names.length)
   })
 
-  test('--schema input --tool git-context resolves the tool input schema', async () => {
-    const { code, stdout } = await runTools(['--schema', 'input', '--tool', 'git-context'])
+  test('--schema input --tool git-history resolves the tool input schema', async () => {
+    const { code, stdout } = await runTools(['--schema', 'input', '--tool', 'git-history'])
 
     expect(code).toBe(0)
     const schema = JSON.parse(stdout)
-    expect(schema.oneOf).toHaveLength(4)
+    expect(schema.properties).toHaveProperty('base')
+    expect(schema.properties).toHaveProperty('paths')
   })
 
-  test('--schema output --tool typescript-lsp resolves the tool output schema', async () => {
-    const { code, stdout } = await runTools(['--schema', 'output', '--tool', 'typescript-lsp'])
+  test('--schema output --tool typescript-lsp-discover resolves the tool output schema', async () => {
+    const { code, stdout } = await runTools(['--schema', 'output', '--tool', 'typescript-discover'])
 
     expect(code).toBe(0)
     const schema = JSON.parse(stdout)
-    expect(schema.oneOf).toHaveLength(2)
+    expect(schema.properties).toHaveProperty('capabilities')
   })
 
   test('--schema input without --tool prints the dispatch envelope schema', async () => {
@@ -77,22 +82,20 @@ describe('behavioral tools', () => {
   })
 
   test('invokes a tool by name and prints its validated output', async () => {
-    const { code, stdout } = await runTools([JSON.stringify({ tool: 'typescript-lsp', input: { mode: 'discover' } })])
+    const { code, stdout } = await runTools([JSON.stringify({ tool: 'typescript-discover', input: {} })])
 
     expect(code).toBe(0)
     const output = JSON.parse(stdout)
-    expect(output.mode).toBe('discover')
     expect(output.capabilities.length).toBeGreaterThan(0)
   })
 
-  test('applies declared input defaults at dispatch (git-context history)', async () => {
+  test('applies declared input defaults at dispatch (git-history)', async () => {
     const { code, stdout } = await runTools([
-      JSON.stringify({ tool: 'git-context', input: { mode: 'history', cwd: repoRoot, base: 'dev' } }),
+      JSON.stringify({ tool: 'git-history', input: { cwd: repoRoot, base: 'dev' } }),
     ])
 
     expect(code).toBe(0)
     const output = JSON.parse(stdout)
-    expect(output.mode).toBe('history')
     expect(output.paths).toEqual([])
     expect(output.summary.commitCountSinceBase).toBeGreaterThanOrEqual(0)
   })
@@ -104,23 +107,20 @@ describe('behavioral tools', () => {
   })
 
   test('rejects input that fails the named tool input schema with exit 2', async () => {
-    const { code, stderr } = await runTools([JSON.stringify({ tool: 'typescript-lsp', input: { mode: 'bogus' } })])
+    const { code, stderr } = await runTools([JSON.stringify({ tool: 'git-history', input: { cwd: repoRoot } })])
 
     expect(code).toBe(2)
-    expect(stderr).toContain('oneOf')
+    expect(stderr).toContain('required')
   })
 
   test('--dry-run prints the dispatch envelope without executing', async () => {
-    const { code, stdout } = await runTools([
-      JSON.stringify({ tool: 'typescript-lsp', input: { mode: 'discover' } }),
-      '--dry-run',
-    ])
+    const { code, stdout } = await runTools([JSON.stringify({ tool: 'typescript-discover', input: {} }), '--dry-run'])
 
     expect(code).toBe(0)
     const output = JSON.parse(stdout)
     expect(output).toEqual({
       command: 'tools',
-      input: { tool: 'typescript-lsp', input: { mode: 'discover' } },
+      input: { tool: 'typescript-discover', input: {} },
       dryRun: true,
     })
   })

@@ -26,7 +26,7 @@ import {
   discoveryUpdate,
 } from '../tools/discovery.ts'
 import { frontierExplore, frontierReplay, frontierVerify } from '../tools/frontier.ts'
-import { gitContext } from '../tools/git-context.ts'
+import { gitContext, gitHistory, gitStatus, gitWorktrees } from '../tools/git-context.ts'
 import {
   htmlRender,
   htmlScaleCheck,
@@ -45,7 +45,7 @@ import {
 } from '../tools/mcp-client.ts'
 import { pluginLoader } from '../tools/plugin-loader.ts'
 import { skillDiscover, skillListResources, skillRead } from '../tools/skill-client.ts'
-import { typescriptLsp } from '../tools/typescript-lsp.ts'
+import { typescriptLspDiscover, typescriptLspExecute } from '../tools/typescript-lsp.ts'
 import { ajv } from '../tools/use-tool.ts'
 import { makeCli } from './cli.ts'
 
@@ -105,8 +105,12 @@ const FLEET: FleetEntry[] = [
   entry(skillDiscover),
   entry(skillRead),
   entry(skillListResources),
+  entry(gitStatus),
+  entry(gitHistory),
+  entry(gitWorktrees),
   entry(gitContext),
-  entry(typescriptLsp),
+  entry(typescriptLspExecute),
+  entry(typescriptLspDiscover),
 ]
 
 const registry = new Map(FLEET.map((tool) => [tool.name, tool]))

@@ -1,16 +1,17 @@
 /**
- * TypeScript LSP tool — TypeScript 7 native API passthrough.
+ * TypeScript LSP tools — TypeScript 7 native API passthrough.
  *
  * @remarks
  * Replaces the old typescript-language-server (which needed tsserver.js,
  * removed in TS 5.8+) with TypeScript 7's native async API.
  *
- * Two modes via the `mode` discriminant:
- *   - `execute`: open file, run method handlers, return results
- *   - `discover`: return list of supported method→capability mappings
+ * Two `useTool` units:
+ *   - `typescript-lsp-execute`: open file, run method handlers, return results
+ *   - `typescript-lsp-discover`: return supported method→capability mappings
  *
- * Verbatim port of the removed `src/cli/typescript-lsp.ts` (Zod CLI) to a
- * `useTool` unit with AJV schemas. Input/output shapes are unchanged.
+ * Ported from the removed `src/cli/typescript-lsp.ts` (Zod CLI): same logic
+ * and output shapes minus the old `mode` discriminant, which the per-tool
+ * split makes redundant.
  *
  * @internal
  */
@@ -36,7 +37,8 @@ import { useTool } from './use-tool.ts'
 // Constants
 // ============================================================================
 
-export const TYPESCRIPT_LSP_TOOL_NAME = 'typescript-lsp'
+export const TYPESCRIPT_EXECUTE_TOOL_NAME = 'typescript-execute'
+export const TYPESCRIPT_DISCOVER_TOOL_NAME = 'typescript-discover'
 
 // ============================================================================
 // Helpers
@@ -307,23 +309,19 @@ export type LspExecuteRequest = {
   params?: unknown
 }
 
-export type TypeScriptLspInput =
-  | {
-      /** Execute LSP-style requests against a file */
-      mode: 'execute'
-      /** Path to a TypeScript/JavaScript file */
-      file: string
-      /** Workspace root for file:// URI resolution */
-      rootDir?: string
-      /** Requests to execute in a single session */
-      requests: LspExecuteRequest[]
-    }
-  | {
-      /** Discover available LSP methods supported by the server */
-      mode: 'discover'
-      /** Workspace root for file:// URI resolution */
-      rootDir?: string
-    }
+export type TypeScriptLspExecuteInput = {
+  /** Path to a TypeScript/JavaScript file */
+  file: string
+  /** Workspace root for file:// URI resolution */
+  rootDir?: string
+  /** Requests to execute in a single session */
+  requests: LspExecuteRequest[]
+}
+
+export type TypeScriptLspDiscoverInput = {
+  /** Workspace root for file:// URI resolution */
+  rootDir?: string
+}
 
 export type LspExecuteResult = {
   /** LSP method that was called */
@@ -335,7 +333,6 @@ export type LspExecuteResult = {
 }
 
 export type LspExecuteOutput = {
-  mode: 'execute'
   /** Relative path to the analyzed file */
   file: string
   /** Results array matching input requests order */
@@ -343,7 +340,6 @@ export type LspExecuteOutput = {
 }
 
 export type LspDiscoverOutput = {
-  mode: 'discover'
   /** Supported LSP methods from TypeScript 7 API */
   capabilities: Array<{
     /** LSP method name */
@@ -353,16 +349,13 @@ export type LspDiscoverOutput = {
   }>
 }
 
-export type TypeScriptLspOutput = LspExecuteOutput | LspDiscoverOutput
-
 // ============================================================================
 // Schemas
 // ============================================================================
 
-const ExecuteModeSchema = {
+const ExecuteInputSchema = {
   type: 'object',
   properties: {
-    mode: { type: 'string', const: 'execute', description: 'Execute LSP-style requests against a file' },
     file: { type: 'string', minLength: 1, description: 'Path to a TypeScript/JavaScript file' },
     rootDir: { type: 'string', default: '.', description: 'Workspace root for file:// URI resolution' },
     requests: {
@@ -380,76 +373,70 @@ const ExecuteModeSchema = {
       },
     },
   },
-  required: ['mode', 'file', 'requests'],
+  required: ['file', 'requests'],
   additionalProperties: false,
   description: 'Execute LSP-style requests against a file in a single server session',
 } as const
 
-const DiscoverModeSchema = {
+const DiscoverInputSchema = {
   type: 'object',
   properties: {
-    mode: { type: 'string', const: 'discover', description: 'Discover available LSP methods supported by the server' },
     rootDir: { type: 'string', default: '.', description: 'Workspace root for file:// URI resolution' },
   },
-  required: ['mode'],
+  required: [],
   additionalProperties: false,
   description: 'Discover TypeScript 7 API capabilities',
 } as const
 
-export const TypeScriptLspInputSchema = {
-  oneOf: [ExecuteModeSchema, DiscoverModeSchema],
-  description: 'TypeScript LSP tool input',
-} as unknown as JSONSchemaType<TypeScriptLspInput>
+export const TypeScriptLspExecuteInputSchema =
+  ExecuteInputSchema as unknown as JSONSchemaType<TypeScriptLspExecuteInput>
 
-export const TypeScriptLspOutputSchema = {
-  oneOf: [
-    {
-      type: 'object',
-      properties: {
-        mode: { type: 'string', const: 'execute' },
-        file: { type: 'string', description: 'Relative path to the analyzed file' },
-        results: {
-          type: 'array',
-          description: 'Results array matching input requests order',
-          items: {
-            type: 'object',
-            properties: {
-              method: { type: 'string', description: 'LSP method that was called' },
-              result: { description: 'Successful response payload' },
-              error: { type: 'string', description: 'Error message if the request failed' },
-            },
-            required: ['method'],
-            additionalProperties: false,
-          },
+export const TypeScriptLspExecuteOutputSchema = {
+  type: 'object',
+  properties: {
+    file: { type: 'string', description: 'Relative path to the analyzed file' },
+    results: {
+      type: 'array',
+      description: 'Results array matching input requests order',
+      items: {
+        type: 'object',
+        properties: {
+          method: { type: 'string', description: 'LSP method that was called' },
+          result: { description: 'Successful response payload' },
+          error: { type: 'string', description: 'Error message if the request failed' },
         },
+        required: ['method'],
+        additionalProperties: false,
       },
-      required: ['mode', 'file', 'results'],
-      additionalProperties: false,
     },
-    {
-      type: 'object',
-      properties: {
-        mode: { type: 'string', const: 'discover' },
-        capabilities: {
-          type: 'array',
-          description: 'Supported LSP methods from TypeScript 7 API',
-          items: {
-            type: 'object',
-            properties: {
-              method: { type: 'string', description: 'LSP method name' },
-              capability: { type: 'string', description: 'LSP capability flag name (from TypeScript 7 API)' },
-            },
-            required: ['method', 'capability'],
-            additionalProperties: false,
-          },
+  },
+  required: ['file', 'results'],
+  additionalProperties: false,
+} as unknown as JSONSchemaType<LspExecuteOutput>
+
+export const TypeScriptLspDiscoverInputSchema =
+  DiscoverInputSchema as unknown as JSONSchemaType<TypeScriptLspDiscoverInput>
+
+export const TypeScriptLspDiscoverOutputSchema = {
+  type: 'object',
+  properties: {
+    capabilities: {
+      type: 'array',
+      description: 'Supported LSP methods from TypeScript 7 API',
+      items: {
+        type: 'object',
+        properties: {
+          method: { type: 'string', description: 'LSP method name' },
+          capability: { type: 'string', description: 'LSP capability flag name (from TypeScript 7 API)' },
         },
+        required: ['method', 'capability'],
+        additionalProperties: false,
       },
-      required: ['mode', 'capabilities'],
-      additionalProperties: false,
     },
-  ],
-  description: 'TypeScript LSP tool output',
-} as unknown as JSONSchemaType<TypeScriptLspOutput>
+  },
+  required: ['capabilities'],
+  additionalProperties: false,
+} as unknown as JSONSchemaType<LspDiscoverOutput>
 
 // ============================================================================
 // executeLsp — run requests against a file
@@ -463,9 +450,7 @@ export const TypeScriptLspOutputSchema = {
  * request via the TS 7 API, then stops the server. Each request is
  * independent — if one fails, the others still run.
  */
-export const executeLsp = async (
-  input: Extract<TypeScriptLspInput, { mode: 'execute' }>,
-): Promise<LspExecuteOutput> => {
+export const executeLsp = async (input: TypeScriptLspExecuteInput): Promise<LspExecuteOutput> => {
   const rootDir = resolve(input.rootDir ?? '.')
   const absolutePath = resolveFilePath(input.file, rootDir)
 
@@ -504,7 +489,7 @@ export const executeLsp = async (
         }
       }
 
-      return { mode: 'execute', file: makeDisplayPath(absolutePath, rootDir), results }
+      return { file: makeDisplayPath(absolutePath, rootDir), results }
     } finally {
       snap.dispose()
     }
@@ -521,39 +506,36 @@ export const executeLsp = async (
 // discover — list server capabilities
 // ============================================================================
 
-const handleDiscover = async (): Promise<LspDiscoverOutput> => {
-  const capabilities = Object.entries(CAPABILITY_TO_METHOD).map(([capability, method]) => ({
+const discoverCapabilities = (): LspDiscoverOutput['capabilities'] =>
+  Object.entries(CAPABILITY_TO_METHOD).map(([capability, method]) => ({
     method,
     capability,
   }))
 
-  return { mode: 'discover', capabilities }
-}
-
 // ============================================================================
-// Tool
+// Tools
 // ============================================================================
 
-const runLspMode = async (input: TypeScriptLspInput): Promise<TypeScriptLspOutput> => {
-  if (input.mode === 'discover') {
-    return handleDiscover()
-  }
-  return executeLsp(input)
-}
-
-/**
- * LSP-style queries over the TypeScript 7 native API — execute mode opens a
- * file and runs LSP method requests (documentSymbol, hover, completion,
- * definition) in a single server session; discover mode lists the supported
- * method→capability mappings.
- */
-export const typescriptLsp = useTool(
+/** Open a file and run LSP method requests in a single TypeScript 7 server session. */
+export const typescriptLspExecute = useTool(
   {
-    name: TYPESCRIPT_LSP_TOOL_NAME,
+    name: TYPESCRIPT_EXECUTE_TOOL_NAME,
     description:
-      'LSP-style queries over the TypeScript 7 native API. Two modes via the mode discriminant: execute (open a file and run LSP method requests — documentSymbol, hover, completion, definition — in a single server session) and discover (list the supported method→capability mappings). Each request is independent; a failed request becomes an error entry while the others still run.',
-    inputSchema: TypeScriptLspInputSchema,
-    outputSchema: TypeScriptLspOutputSchema,
+      'Execute LSP-style method requests — documentSymbol, hover, completion, definition — against a TypeScript/JavaScript file in a single TypeScript 7 native server session. Each request is independent; a failed request becomes an error entry while the others still run.',
+    inputSchema: TypeScriptLspExecuteInputSchema,
+    outputSchema: TypeScriptLspExecuteOutputSchema,
   },
-  runLspMode,
+  executeLsp,
+)
+
+/** List the supported LSP methods from TypeScript 7's native API. */
+export const typescriptLspDiscover = useTool(
+  {
+    name: TYPESCRIPT_DISCOVER_TOOL_NAME,
+    description:
+      'Discover the supported LSP method→capability mappings (documentSymbol, hover, completion, definition) from TypeScript 7 native API. No server spawn needed.',
+    inputSchema: TypeScriptLspDiscoverInputSchema,
+    outputSchema: TypeScriptLspDiscoverOutputSchema,
+  },
+  () => ({ capabilities: discoverCapabilities() }),
 )
