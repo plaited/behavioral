@@ -28,7 +28,7 @@
   },
   "type": "module",
   "exports": {
-    "./tools": "./src/tools.ts",
+    "./cli": "./src/cli.ts",
     "./controller": "./src/controller.ts",
     "./utils": "./src/utils.ts"
   },
