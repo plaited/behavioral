@@ -77,14 +77,15 @@ and the impact is broad or unclear, expand coverage until the affected surface i
 **`src/kernel/`** — the irreducible coordination floor: `behavioral()`, threads, the dispatch
 bridge, OAuth. Not removable; without it there is no turn cycle, no spec-event streaming, no tool
 dispatch.
-**`src/tools/`** — agent tools as stateless `useTool` units (`src/tools/use-tool.ts`), each with
-AJV `JSONSchemaType` input/output schemas. `plugin-loader.ts` parses `plugin.json`; the rest
-(`read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`, `html`, `frontier`, `model`, `mcp-client`,
-`skill-client`, `discovery`) are the tool fleet.
+**`src/tools/`** — the tool fleet: stateless `useTool` units (`src/tools/use-tool.ts`), each with
+AJV `JSONSchemaType` input/output schemas (`discovery`, `frontier`, `html`, `mcp-client`, `plugin-loader`,
+`skill-client`, `git-context`, `typescript-lsp`). Dispatched from the CLI via `behavioral tools`.
 **`src/behavioral/`** — the behavioral runtime: types, constants, utils.
 **`src/controller/`** — the browser Controller, delegated listener, swap boundary.
 **`src/cli/`** — the `behavioral` CLI framework (`makeCliRouter`/`parseCli`) and its commands,
-registered in `bin/behavioral.ts`.
+registered in `bin/behavioral.ts`. `tools.ts` is the fleet dispatcher: `behavioral tools
+'{"tool":"<name>","input":{...}}'` invokes any fleet tool by name; bare `--schema` prints the
+fleet index and `--schema <input|output> --tool <name>` resolves a tool schema.
 **`src/utils/`** — shared pure utilities.
 **`tasks/`** — Harbor skill-authoring task specs (challenge content; not shipped, not a plugin).
 **`scripts/`** — repo setup and package-maintenance shell glue.
@@ -93,7 +94,8 @@ registered in `bin/behavioral.ts`.
 
 **CLI features** — a `makeCli` JSON-in/JSON-out command is exported through its `src/cli/<feature>.ts`
 module and registered in `bin/behavioral.ts`. Invoke as `behavioral <command> '<json>'`; each
-command supports `--schema <input|output>`, `--dry-run`, `--help`.
+command supports `--schema <input|output>`, `--dry-run`, `--help` (fleet commands additionally
+support bare `--schema` and `--tool <name>` schema addressing).
 
 ## GitHub CLI
 

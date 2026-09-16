@@ -1,3 +1,4 @@
+import type { ValidateFunction } from 'ajv'
 import Ajv2020 from 'ajv/dist/2020'
 import { B_FORM, B_SCALE, B_TARGET, B_TRIGGER, SCALE } from '../controller/controller.constants.ts'
 import { CSSPropertiesSchema, CUSTOM_PROPERTY_REF_PATTERN, validateCSSValue } from './css.schemas.ts'
@@ -1359,12 +1360,15 @@ export const ElementAttributeListSchema = {
   additionalProperties: DetailedHTMLAttributesSchema,
 }
 
-const attributeListValidator = ajv.compile(ElementAttributeListSchema)
+// Lazy compile: the attribute matrix is a ~4s AJV compile. Deferring it to
+// first use keeps `behavioral tools` startup fast for non-html dispatches.
+let attributeListValidator: ValidateFunction | undefined
 
 /**
  * Validates one CSS property value against its generated schema.
  * Custom properties ('--*') pass as string/number.
  */
 export const validateAttribute = (property: string, value: unknown): boolean => {
+  attributeListValidator ??= ajv.compile(ElementAttributeListSchema)
   return attributeListValidator({ [property]: value })
 }

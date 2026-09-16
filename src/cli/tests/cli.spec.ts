@@ -211,6 +211,88 @@ describe('CLI parsing (subprocess)', () => {
   })
 })
 
+describe('--tool schema resolution (subprocess)', () => {
+  const toolEval = (args: string, withTools: boolean) => [
+    'bun',
+    '-e',
+    `import { parseCli } from '${cliPath}'; await parseCli(${args}, { type: 'object', properties: {}, additionalProperties: false } as any, { name: 'fleet', outputSchema: { type: 'object', properties: {}, additionalProperties: false } as any, help: 'fleet',${
+      withTools
+        ? ` toolSchemas: { index: () => ({ tools: [{ name: 'alpha', description: 'Alpha tool' }] }), resolve: (target, tool) => tool === 'alpha' ? { type: 'object', properties: { [target]: { type: 'string' } } } : undefined },`
+        : ''
+    } })`,
+  ]
+
+  test('bare --schema prints the tool index when toolSchemas is provided', async () => {
+    const proc = Bun.spawn(toolEval("['--schema']", true), { stdout: 'pipe', stderr: 'pipe' })
+
+    expect(await proc.exited).toBe(0)
+    const output = JSON.parse(await new Response(proc.stdout).text())
+    expect(output.tools).toEqual([{ name: 'alpha', description: 'Alpha tool' }])
+  })
+
+  test('--schema input --tool <name> resolves that tool schema', async () => {
+    const proc = Bun.spawn(toolEval("['--schema', 'input', '--tool', 'alpha']", true), {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+
+    expect(await proc.exited).toBe(0)
+    const output = JSON.parse(await new Response(proc.stdout).text())
+    expect(output.properties).toHaveProperty('input')
+  })
+
+  test('--schema output --tool <name> resolves that tool output schema', async () => {
+    const proc = Bun.spawn(toolEval("['--schema', 'output', '--tool', 'alpha']", true), {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+
+    expect(await proc.exited).toBe(0)
+    const output = JSON.parse(await new Response(proc.stdout).text())
+    expect(output.properties).toHaveProperty('output')
+  })
+
+  test('--schema input --tool <unknown> exits 2', async () => {
+    const proc = Bun.spawn(toolEval("['--schema', 'input', '--tool', 'nope']", true), {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+
+    expect(await proc.exited).toBe(2)
+    const stderr = await new Response(proc.stderr).text()
+    expect(stderr).toContain('Unknown tool')
+  })
+
+  test('--schema input without --tool still prints the command input schema', async () => {
+    const proc = Bun.spawn(toolEval("['--schema', 'input']", true), { stdout: 'pipe', stderr: 'pipe' })
+
+    expect(await proc.exited).toBe(0)
+    const output = JSON.parse(await new Response(proc.stdout).text())
+    expect(output.type).toBe('object')
+  })
+
+  test('--tool without --schema exits 2', async () => {
+    const proc = Bun.spawn(toolEval("['--tool', 'alpha']", true), { stdout: 'pipe', stderr: 'pipe' })
+
+    expect(await proc.exited).toBe(2)
+  })
+
+  test('--tool is rejected for commands without toolSchemas', async () => {
+    const proc = Bun.spawn(toolEval("['--schema', 'input', '--tool', 'alpha']", false), {
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+
+    expect(await proc.exited).toBe(2)
+  })
+
+  test('bare --schema still exits 2 without toolSchemas', async () => {
+    const proc = Bun.spawn(toolEval("['--schema']", false), { stdout: 'pipe', stderr: 'pipe' })
+
+    expect(await proc.exited).toBe(2)
+  })
+})
+
 describe('makeCli', () => {
   test('runs the command with parsed input', async () => {
     const proc = Bun.spawn(
