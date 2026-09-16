@@ -19,7 +19,7 @@ const runTurnCli = async (input: string): Promise<{ code: number; stdout: string
   return { code, stdout, stderr }
 }
 
-describe('behavioral turn — CLI seam (Harbor hook)', () => {
+describe('behavioral turn — CLI seam', () => {
   test('runs one scripted turn and prints a valid TurnResult JSON', async () => {
     const { code, stdout, stderr } = await runTurnCli('{"space":"s","prompt":"Hello"}')
     expect(code).toBe(0)

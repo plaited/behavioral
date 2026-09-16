@@ -20,7 +20,7 @@ the I/O when the engine selects a coordination event.
 flowchart TD
   subgraph KERNEL["KERNEL FLOOR — src/kernel/kernel.ts"]
     direction TB
-    K_PROV["provisions per process: MCP connection pool · model tools (scripted by default, live = fetch) · dispatch registry"]
+    K_PROV["provisions per process: model tools (scripted by default, live = fetch) · dispatch registry"]
     K_RUN["runTurn({ space, prompt, threads? }) — composes a FRESH behavioral() program per turn"]
     K_RES["useTrace listener — resolves TurnResult { status, items, iterations, usage, trace } when turn.end is selected"]
   end
@@ -56,7 +56,7 @@ flowchart TD
     T_MODEL["model-respond — POST /responses · returns output items as DATA (function_call items never executed here)"]
     T_COMPACT["model-compact — POST /responses/compact"]
     T_CORE["read · write · edit · bash · grep · find · ls · html · frontier"]
-    T_EXT["mcp-client (kernel pool) · skill-client · discovery"]
+    T_EXT["mcp-client (per-call connection) · skill-client · discovery"]
   end
 
   K_RUN -->|"register thread + wire bridge"| ENGINE

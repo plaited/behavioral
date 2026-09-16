@@ -13,7 +13,7 @@
  * @packageDocumentation
  */
 
-import { makeSchema, type SchemaValidator, UsageSchema } from '../tools/open-responses.schemas.ts'
+import { makeSchema, type SchemaValidator, UsageSchema } from '../workers/open-responses.schemas.ts'
 import type { TurnResult } from './kernel.ts'
 
 /**

@@ -293,7 +293,7 @@ describe('autoresearch loop — JSONL results log', () => {
   })
 })
 
-import { createScriptedModelTools } from '../../tools/model.ts'
+import { createScriptedModelTools } from '../../workers/use-model.ts'
 import { createModelGenerator } from '../autoresearch.ts'
 
 describe('autoresearch loop — model generator', () => {
@@ -317,8 +317,8 @@ describe('autoresearch loop — model generator', () => {
 
     const generator = createModelGenerator({
       modelRespond,
-      provider: 'openrouter',
-      modelId: 'z-ai/glm-5.3-flash',
+      provider: 'mock',
+      modelId: 'mock-model',
       instructions: 'Generate an improved thread.',
     })
 
@@ -355,8 +355,8 @@ describe('autoresearch loop — model generator', () => {
 
     const generator = createModelGenerator({
       modelRespond,
-      provider: 'openrouter',
-      modelId: 'z-ai/glm-5.3-flash',
+      provider: 'mock',
+      modelId: 'mock-model',
       instructions: 'Generate an improved thread.',
     })
 
@@ -374,8 +374,8 @@ describe('autoresearch loop — model generator', () => {
 
     const generator = createModelGenerator({
       modelRespond,
-      provider: 'openrouter',
-      modelId: 'z-ai/glm-5.3-flash',
+      provider: 'mock',
+      modelId: 'mock-model',
       instructions: 'Generate an improved thread.',
     })
 
@@ -410,8 +410,8 @@ describe('autoresearch loop — model generator', () => {
 
     const generator = createModelGenerator({
       modelRespond,
-      provider: 'openrouter',
-      modelId: 'z-ai/glm-5.3-flash',
+      provider: 'mock',
+      modelId: 'mock-model',
       instructions: 'Generate an improved thread.',
     })
 

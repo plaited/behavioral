@@ -1,158 +1,33 @@
 /**
- * Kernel engine floor — owns shared process-lifetime state and wires
- * provisioned tools.
+ * Kernel engine floor — composes the turn loop over provisioned tools.
  *
  * @remarks
- * The kernel is the single home for state that tools must not hold as module
- * singletons: the MCP connection pool (and, later, the model-endpoint
- * registry). Tools are stateless via constructor injection; the kernel
- * instantiates the pool once and injects its `getClient` into the MCP client
- * tool at provisioning. The kernel also owns the pool's lifecycle —
- * {@link Kernel.shutdown} drains every pooled connection and is registered on
- * process teardown so no client leaks across an agent run.
+ * Tools are stateless: constructor/provisioner injection for anything they
+ * cannot derive from input, and no module-level singletons. The MCP client
+ * tools own their per-call connections (opened on use, closed on return), and
+ * the model tools fetch per call, so the kernel holds no process-lifetime
+ * resources to drain.
  *
  * @packageDocumentation
  */
 
-import {
-  Client,
-  type FetchLike,
-  type OAuthClientProvider,
-  StreamableHTTPClientTransport,
-} from '@modelcontextprotocol/client'
 import { KICK_EVENT_TYPE, TRACE_MESSAGE_KINDS } from '../behavioral/behavioral.constants.ts'
 import { behavioral } from '../behavioral/behavioral.ts'
 import type { BPEvent, Disconnect, Frontier, Thread, Trace } from '../behavioral/behavioral.types.ts'
-import { createMcpClientTool, type McpClientTool } from '../tools/mcp-client.ts'
-import type { ModelCompactTool, ModelRespondTool } from '../tools/model.ts'
-import { createScriptedModelTools, DEFAULT_SCRIPTED_RESPONSE } from '../tools/model.ts'
-import type { FunctionCallItem, InputItem, OutputItem, Usage } from '../tools/open-responses.schemas.ts'
-import { read } from '../tools/read.ts'
+import type { FunctionCallItem, InputItem, OutputItem, Usage } from '../workers/open-responses.schemas.ts'
+import type { ModelCompactTool, ModelRespondTool } from '../workers/use-model.ts'
+import { createScriptedModelTools, DEFAULT_SCRIPTED_RESPONSE } from '../workers/use-model.ts'
 import { createDispatchBridge, type DispatchableTool, type DispatchBridge } from './dispatch.ts'
 import { createReentryThread, TURN_LOOP_THREAD } from './threads.ts'
 
 export { TurnResultSchema } from './kernel.schemas.ts'
 
 // ---------------------------------------------------------------------------
-// Pool contract types
+// Kernel — owns the model tools, the dispatch registry, and the turn-loop
+// thread; exposes runTurn ({ space, prompt }) → JSON result.
 // ---------------------------------------------------------------------------
 
-/** Options used to establish (and re-establish) a pooled connection. */
-export type AdapterSessionOptions = {
-  headers?: Record<string, string>
-  authProvider?: OAuthClientProvider
-  timeoutMs?: number
-  /**
-   * Custom fetch implementation for the transport. When provided (e.g. by
-   * test fixtures using an in-process handler), no real network socket is
-   * opened — requests route directly through the handler's fetch method.
-   */
-  fetch?: FetchLike
-}
-
-type PoolEntry = {
-  client: Client
-  /** Resolves to the connected client; shared by concurrent first-callers. */
-  connectPromise: Promise<Client>
-}
-
-/** Pool getter injected into the MCP client tool at provisioning. */
-export type GetClientFn = (url: string, options: AdapterSessionOptions) => Promise<Client>
-
-/** The ownable pool surface the kernel (or a test suite) instantiates. */
-export type ConnectionPool = {
-  /** Lazily connect a {@link Client} for `url` and reuse it on subsequent calls. */
-  getClient: GetClientFn
-  /** Close and drop a single connection. */
-  closeClient: (url: string) => Promise<void>
-  /** Close and drop every pooled connection (teardown). */
-  closeAll: () => Promise<void>
-  /** Test/debug hook: the number of currently pooled connections. */
-  size: () => number
-}
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-const CLIENT_INFO = { name: 'behavioral', version: '0.0.0' }
-
-// ---------------------------------------------------------------------------
-// Pool factory — a closure, no module-level Map
-// ---------------------------------------------------------------------------
-
-/**
- * Build a connection-pool closure. The kernel instantiates this once and
- * injects `getClient` into {@link createMcpClientTool}; tests instantiate one
- * per suite for isolation. Concurrent first-callers share the same
- * `connectPromise`; a failed connect evicts the entry so the next call
- * retries. Callers never close the returned client — the pool owns its
- * lifecycle (see {@link ConnectionPool.closeAll}).
- *
- * MINIMAL: the pool key is the server-url alone. A second call to the same
- * url with different `headers`/`authProvider` reuses the first connection's
- * request init. Upgrade path: key by url + auth-fingerprint so per-call auth
- * variants get distinct connections.
- */
-export const createConnectionPool = (): ConnectionPool => {
-  const pool = new Map<string, PoolEntry>()
-
-  const getClient = async (url: string, options: AdapterSessionOptions): Promise<Client> => {
-    const existing = pool.get(url)
-    if (existing) return existing.connectPromise
-
-    const client = new Client(CLIENT_INFO)
-    const transport = new StreamableHTTPClientTransport(new URL(url), {
-      requestInit: options.headers ? { headers: options.headers } : undefined,
-      authProvider: options.authProvider,
-      ...(options.fetch ? { fetch: options.fetch } : {}),
-    })
-    const connectPromise = client.connect(transport).then(() => client)
-    pool.set(url, { client, connectPromise })
-
-    try {
-      await connectPromise
-    } catch (err) {
-      // Evict on failure so the next call can retry instead of reusing a dead
-      // connectPromise forever.
-      pool.delete(url)
-      try {
-        await client.close()
-      } catch {
-        /* best-effort */
-      }
-      throw err
-    }
-    return client
-  }
-
-  const closeClient = async (url: string): Promise<void> => {
-    const entry = pool.get(url)
-    if (!entry) return
-    pool.delete(url)
-    try {
-      await entry.client.close()
-    } catch {
-      /* best-effort */
-    }
-  }
-
-  const closeAll = async (): Promise<void> => {
-    const urls = [...pool.keys()]
-    await Promise.all(urls.map((url) => closeClient(url)))
-  }
-
-  const size = (): number => pool.size
-
-  return { getClient, closeClient, closeAll, size }
-}
-
-// ---------------------------------------------------------------------------
-// Kernel — owns the pool, the model tools, the dispatch registry, and the
-// turn-loop thread; exposes runTurn ({ space, prompt }) → JSON result.
-// ---------------------------------------------------------------------------
-
-/** The outcome of one turn, shaped for machine consumption (Harbor parses this). */
+/** The outcome of one turn, shaped for machine consumption (headless consumers parse this). */
 export type TurnResult = {
   ok: true
   space: string
@@ -187,17 +62,10 @@ export type KernelOptions = {
   provider?: string
   /** Model id routed to the provisioned model tools. */
   modelId?: string
-  /** Custom fetch for the MCP transport — test fixtures inject an in-process
-   *  handler.fetch so no real network socket is opened. */
-  poolFetch?: FetchLike
 }
 
-/** Kernel engine surface: shared state + provisioned tools + lifecycle + turn. */
+/** Kernel engine surface: the turn loop + the thread runner. */
 export type Kernel = {
-  /** The kernel-owned MCP connection pool. */
-  pool: ConnectionPool
-  /** MCP client tool provisioned with the kernel's pool getter. */
-  mcpClient: McpClientTool
   /** Run one turn from a `{ space, prompt, threads? }` to a JSON {@link TurnResult}.
    *  Candidate `threads` are co-registered alongside the turn-loop coordination
    *  skeleton; when omitted the turn loop runs alone (backward compat). */
@@ -205,8 +73,6 @@ export type Kernel = {
   /** Register arbitrary threads + run the program + capture the trace, with no
    *  model round-trip. Returns the captured trace and the final frontier. */
   runThreads: (input: { space: string; threads: Thread[] }) => Promise<RunThreadsResult>
-  /** Drain every pooled connection. Idempotent; registered on process teardown. */
-  shutdown: () => Promise<void>
 }
 
 /**
@@ -420,27 +286,15 @@ const runThreadsImpl = ({ space, threads }: { space: string; threads: Thread[] }
 }
 
 /**
- * Instantiate the kernel engine floor. Creates the connection pool, wires the
- * MCP client tool against the pool's `getClient`, provisions the model tools
- * (scripted by default — no fetch, deterministic) and the dispatch registry
- * (the built-in `read` tool by default), and registers a teardown hook so
- * pooled connections drain on process exit. `runTurn` composes a fresh
- * behavioral program per turn.
- *
- * MINIMAL: a single process-teardown hook (`beforeExit`). Upgrade path: also
- * drain on SIGINT/SIGTERM with a flush timeout once the agent has a graceful
- * shutdown sequence wired through the controller.
+ * Instantiate the kernel engine floor. Provisions the model tools (scripted by
+ * default — no fetch, deterministic) and the dispatch registry (empty by
+ * default; provisioner-injected). `runTurn` composes a fresh behavioral program
+ * per turn. No process-lifetime resources: the model tools fetch per call.
  */
 export const createKernel = (options: KernelOptions = {}): Kernel => {
-  const pool = createConnectionPool()
-  const poolFetch = options.poolFetch
-  const mcpClient = createMcpClientTool({
-    getClient: (url, sessionOpts) =>
-      pool.getClient(url, { ...sessionOpts, ...(poolFetch ? { fetch: poolFetch } : {}) }),
-  })
   const modelTools = options.modelTools ?? createScriptedModelTools({ script: DEFAULT_SCRIPTED_RESPONSE })
   const dispatch = createDispatchBridge({
-    tools: options.dispatchTools ?? { read: read as unknown as DispatchableTool },
+    tools: options.dispatchTools ?? {},
   })
   const maxIterations = options.maxIterations ?? 8
   const provider = options.provider ?? 'scripted'
@@ -449,16 +303,5 @@ export const createKernel = (options: KernelOptions = {}): Kernel => {
     runTurnImpl({ ...input, modelRespond: modelTools.modelRespond, dispatch, maxIterations, provider, modelId })
   const runThreads = (input: { space: string; threads: Thread[] }): Promise<RunThreadsResult> => runThreadsImpl(input)
 
-  let shuttingDown = false
-  const shutdown = async (): Promise<void> => {
-    if (shuttingDown) return
-    shuttingDown = true
-    await pool.closeAll()
-  }
-
-  // Drain pooled connections when the agent's event loop empties. `beforeExit`
-  // can fire more than once; `shutdown` is idempotent so re-entry is safe.
-  process.on('beforeExit', shutdown)
-
-  return { pool, mcpClient, runTurn, runThreads, shutdown }
+  return { runTurn, runThreads }
 }

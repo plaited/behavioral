@@ -50,9 +50,6 @@
     "check:biome": "biome check",
     "check:types": "tsc --noEmit",
     "check:write": "biome check --write && format-package --write",
-    "demo:autoresearch": "bun run scripts/autoresearch-daytona/autoresearch-daytona.ts",
-    "demo:autoresearch:fork-isolation": "bun run scripts/autoresearch-daytona/autoresearch-daytona.ts --fork-isolation",
-    "demo:autoresearch:model": "bun run scripts/autoresearch-daytona/autoresearch-daytona.ts --model",
     "generate:css-schemas": "bun run scripts/css-schemas/run.ts generate",
     "prepare": "git config core.hooksPath .hooks",
     "test": "bun test"

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import type { FunctionCallOutputItem } from '../../tools/open-responses.schemas.ts'
+import type { FunctionCallOutputItem } from '../../workers/open-responses.schemas.ts'
 import { createDispatchBridge, type DispatchableTool } from '../dispatch.ts'
 
 // A plain callable tool taking `unknown` (validates/echoes internally). Built

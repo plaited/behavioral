@@ -10,7 +10,7 @@
  * 1. Read the current thread (the mutable surface —
  *    {@link PROGRESSIVE_DISCLOSURE_THREAD}).
  * 2. Generate a candidate (full replacement Thread). Scripted first
- *    (deterministic); then model-respond via OpenRouter
+ *    (deterministic); then model-respond via a provisioned endpoint
  *    (z-ai/glm-5.3-flash) — validated against the Thread schema before
  *    gating. A malformed model proposal → discard, not crash.
  * 3. Gate the candidate:
@@ -322,11 +322,12 @@ export const serializeResultsLog = (result: LoopResult): string =>
     .join('\n')
 
 // ---------------------------------------------------------------------------
-// Model generator — model-respond via OpenRouter (GLM-5.3-flash)
+// Model generator — model-respond via a provisioned endpoint
 // ---------------------------------------------------------------------------
 
-import type { ModelRespondTool, ReasoningEffort } from '../tools/model.ts'
-import type { InputItem, MessageItem, OutputItem } from '../tools/open-responses.schemas.ts'
+import type { ReasoningEffort } from '../workers/model.types.ts'
+import type { InputItem, MessageItem, OutputItem } from '../workers/open-responses.schemas.ts'
+import type { ModelRespondTool } from '../workers/use-model.ts'
 
 /**
  * Configuration for {@link createModelGenerator}.
@@ -336,11 +337,11 @@ export type ModelGeneratorConfig = {
   modelRespond: ModelRespondTool
   /** Provider label (routes to the endpoint config). */
   provider: string
-  /** Model ID (e.g. 'z-ai/glm-5.3-flash'). */
+  /** Model ID at the provisioned endpoint. */
   modelId: string
   /** Instructions for the model. */
   instructions: string
-  /** OpenRouter reasoning effort level. Defaults to 'medium'. */
+  /** Reasoning effort level. Defaults to 'medium'. */
   reasoningEffort?: ReasoningEffort
 }
 

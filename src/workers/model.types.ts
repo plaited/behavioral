@@ -119,7 +119,7 @@ export type ModelOutbound = ModelDeltaEvent | ModelResultEvent
 /**
  * One canned model-respond response. Not part of the Open Responses spec and
  * never part of the worker — this backs the in-process deterministic executor
- * used by the CLI/Harbor seam and unit tests.
+ * used by the CLI turn seam and unit tests.
  */
 export type ScriptedResponse = {
   items: OutputItem[]

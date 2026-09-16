@@ -1,12 +1,12 @@
 /**
- * The turn CLI seam — the Harbor hook. `behavioral turn '<json>'` runs one scripted
- * model turn end-to-end and prints the {@link TurnResult} as JSON.
+ * The turn CLI seam — the default behavioral usage. `behavioral turn '<json>'`
+ * runs one turn end-to-end and prints the {@link TurnResult} as JSON: JSON in,
+ * JSON (with the trace stream) out.
  *
  * @remarks
- * The `--no-serve` slice only: no daemon, no serve mode, no `--seed` flag, no
- * permission flow (those are Phase 6). One cold run per invocation: create a
+ * The agent as a cold, composable command — one run per invocation: create a
  * kernel (scripted model by default — deterministic, no network), run the turn,
- * drain the pool, print the JSON result. Harbor drives this seam later.
+ * print the JSON result. The interactive mode is not built yet.
  *
  * The output schema is the kernel's {@link TurnResultSchema} — the single
  * JSON-schema home for the TurnResult shape. The CLI does not hand-mirror the
@@ -46,7 +46,7 @@ const TurnCliInputSchema = {
   },
   required: ['space', 'prompt'],
   additionalProperties: false,
-  description: 'Turn CLI input — run one scripted model turn from a prompt to a JSON result',
+  description: 'Turn CLI input — run one turn from a prompt to a JSON result',
 } as unknown as JSONSchemaType<TurnCliInput>
 
 export const turnCli = makeCli({
@@ -56,21 +56,17 @@ export const turnCli = makeCli({
   // home for the TurnResult shape. No hand-mirrored copy here.
   outputSchema: TurnResultSchema.schema as unknown as JSONSchemaType<TurnResult>,
   help: [
-    'Run one scripted model turn end-to-end and print the JSON result.',
+    'Run one turn: JSON in, JSON out (the result plus the trace stream).',
     '',
-    'The Harbor seam — the --no-serve slice only (no daemon, no --seed, no permission flow).',
+    'The default behavioral usage — one cold run per invocation; no daemon, no serve mode.',
     'Deterministic against the kernel default scripted model (no network).',
     '',
     'Examples:',
-    '  behavioral turn \'{"space":"s","prompt":"Hello"}\'',
-    '  echo \'{"space":"s","prompt":"Hello"}\' | behavioral turn',
+    `  behavioral turn '{"space":"s","prompt":"Hello"}'`,
+    `  echo '{"space":"s","prompt":"Hello"}' | behavioral turn`,
   ].join('\n'),
   run: async (input) => {
     const kernel = createKernel()
-    try {
-      return await kernel.runTurn({ space: input.space, prompt: input.prompt })
-    } finally {
-      await kernel.shutdown()
-    }
+    return await kernel.runTurn({ space: input.space, prompt: input.prompt })
   },
 })

@@ -19,8 +19,8 @@
  * @packageDocumentation
  */
 
-import type { FunctionCallOutputItem } from '../tools/open-responses.schemas.ts'
 import { ueid } from '../utils.ts'
+import type { FunctionCallOutputItem } from '../workers/open-responses.schemas.ts'
 
 /** A tool the bridge can dispatch to: callable + its registered name. */
 export type DispatchableTool = ((input: unknown) => Promise<unknown> | unknown) & {
