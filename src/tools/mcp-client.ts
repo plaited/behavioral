@@ -16,8 +16,8 @@
 
 import { Client, type OAuthClientProvider, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import type { JSONSchemaType } from 'ajv'
-import type { Keychain } from '../kernel/oauth/keychain.ts'
-import { BunKeychainOAuthProvider, type KeychainOAuthProviderOptions } from '../kernel/oauth/keychain-oauth-provider.ts'
+import type { Keychain } from '../oauth/keychain.ts'
+import { BunKeychainOAuthProvider, type KeychainOAuthProviderOptions } from '../oauth/keychain-oauth-provider.ts'
 import { ajv, useTool } from './use-tool.ts'
 
 // ---------------------------------------------------------------------------

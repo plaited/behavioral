@@ -156,7 +156,7 @@ const resolveAuth = (
 
 const storeApiKey = async (apiKey: string): Promise<void> => {
   try {
-    const { BunKeychain, KEYCHAIN_SERVICE } = await import('../kernel/oauth/keychain.ts')
+    const { BunKeychain, KEYCHAIN_SERVICE } = await import('../oauth/keychain.ts')
     const keychain = BunKeychain(KEYCHAIN_SERVICE)
     await keychain.set('you-web-api-key', apiKey)
   } catch {
