@@ -1,56 +1,102 @@
 import { describe, expect, test } from 'bun:test'
 import type { FetchLike } from '@modelcontextprotocol/client'
-import { createConnectionPool } from '../../kernel/kernel.ts'
-import { createMcpClientTool, McpClientInputSchema, McpClientOutputSchema } from '../mcp-client.ts'
+import {
+  McpCallToolInputSchema,
+  McpCallToolOutputSchema,
+  McpDiscoverInputSchema,
+  McpDiscoverOutputSchema,
+  McpGetPromptInputSchema,
+  McpGetPromptOutputSchema,
+  McpListPromptsInputSchema,
+  McpListPromptsOutputSchema,
+  McpListResourcesInputSchema,
+  McpListResourcesOutputSchema,
+  McpListToolsInputSchema,
+  McpListToolsOutputSchema,
+  McpReadResourceInputSchema,
+  McpReadResourceOutputSchema,
+  mcpCallTool,
+  mcpDiscover,
+  mcpGetPrompt,
+  mcpListPrompts,
+  mcpListResources,
+  mcpListTools,
+  mcpReadResource,
+} from '../mcp-client.ts'
 import { ajv } from '../use-tool.ts'
 import { startMcpServer } from './mcp-server-fixture.ts'
 
-const validateInput = ajv.compile(McpClientInputSchema)
-const validateOutput = ajv.compile(McpClientOutputSchema)
+const validateCallToolInput = ajv.compile(McpCallToolInputSchema)
+const validateCallToolOutput = ajv.compile(McpCallToolOutputSchema)
+const validateListToolsInput = ajv.compile(McpListToolsInputSchema)
+const validateListToolsOutput = ajv.compile(McpListToolsOutputSchema)
+const validateListPromptsInput = ajv.compile(McpListPromptsInputSchema)
+const validateListPromptsOutput = ajv.compile(McpListPromptsOutputSchema)
+const validateGetPromptInput = ajv.compile(McpGetPromptInputSchema)
+const validateGetPromptOutput = ajv.compile(McpGetPromptOutputSchema)
+const validateListResourcesInput = ajv.compile(McpListResourcesInputSchema)
+const validateListResourcesOutput = ajv.compile(McpListResourcesOutputSchema)
+const validateReadResourceInput = ajv.compile(McpReadResourceInputSchema)
+const validateReadResourceOutput = ajv.compile(McpReadResourceOutputSchema)
+const validateDiscoverInput = ajv.compile(McpDiscoverInputSchema)
+const validateDiscoverOutput = ajv.compile(McpDiscoverOutputSchema)
 
-describe('mcp-client tool — schema contract (RED)', () => {
-  test('input schema is a 7-branch oneOf on mode', () => {
-    expect((McpClientInputSchema as { oneOf?: unknown[] }).oneOf).toHaveLength(7)
+/**
+ * Run `fn` with `globalThis.fetch` routed through the in-process MCP handler,
+ * then restore it. The tools are flat and standalone (no injected client), so
+ * the SDK's `handler.fetch` test pattern attaches at the ambient fetch
+ * boundary — the same transport default the SDK docs use.
+ */
+const withFetch = async <T>(fetchImpl: FetchLike, fn: () => Promise<T>): Promise<T> => {
+  const original = globalThis.fetch
+  globalThis.fetch = fetchImpl as unknown as typeof globalThis.fetch
+  try {
+    return await fn()
+  } finally {
+    globalThis.fetch = original
+  }
+}
+
+describe('mcp-client tools — schema contract (RED)', () => {
+  test('each tool names itself distinctly', () => {
+    expect(mcpCallTool.name).toBe('mcp-call-tool')
+    expect(mcpListTools.name).toBe('mcp-list-tools')
+    expect(mcpListPrompts.name).toBe('mcp-list-prompts')
+    expect(mcpGetPrompt.name).toBe('mcp-get-prompt')
+    expect(mcpListResources.name).toBe('mcp-list-resources')
+    expect(mcpReadResource.name).toBe('mcp-read-resource')
+    expect(mcpDiscover.name).toBe('mcp-discover')
   })
 
-  test('output schema is a 7-branch oneOf on mode', () => {
-    expect((McpClientOutputSchema as { oneOf?: unknown[] }).oneOf).toHaveLength(7)
+  test('call-tool requires url, tool, and args', () => {
+    expect(validateCallToolInput({ url: 'http://x', tool: 't' })).toBe(false)
+    expect(validateCallToolInput({ url: 'http://x', args: {} })).toBe(false)
+    expect(validateCallToolInput({ url: 'http://x', tool: 't', args: {} })).toBe(true)
   })
 
-  test('rejects an unknown mode', () => {
-    expect(validateInput({ mode: 'nope', url: 'http://x' })).toBe(false)
+  test('the listing tools require url and reject mode-specific stray fields', () => {
+    expect(validateListToolsInput({})).toBe(false)
+    expect(validateListToolsInput({ url: 'http://x' })).toBe(true)
+    expect(validateListToolsInput({ url: 'http://x', mode: 'list-tools' })).toBe(false)
+    expect(validateListPromptsInput({ url: 'http://x' })).toBe(true)
+    expect(validateListResourcesInput({ url: 'http://x' })).toBe(true)
+    expect(validateDiscoverInput({ url: 'http://x' })).toBe(true)
   })
 
-  test('rejects a mode missing its required url', () => {
-    expect(validateInput({ mode: 'list-tools' })).toBe(false)
+  test('get-prompt requires url and name; args is optional', () => {
+    expect(validateGetPromptInput({ url: 'http://x' })).toBe(false)
+    expect(validateGetPromptInput({ url: 'http://x', name: 'p' })).toBe(true)
+    expect(validateGetPromptInput({ url: 'http://x', name: 'p', args: { name: 'sam' } })).toBe(true)
   })
 
-  test('call-tool rejects when tool is missing', () => {
-    expect(validateInput({ mode: 'call-tool', url: 'http://x', args: {} })).toBe(false)
+  test('read-resource requires url and uri', () => {
+    expect(validateReadResourceInput({ url: 'http://x' })).toBe(false)
+    expect(validateReadResourceInput({ url: 'http://x', uri: 'test://note' })).toBe(true)
   })
 
-  test('call-tool rejects when args is missing', () => {
-    expect(validateInput({ mode: 'call-tool', url: 'http://x', tool: 't' })).toBe(false)
-  })
-
-  test('read-resource rejects when uri is missing', () => {
-    expect(validateInput({ mode: 'read-resource', url: 'http://x' })).toBe(false)
-  })
-
-  test('accepts each of the seven modes with its required fields', () => {
-    expect(validateInput({ mode: 'list-tools', url: 'http://x' })).toBe(true)
-    expect(validateInput({ mode: 'list-prompts', url: 'http://x' })).toBe(true)
-    expect(validateInput({ mode: 'list-resources', url: 'http://x' })).toBe(true)
-    expect(validateInput({ mode: 'discover', url: 'http://x' })).toBe(true)
-    expect(validateInput({ mode: 'call-tool', url: 'http://x', tool: 't', args: {} })).toBe(true)
-    expect(validateInput({ mode: 'get-prompt', url: 'http://x', name: 'p' })).toBe(true)
-    expect(validateInput({ mode: 'read-resource', url: 'http://x', uri: 'u' })).toBe(true)
-  })
-
-  test('accepts optional shared fields on any mode', () => {
+  test('accepts optional shared fields on any tool', () => {
     expect(
-      validateInput({
-        mode: 'list-tools',
+      validateListToolsInput({
         url: 'http://x',
         headers: { 'x-trace': '1' },
         timeoutMs: 5000,
@@ -60,125 +106,85 @@ describe('mcp-client tool — schema contract (RED)', () => {
   })
 })
 
-describe('mcp-client tool — seven modes through the shared pool', () => {
-  test('round-trips all seven modes against a real in-process MCP server', async () => {
-    const pool = createConnectionPool()
+describe('mcp-client tools — one round-trip per tool (in-process handler.fetch)', () => {
+  test('round-trips all seven tools against a real in-process MCP server', async () => {
     const { url, fetch, close } = await startMcpServer()
-    const wrappedGetClient: typeof pool.getClient = (u, opts) =>
-      pool.getClient(u, { ...opts, fetch: fetch as FetchLike })
-    const mcpClient = createMcpClientTool({ getClient: wrappedGetClient })
     try {
-      // list-tools
-      const tools = (await mcpClient({ mode: 'list-tools', url })) as { mode: string; result: { name: string }[] }
-      expect(tools.mode).toBe('list-tools')
-      expect(validateOutput(tools)).toBe(true)
-      expect(tools.result.map((t) => t.name)).toContain('echo')
+      await withFetch(fetch as FetchLike, async () => {
+        // mcp-list-tools
+        const listed = (await mcpListTools({ url })) as { tools: { name: string }[] }
+        expect(validateListToolsOutput(listed)).toBe(true)
+        expect(listed.tools.map((t) => t.name)).toContain('echo')
 
-      // call-tool
-      const called = (await mcpClient({
-        mode: 'call-tool',
-        url,
-        tool: 'echo',
-        args: { message: 'hi' },
-      })) as { mode: string; result: { content: { type: string; text?: string }[] } }
-      expect(called.mode).toBe('call-tool')
-      expect(validateOutput(called)).toBe(true)
-      expect(called.result.content[0]?.text).toBe('echo:hi')
+        // mcp-call-tool
+        const called = (await mcpCallTool({ url, tool: 'echo', args: { message: 'hi' } })) as {
+          content: { type: string; text?: string }[]
+        }
+        expect(validateCallToolOutput(called)).toBe(true)
+        expect(called.content[0]?.text).toBe('echo:hi')
 
-      // list-prompts
-      const prompts = (await mcpClient({ mode: 'list-prompts', url })) as { mode: string; result: { name: string }[] }
-      expect(prompts.mode).toBe('list-prompts')
-      expect(validateOutput(prompts)).toBe(true)
-      expect(prompts.result.map((p) => p.name)).toContain('greet')
+        // mcp-list-prompts
+        const prompts = (await mcpListPrompts({ url })) as { prompts: { name: string }[] }
+        expect(validateListPromptsOutput(prompts)).toBe(true)
+        expect(prompts.prompts.map((p) => p.name)).toContain('greet')
 
-      // get-prompt
-      const prompt = (await mcpClient({
-        mode: 'get-prompt',
-        url,
-        name: 'greet',
-        args: { name: 'sam' },
-      })) as { mode: string; result: { role: string; content: { text?: string } }[] }
-      expect(prompt.mode).toBe('get-prompt')
-      expect(validateOutput(prompt)).toBe(true)
-      expect(prompt.result[0]?.content.text).toBe('hello sam')
+        // mcp-get-prompt
+        const prompt = (await mcpGetPrompt({ url, name: 'greet', args: { name: 'sam' } })) as {
+          messages: { role: string; content: { text?: string } }[]
+        }
+        expect(validateGetPromptOutput(prompt)).toBe(true)
+        expect(prompt.messages[0]?.content.text).toBe('hello sam')
 
-      // list-resources
-      const resources = (await mcpClient({ mode: 'list-resources', url })) as {
-        mode: string
-        result: { uri: string }[]
-      }
-      expect(resources.mode).toBe('list-resources')
-      expect(validateOutput(resources)).toBe(true)
-      expect(resources.result.map((r) => r.uri)).toContain('test://note')
+        // mcp-list-resources
+        const resources = (await mcpListResources({ url })) as { resources: { uri: string }[] }
+        expect(validateListResourcesOutput(resources)).toBe(true)
+        expect(resources.resources.map((r) => r.uri)).toContain('test://note')
 
-      // read-resource
-      const read = (await mcpClient({ mode: 'read-resource', url, uri: 'test://note' })) as {
-        mode: string
-        result: { text?: string }[]
-      }
-      expect(read.mode).toBe('read-resource')
-      expect(validateOutput(read)).toBe(true)
-      expect(read.result[0]?.text).toBe('a note')
+        // mcp-read-resource
+        const read = (await mcpReadResource({ url, uri: 'test://note' })) as { contents: { text?: string }[] }
+        expect(validateReadResourceOutput(read)).toBe(true)
+        expect(read.contents[0]?.text).toBe('a note')
 
-      // discover
-      const discovered = (await mcpClient({ mode: 'discover', url })) as {
-        mode: string
-        result: { tools: unknown[]; prompts: unknown[]; resources: unknown[] }
-      }
-      expect(discovered.mode).toBe('discover')
-      expect(validateOutput(discovered)).toBe(true)
-      expect(discovered.result.tools).toHaveLength(1)
-      expect(discovered.result.prompts).toHaveLength(1)
-      expect(discovered.result.resources).toHaveLength(1)
+        // mcp-discover
+        const discovered = (await mcpDiscover({ url })) as {
+          tools: unknown[]
+          prompts: unknown[]
+          resources: unknown[]
+        }
+        expect(validateDiscoverOutput(discovered)).toBe(true)
+        expect(discovered.tools).toHaveLength(1)
+        expect(discovered.prompts).toHaveLength(1)
+        expect(discovered.resources).toHaveLength(1)
+      })
     } finally {
-      await pool.closeAll()
       await close()
     }
   })
+})
 
-  test('reuses a single pooled connection across multiple calls', async () => {
-    const pool = createConnectionPool()
+describe('mcp-client tools — per-call connection lifecycle (no pool)', () => {
+  test('each call opens and closes its own session — no reuse', async () => {
     const { url, fetch, close } = await startMcpServer()
-    const wrappedGetClient: typeof pool.getClient = (u, opts) =>
-      pool.getClient(u, { ...opts, fetch: fetch as FetchLike })
-    const mcpClient = createMcpClientTool({ getClient: wrappedGetClient })
-    try {
-      expect(pool.size()).toBe(0)
-      await mcpClient({ mode: 'list-tools', url })
-      expect(pool.size()).toBe(1)
-      await mcpClient({ mode: 'list-prompts', url })
-      await mcpClient({ mode: 'discover', url })
-      // Same url → still exactly one pooled client.
-      expect(pool.size()).toBe(1)
-    } finally {
-      await pool.closeAll()
-      await close()
+    let initializes = 0
+    const countingFetch: FetchLike = (input, init) => {
+      if (typeof init?.body === 'string') {
+        try {
+          if ((JSON.parse(init.body) as { method?: unknown }).method === 'initialize') initializes += 1
+        } catch {
+          /* non-JSON body — not an initialize frame */
+        }
+      }
+      return fetch(input, init)
     }
-    expect(pool.size()).toBe(0)
-  })
-
-  test('separate urls get separate pooled connections', async () => {
-    const pool = createConnectionPool()
-    const a = await startMcpServer()
-    const b = await startMcpServer()
-    const wrap =
-      (fetch: FetchLike): typeof pool.getClient =>
-      (u, opts) =>
-        pool.getClient(u, { ...opts, fetch })
-    const mcpClient = createMcpClientTool({
-      getClient: (u, opts) => {
-        if (u === a.url) return wrap(a.fetch)(u, opts)
-        return wrap(b.fetch)(u, opts)
-      },
-    })
     try {
-      await mcpClient({ mode: 'list-tools', url: a.url })
-      await mcpClient({ mode: 'list-tools', url: b.url })
-      expect(pool.size()).toBe(2)
+      await withFetch(countingFetch, async () => {
+        await mcpListTools({ url })
+        expect(initializes).toBe(1)
+        await mcpListTools({ url })
+        expect(initializes).toBe(2)
+      })
     } finally {
-      await pool.closeAll()
-      await a.close()
-      await b.close()
+      await close()
     }
   })
 })

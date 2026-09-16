@@ -8,14 +8,14 @@
  * tool is the dumb primitive: it discovers, reads, and lists resources. The
  * catalog/search loop lives in a kernel behavioral thread, not here.
  *
- * Three modes (discriminated union on `mode`):
- * - `discover` — tier 1 metadata: scan `.agents/skills/` at project + user
- *   level, parse YAML frontmatter → `{ name, description, location, ... }`
+ * Three tools (one per mode, no `mode` discriminator):
+ * - {@link skillDiscover} — tier 1 metadata: scan `.agents/skills/` at project
+ *   + user level, parse YAML frontmatter → `{ name, description, location, ... }`
  *   records (lenient validation per spec).
- * - `read-skill` — tier 2 full instructions: load the SKILL.md body with
+ * - {@link skillRead} — tier 2 full instructions: load the SKILL.md body with
  *   frontmatter stripped.
- * - `list-resources` — tier 3 bundled-resource preview: enumerate bundled
- *   files in the skill directory without reading them.
+ * - {@link skillListResources} — tier 3 bundled-resource preview: enumerate
+ *   bundled files in the skill directory without reading them.
  *
  * Returns data only; never writes. Own frontmatter parsing (does not import
  * the deleted `src/cli/markdown.ts` CLI). `cwd` is provisioner-supplied (same
@@ -51,134 +51,143 @@ type ResourceEntry = {
   type: 'file' | 'directory'
 }
 
-export type SkillClientInput =
-  | { mode: 'discover'; cwd: string }
-  | { mode: 'read-skill'; cwd: string; location: string }
-  | { mode: 'list-resources'; cwd: string; location: string }
+export type SkillDiscoverInput = { cwd: string }
 
-export type SkillClientOutput =
-  | { mode: 'discover'; skills: SkillRecord[]; warnings: string[] }
-  | { mode: 'read-skill'; name: string; body: string; isError?: false }
-  | { mode: 'read-skill'; isError: true; message: string }
-  | { mode: 'list-resources'; resources: ResourceEntry[] }
+export type SkillDiscoverOutput = {
+  skills: SkillRecord[]
+  warnings: string[]
+}
+
+export type SkillReadInput = { cwd: string; location: string }
+
+export type SkillReadOutput = { name: string; body: string } | { isError: true; message: string }
+
+export type SkillListResourcesInput = { cwd: string; location: string }
+
+export type SkillListResourcesOutput = { resources: ResourceEntry[] }
 
 // ---------------------------------------------------------------------------
-// Tool JSON schemas — hand-written oneOf on `mode`, cast through `unknown`
-// as JSONSchemaType (discriminated unions exceed its static power; read.ts /
-// frontier.ts / mcp-client.ts precedent). AJV validates at runtime.
+// Tool JSON schemas — one schema pair per tool, no `mode` discriminator.
+// AJV validates at runtime; `SkillRecord`'s open index signature means the
+// discover output schema is cast through `unknown` (same precedent as
+// frontier.ts / html.ts).
 // ---------------------------------------------------------------------------
 
-export const SkillClientInputSchema = {
+const skillRecordJsonSchema = {
   type: 'object',
-  oneOf: [
-    {
-      type: 'object',
-      properties: {
-        mode: { type: 'string', const: 'discover' },
-        cwd: { type: 'string', minLength: 1, description: "the tool's provisioned cwd" },
-      },
-      required: ['mode', 'cwd'],
-      additionalProperties: false,
-    },
-    {
-      type: 'object',
-      properties: {
-        mode: { type: 'string', const: 'read-skill' },
-        cwd: { type: 'string', minLength: 1, description: "the tool's provisioned cwd" },
-        location: {
-          type: 'string',
-          minLength: 1,
-          description: 'path to the SKILL.md file — absolute, or relative to the provisioned cwd',
-        },
-      },
-      required: ['mode', 'cwd', 'location'],
-      additionalProperties: false,
-    },
-    {
-      type: 'object',
-      properties: {
-        mode: { type: 'string', const: 'list-resources' },
-        cwd: { type: 'string', minLength: 1, description: "the tool's provisioned cwd" },
-        location: {
-          type: 'string',
-          minLength: 1,
-          description: 'path to the SKILL.md file whose directory to enumerate',
-        },
-      },
-      required: ['mode', 'cwd', 'location'],
-      additionalProperties: false,
-    },
-  ],
+  properties: {
+    name: { type: 'string' },
+    description: { type: 'string' },
+    location: { type: 'string' },
+  },
+  required: ['name', 'description', 'location'],
+  additionalProperties: true,
+} as const
+
+const cwdJsonSchema = {
+  type: 'string',
+  minLength: 1,
+  description: "the tool's provisioned cwd",
+} as const
+
+export const SkillDiscoverInputSchema = {
+  type: 'object',
+  properties: { cwd: cwdJsonSchema },
+  required: ['cwd'],
+  additionalProperties: false,
   description:
-    'Progressive disclosure over local skills: discover (tier 1 metadata), read-skill (tier 2 full instructions), list-resources (tier 3 bundled-resource preview).',
-} as unknown as JSONSchemaType<SkillClientInput>
+    'Discover tier-1 metadata for local skills: scan `.agents/skills/` at project + user level and parse SKILL.md frontmatter.',
+} as unknown as JSONSchemaType<SkillDiscoverInput>
 
-export const SkillClientOutputSchema = {
+export const SkillDiscoverOutputSchema = {
+  type: 'object',
+  properties: {
+    skills: { type: 'array', items: skillRecordJsonSchema },
+    warnings: { type: 'array', items: { type: 'string' } },
+  },
+  required: ['skills', 'warnings'],
+  additionalProperties: false,
+} as unknown as JSONSchemaType<SkillDiscoverOutput>
+
+export const SkillReadInputSchema = {
+  type: 'object',
+  properties: {
+    cwd: cwdJsonSchema,
+    location: {
+      type: 'string',
+      minLength: 1,
+      description: 'path to the SKILL.md file — absolute, or relative to the provisioned cwd',
+    },
+  },
+  required: ['cwd', 'location'],
+  additionalProperties: false,
+  description: 'Load a SKILL.md body (tier 2 full instructions) with frontmatter stripped.',
+} as unknown as JSONSchemaType<SkillReadInput>
+
+export const SkillReadOutputSchema = {
   type: 'object',
   oneOf: [
     {
       type: 'object',
       properties: {
-        mode: { type: 'string', const: 'discover' },
-        skills: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: {
-              name: { type: 'string' },
-              description: { type: 'string' },
-              location: { type: 'string' },
-            },
-            required: ['name', 'description', 'location'],
-            additionalProperties: true,
-          },
-        },
-        warnings: { type: 'array', items: { type: 'string' } },
+        name: { type: 'string', description: 'the skill name from frontmatter; empty when absent' },
+        body: { type: 'string', description: 'the SKILL.md body with frontmatter stripped' },
       },
-      required: ['mode', 'skills', 'warnings'],
+      required: ['name', 'body'],
       additionalProperties: false,
     },
     {
       type: 'object',
       properties: {
-        mode: { type: 'string', const: 'read-skill' },
-        name: { type: 'string', nullable: true },
-        body: { type: 'string', nullable: true },
-        isError: { type: 'boolean', nullable: true },
-        message: { type: 'string', nullable: true },
+        isError: { type: 'boolean', const: true },
+        message: { type: 'string', minLength: 1 },
       },
-      required: ['mode'],
-      additionalProperties: false,
-    },
-    {
-      type: 'object',
-      properties: {
-        mode: { type: 'string', const: 'list-resources' },
-        resources: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: {
-              name: { type: 'string' },
-              type: { type: 'string', enum: ['file', 'directory'] },
-            },
-            required: ['name', 'type'],
-            additionalProperties: false,
-          },
-        },
-      },
-      required: ['mode', 'resources'],
+      required: ['isError', 'message'],
       additionalProperties: false,
     },
   ],
-  description: 'Skill client operation result, discriminated by mode.',
-} as unknown as JSONSchemaType<SkillClientOutput>
+  description: 'On success: { name, body }. On failure: { isError: true, message }.',
+} as unknown as JSONSchemaType<SkillReadOutput>
+
+export const SkillListResourcesInputSchema = {
+  type: 'object',
+  properties: {
+    cwd: cwdJsonSchema,
+    location: {
+      type: 'string',
+      minLength: 1,
+      description: 'path to the SKILL.md file whose directory to enumerate',
+    },
+  },
+  required: ['cwd', 'location'],
+  additionalProperties: false,
+  description: 'Enumerate bundled files (tier 3) in a skill directory without reading them.',
+} as unknown as JSONSchemaType<SkillListResourcesInput>
+
+export const SkillListResourcesOutputSchema = {
+  type: 'object',
+  properties: {
+    resources: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', description: 'path relative to the skill directory, using forward slashes' },
+          type: { type: 'string', enum: ['file', 'directory'] },
+        },
+        required: ['name', 'type'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['resources'],
+  additionalProperties: false,
+} as unknown as JSONSchemaType<SkillListResourcesOutput>
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-export const SKILL_CLIENT_TOOL_NAME = 'skill-client'
 const SKILL_DIR_NAME = '.agents/skills'
 const SKILL_FILE = 'SKILL.md'
 const SKIP_DIRS = new Set(['.git', 'node_modules', '.DS_Store'])
@@ -354,23 +363,23 @@ const discoverSkills = async (cwd: string): Promise<{ skills: SkillRecord[]; war
 // read-skill (tier 2)
 // ---------------------------------------------------------------------------
 
-const readSkillBody = async (cwd: string, location: string): Promise<SkillClientOutput> => {
+const readSkillBody = async (cwd: string, location: string): Promise<SkillReadOutput> => {
   const resolved = path.resolve(cwd, location)
   const file = Bun.file(resolved)
   if (!(await file.exists())) {
-    return { mode: 'read-skill', isError: true, message: `Skill file not found: ${resolved}` }
+    return { isError: true, message: `Skill file not found: ${resolved}` }
   }
   const markdown = await file.text()
   const parsed = parseSkillFrontmatter(markdown)
   // No frontmatter is allowed for read-skill (the whole file is the body); only
   // unparseable frontmatter (a malformed block that begins with ---) is an error.
   if (parsed === null && markdown.startsWith('---')) {
-    return { mode: 'read-skill', isError: true, message: `Unparseable YAML frontmatter: ${resolved}` }
+    return { isError: true, message: `Unparseable YAML frontmatter: ${resolved}` }
   }
   if (parsed === null) {
-    return { mode: 'read-skill', name: '', body: markdown.trim() }
+    return { name: '', body: markdown.trim() }
   }
-  return { mode: 'read-skill', name: String(parsed.frontmatter.name ?? ''), body: parsed.body }
+  return { name: String(parsed.frontmatter.name ?? ''), body: parsed.body }
 }
 
 // ---------------------------------------------------------------------------
@@ -411,47 +420,51 @@ const listResources = async (cwd: string, location: string): Promise<ResourceEnt
 }
 
 // ---------------------------------------------------------------------------
-// Tool run
-// ---------------------------------------------------------------------------
-
-const run = async (input: SkillClientInput): Promise<SkillClientOutput> => {
-  switch (input.mode) {
-    case 'discover': {
-      const { skills, warnings } = await discoverSkills(input.cwd)
-      return { mode: 'discover', skills, warnings }
-    }
-    case 'read-skill': {
-      return readSkillBody(input.cwd, input.location)
-    }
-    case 'list-resources': {
-      const resources = await listResources(input.cwd, input.location)
-      return { mode: 'list-resources', resources }
-    }
-  }
-}
-
-// ---------------------------------------------------------------------------
-// useTool registration
+// useTool registration — one tool per mode
 // ---------------------------------------------------------------------------
 
 /**
- * Progressive disclosure over local skills: discover (tier 1 metadata),
- * read-skill (tier 2 full instructions), list-resources (tier 3
- * bundled-resource preview). Returns data only — never writes. Own
- * frontmatter parsing; does not import from the markdown CLI.
+ * Discover tier-1 metadata for local skills: scan `.agents/skills/` at project
+ * + user level, parse SKILL.md frontmatter, and return metadata records plus
+ * warnings for skills that were skipped. Returns data only — never writes.
  */
-export const skillClient = useTool(
+export const skillDiscover = useTool(
   {
-    name: SKILL_CLIENT_TOOL_NAME,
+    name: 'skill-discover',
     description:
-      'Progressive disclosure over local skills. discover scans ' +
-      '.agents/skills/ at project + user level and parses frontmatter into ' +
-      'metadata records (tier 1). read-skill loads the SKILL.md body with ' +
-      'frontmatter stripped (tier 2). list-resources enumerates bundled ' +
-      'files in the skill directory without reading them (tier 3). Returns ' +
-      'data only — never writes.',
-    inputSchema: SkillClientInputSchema,
-    outputSchema: SkillClientOutputSchema,
+      'Discover local skills (tier 1 metadata): scan .agents/skills/ at project + user level, parse frontmatter into name/description/location records, and report skipped-skill warnings. Returns data only — never writes.',
+    inputSchema: SkillDiscoverInputSchema,
+    outputSchema: SkillDiscoverOutputSchema,
   },
-  run,
+  ({ cwd }) => discoverSkills(cwd),
+)
+
+/**
+ * Load a SKILL.md body (tier 2 full instructions) with frontmatter stripped.
+ * A missing file or unparseable frontmatter returns `{ isError, message }`.
+ */
+export const skillRead = useTool(
+  {
+    name: 'skill-read',
+    description:
+      "Load a local skill's SKILL.md body (tier 2 full instructions) with frontmatter stripped. Returns { name, body }, or { isError, message } when the file is missing or its frontmatter is unparseable.",
+    inputSchema: SkillReadInputSchema,
+    outputSchema: SkillReadOutputSchema,
+  },
+  ({ cwd, location }) => readSkillBody(cwd, location),
+)
+
+/**
+ * Enumerate bundled files (tier 3) in a skill directory without reading them.
+ * SKILL.md itself is excluded (it is the tier-2 instruction file).
+ */
+export const skillListResources = useTool(
+  {
+    name: 'skill-list-resources',
+    description:
+      'Enumerate bundled resources (tier 3) in a local skill directory as relative paths without reading them. SKILL.md is excluded — it is the tier-2 instruction file.',
+    inputSchema: SkillListResourcesInputSchema,
+    outputSchema: SkillListResourcesOutputSchema,
+  },
+  async ({ cwd, location }) => ({ resources: await listResources(cwd, location) }),
 )

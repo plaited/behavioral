@@ -1,63 +1,94 @@
 import { describe, expect, test } from 'bun:test'
-import { createDiscoveryTool, DiscoveryInputSchema, DiscoveryOutputSchema } from '../discovery.ts'
+import {
+  DiscoveryCreateInputSchema,
+  DiscoveryCreateOutputSchema,
+  DiscoveryDeleteInputSchema,
+  DiscoveryDeleteOutputSchema,
+  DiscoveryReadInputSchema,
+  DiscoveryReadOutputSchema,
+  DiscoverySearchInputSchema,
+  DiscoverySearchOutputSchema,
+  DiscoveryUpdateInputSchema,
+  DiscoveryUpdateOutputSchema,
+  discoveryCreate,
+  discoveryDelete,
+  discoveryRead,
+  discoverySearch,
+  discoveryUpdate,
+} from '../discovery.ts'
 import { ajv } from '../use-tool.ts'
 
-const validateInput = ajv.compile(DiscoveryInputSchema)
-const validateOutput = ajv.compile(DiscoveryOutputSchema)
+const validateCreateInput = ajv.compile(DiscoveryCreateInputSchema)
+const validateCreateOutput = ajv.compile(DiscoveryCreateOutputSchema)
+const validateReadInput = ajv.compile(DiscoveryReadInputSchema)
+const validateReadOutput = ajv.compile(DiscoveryReadOutputSchema)
+const validateUpdateInput = ajv.compile(DiscoveryUpdateInputSchema)
+const validateUpdateOutput = ajv.compile(DiscoveryUpdateOutputSchema)
+const validateDeleteInput = ajv.compile(DiscoveryDeleteInputSchema)
+const validateDeleteOutput = ajv.compile(DiscoveryDeleteOutputSchema)
+const validateSearchInput = ajv.compile(DiscoverySearchInputSchema)
+const validateSearchOutput = ajv.compile(DiscoverySearchOutputSchema)
 
-// Each test gets a fresh temp SQLite file so CRUD round-trips are isolated.
-const tempDbPath = async (): Promise<{ dbPath: string; cleanup: () => Promise<void> }> => {
+// Each test gets a fresh temp cwd; the store resolves to
+// <cwd>/.behavioral/discovery.sqlite.
+const tempCwd = async (): Promise<{ cwd: string; cleanup: () => Promise<void> }> => {
   const dir = (await Bun.$`mktemp -d`.quiet().text()).trim()
   return {
-    dbPath: `${dir}/discovery.sqlite`,
+    cwd: dir,
     cleanup: async () => {
       await Bun.$`rm -rf ${dir}`.quiet().nothrow()
     },
   }
 }
 
-describe('discovery tool — schema contract (RED)', () => {
-  test('input schema is a 5-branch oneOf on mode', () => {
-    expect((DiscoveryInputSchema as { oneOf?: unknown[] }).oneOf).toHaveLength(5)
+describe('discovery tools — schema contract (RED)', () => {
+  test('each tool names itself distinctly', () => {
+    expect(discoveryCreate.name).toBe('discovery-create')
+    expect(discoveryRead.name).toBe('discovery-read')
+    expect(discoveryUpdate.name).toBe('discovery-update')
+    expect(discoveryDelete.name).toBe('discovery-delete')
+    expect(discoverySearch.name).toBe('discovery-search')
   })
 
-  test('output schema is a 5-branch oneOf on mode', () => {
-    expect((DiscoveryOutputSchema as { oneOf?: unknown[] }).oneOf).toHaveLength(5)
-  })
-
-  test('rejects an unknown mode', () => {
-    expect(validateInput({ mode: 'nope' })).toBe(false)
+  test('every tool requires cwd — the store path derives from it', () => {
+    expect(validateCreateInput({ kind: 'mcp-tool', name: 'n', description: 'd', handle: 'h' })).toBe(false)
+    expect(validateReadInput({ id: 'x' })).toBe(false)
+    expect(validateUpdateInput({ id: 'x' })).toBe(false)
+    expect(validateDeleteInput({ id: 'x' })).toBe(false)
+    expect(validateSearchInput({ query: 'x' })).toBe(false)
   })
 
   test('create requires kind, name, description, handle', () => {
-    expect(validateInput({ mode: 'create', kind: 'mcp-tool', name: 'n' })).toBe(false)
-    expect(validateInput({ mode: 'create', kind: 'mcp-tool', name: 'n', description: 'd', handle: 'h' })).toBe(true)
+    expect(validateCreateInput({ cwd: '/p', kind: 'mcp-tool', name: 'n' })).toBe(false)
+    expect(validateCreateInput({ cwd: '/p', kind: 'mcp-tool', name: 'n', description: 'd', handle: 'h' })).toBe(true)
   })
 
   test('create rejects an invalid kind', () => {
-    expect(validateInput({ mode: 'create', kind: 'nope', name: 'n', description: 'd', handle: 'h' })).toBe(false)
+    expect(validateCreateInput({ cwd: '/p', kind: 'nope', name: 'n', description: 'd', handle: 'h' })).toBe(false)
   })
 
   test('read/update/delete require id', () => {
-    expect(validateInput({ mode: 'read' })).toBe(false)
-    expect(validateInput({ mode: 'read', id: 'x' })).toBe(true)
-    expect(validateInput({ mode: 'update' })).toBe(false)
-    expect(validateInput({ mode: 'update', id: 'x', description: 'd' })).toBe(true)
-    expect(validateInput({ mode: 'delete' })).toBe(false)
-    expect(validateInput({ mode: 'delete', id: 'x' })).toBe(true)
+    expect(validateReadInput({ cwd: '/p' })).toBe(false)
+    expect(validateReadInput({ cwd: '/p', id: 'x' })).toBe(true)
+    expect(validateUpdateInput({ cwd: '/p' })).toBe(false)
+    expect(validateUpdateInput({ cwd: '/p', id: 'x', description: 'd' })).toBe(true)
+    expect(validateDeleteInput({ cwd: '/p' })).toBe(false)
+    expect(validateDeleteInput({ cwd: '/p', id: 'x' })).toBe(true)
   })
 
   test('search requires query', () => {
-    expect(validateInput({ mode: 'search' })).toBe(false)
-    expect(validateInput({ mode: 'search', query: 'term' })).toBe(true)
+    expect(validateSearchInput({ cwd: '/p' })).toBe(false)
+    expect(validateSearchInput({ cwd: '/p', query: 'term' })).toBe(true)
+    expect(validateSearchInput({ cwd: '/p', query: 'term', kind: 'skill', limit: 5 })).toBe(true)
+    expect(validateSearchInput({ cwd: '/p', query: 'term', kind: 'nope' })).toBe(false)
   })
 
-  test('a model-supplied dbPath is rejected — dbPath is provisioner-injected, not model-facing', () => {
-    // dbPath is NOT in the schema. A model attempting to choose the store path
-    // is rejected at the boundary (additionalProperties: false).
+  test('a model-supplied dbPath is rejected — the store path derives from cwd', () => {
+    // dbPath is NOT in any schema. A model attempting to choose the store
+    // path is rejected at the boundary (additionalProperties: false).
     expect(
-      validateInput({
-        mode: 'create',
+      validateCreateInput({
+        cwd: '/p',
         kind: 'mcp-tool',
         name: 'n',
         description: 'd',
@@ -65,50 +96,52 @@ describe('discovery tool — schema contract (RED)', () => {
         dbPath: '/etc/passwd',
       }),
     ).toBe(false)
-    expect(validateInput({ mode: 'search', query: 'x', dbPath: '/tmp/evil.sqlite' })).toBe(false)
+    expect(validateSearchInput({ cwd: '/p', query: 'x', dbPath: '/tmp/evil.sqlite' })).toBe(false)
+  })
+
+  test('a stray mode discriminator is rejected — modes are separate tools now', () => {
+    expect(validateSearchInput({ cwd: '/p', mode: 'search', query: 'x' })).toBe(false)
+    expect(
+      validateCreateInput({ cwd: '/p', mode: 'create', kind: 'mcp-tool', name: 'n', description: 'd', handle: 'h' }),
+    ).toBe(false)
   })
 })
 
-describe('discovery tool — CRUD round-trip through .behavioral/discovery.sqlite', () => {
+describe('discovery tools — CRUD round-trip through <cwd>/.behavioral/discovery.sqlite', () => {
   test('create → read → update → delete an mcp-tool row', async () => {
-    const { dbPath, cleanup } = await tempDbPath()
-    const discovery = createDiscoveryTool({ dbPath })
+    const { cwd, cleanup } = await tempCwd()
     try {
-      const created = (await discovery({
-        mode: 'create',
+      const created = (await discoveryCreate({
+        cwd,
         kind: 'mcp-tool',
         name: 'you-docs',
         description: 'Search the MCP docs.',
         handle: 'https://api.example.com/mcp',
         metadata: { inputSchema: { type: 'object' } },
-      })) as { mode: string; row: { id: string; kind: string; name: string; metadata: unknown } }
-      expect(created.mode).toBe('create')
-      expect(validateOutput(created)).toBe(true)
+      })) as { row: { id: string; kind: string; name: string; metadata: unknown } }
+      expect(validateCreateOutput(created)).toBe(true)
       const id = created.row.id
       expect(created.row.kind).toBe('mcp-tool')
       expect(created.row.name).toBe('you-docs')
       expect(created.row.metadata).toEqual({ inputSchema: { type: 'object' } })
 
-      const read = (await discovery({ mode: 'read', id })) as { mode: string; row: { name: string } | null }
-      expect(read.mode).toBe('read')
-      expect(validateOutput(read)).toBe(true)
+      const read = (await discoveryRead({ cwd, id })) as { row: { name: string } | null }
+      expect(validateReadOutput(read)).toBe(true)
       expect(read.row?.name).toBe('you-docs')
 
-      const updated = (await discovery({
-        mode: 'update',
+      const updated = (await discoveryUpdate({
+        cwd,
         id,
         description: 'Search the MCP docs, updated.',
-      })) as { mode: string; row: { description: string } | null }
-      expect(updated.mode).toBe('update')
-      expect(validateOutput(updated)).toBe(true)
+      })) as { row: { description: string } | null }
+      expect(validateUpdateOutput(updated)).toBe(true)
       expect(updated.row?.description).toBe('Search the MCP docs, updated.')
 
-      const deleted = (await discovery({ mode: 'delete', id })) as { mode: string; deleted: boolean }
-      expect(deleted.mode).toBe('delete')
-      expect(validateOutput(deleted)).toBe(true)
+      const deleted = (await discoveryDelete({ cwd, id })) as { deleted: boolean }
+      expect(validateDeleteOutput(deleted)).toBe(true)
       expect(deleted.deleted).toBe(true)
 
-      const afterDelete = (await discovery({ mode: 'read', id })) as { row: null }
+      const afterDelete = (await discoveryRead({ cwd, id })) as { row: null }
       expect(afterDelete.row).toBeNull()
     } finally {
       await cleanup()
@@ -116,11 +149,10 @@ describe('discovery tool — CRUD round-trip through .behavioral/discovery.sqlit
   })
 
   test('a skill row stores frontmatter as metadata', async () => {
-    const { dbPath, cleanup } = await tempDbPath()
-    const discovery = createDiscoveryTool({ dbPath })
+    const { cwd, cleanup } = await tempCwd()
     try {
-      const created = (await discovery({
-        mode: 'create',
+      const created = (await discoveryCreate({
+        cwd,
         kind: 'skill',
         name: 'echo',
         description: 'Echo skill.',
@@ -135,11 +167,10 @@ describe('discovery tool — CRUD round-trip through .behavioral/discovery.sqlit
   })
 
   test('read of a missing id returns row null', async () => {
-    const { dbPath, cleanup } = await tempDbPath()
-    const discovery = createDiscoveryTool({ dbPath })
+    const { cwd, cleanup } = await tempCwd()
     try {
-      const read = (await discovery({ mode: 'read', id: 'nonexistent' })) as { row: null }
-      expect(validateOutput({ mode: 'read', row: read.row })).toBe(true)
+      const read = (await discoveryRead({ cwd, id: 'nonexistent' })) as { row: null }
+      expect(validateReadOutput(read)).toBe(true)
       expect(read.row).toBeNull()
     } finally {
       await cleanup()
@@ -147,10 +178,9 @@ describe('discovery tool — CRUD round-trip through .behavioral/discovery.sqlit
   })
 
   test('update of a missing id returns row null with isError', async () => {
-    const { dbPath, cleanup } = await tempDbPath()
-    const discovery = createDiscoveryTool({ dbPath })
+    const { cwd, cleanup } = await tempCwd()
     try {
-      const updated = (await discovery({ mode: 'update', id: 'nonexistent', description: 'x' })) as {
+      const updated = (await discoveryUpdate({ cwd, id: 'nonexistent', description: 'x' })) as {
         row: null
         isError?: boolean
       }
@@ -162,10 +192,9 @@ describe('discovery tool — CRUD round-trip through .behavioral/discovery.sqlit
   })
 
   test('delete of a missing id returns deleted false', async () => {
-    const { dbPath, cleanup } = await tempDbPath()
-    const discovery = createDiscoveryTool({ dbPath })
+    const { cwd, cleanup } = await tempCwd()
     try {
-      const deleted = (await discovery({ mode: 'delete', id: 'nonexistent' })) as { deleted: boolean }
+      const deleted = (await discoveryDelete({ cwd, id: 'nonexistent' })) as { deleted: boolean }
       expect(deleted.deleted).toBe(false)
     } finally {
       await cleanup()
@@ -173,18 +202,17 @@ describe('discovery tool — CRUD round-trip through .behavioral/discovery.sqlit
   })
 
   test('updating a name and handle persists', async () => {
-    const { dbPath, cleanup } = await tempDbPath()
-    const discovery = createDiscoveryTool({ dbPath })
+    const { cwd, cleanup } = await tempCwd()
     try {
-      const created = (await discovery({
-        mode: 'create',
+      const created = (await discoveryCreate({
+        cwd,
         kind: 'mcp-tool',
         name: 'old',
         description: 'd',
         handle: 'h1',
       })) as { row: { id: string } }
-      const updated = (await discovery({
-        mode: 'update',
+      const updated = (await discoveryUpdate({
+        cwd,
         id: created.row.id,
         name: 'new',
         handle: 'h2',
@@ -197,34 +225,21 @@ describe('discovery tool — CRUD round-trip through .behavioral/discovery.sqlit
   })
 })
 
-describe('discovery tool — search across both kinds', () => {
+describe('discovery tools — search across both kinds', () => {
   test('matches by name and description substring, case-insensitive', async () => {
-    const { dbPath, cleanup } = await tempDbPath()
-    const discovery = createDiscoveryTool({ dbPath })
+    const { cwd, cleanup } = await tempCwd()
     try {
-      await discovery({
-        mode: 'create',
-        kind: 'mcp-tool',
-        name: 'weather',
-        description: 'Get forecasts.',
-        handle: 'u1',
-      })
-      await discovery({ mode: 'create', kind: 'skill', name: 'code-review', description: 'Review code.', handle: 'p1' })
-      await discovery({
-        mode: 'create',
-        kind: 'mcp-tool',
-        name: 'search',
-        description: 'Web search tool.',
-        handle: 'u2',
-      })
+      await discoveryCreate({ cwd, kind: 'mcp-tool', name: 'weather', description: 'Get forecasts.', handle: 'u1' })
+      await discoveryCreate({ cwd, kind: 'skill', name: 'code-review', description: 'Review code.', handle: 'p1' })
+      await discoveryCreate({ cwd, kind: 'mcp-tool', name: 'search', description: 'Web search tool.', handle: 'u2' })
 
-      const byName = (await discovery({ mode: 'search', query: 'weath' })) as { rows: { name: string }[] }
+      const byName = (await discoverySearch({ cwd, query: 'weath' })) as { rows: { name: string }[] }
       expect(byName.rows.map((r) => r.name)).toEqual(['weather'])
 
-      const byDesc = (await discovery({ mode: 'search', query: 'code' })) as { rows: { name: string }[] }
+      const byDesc = (await discoverySearch({ cwd, query: 'code' })) as { rows: { name: string }[] }
       expect(byDesc.rows.map((r) => r.name)).toEqual(['code-review'])
 
-      const caseInsensitive = (await discovery({ mode: 'search', query: 'REVIEW' })) as { rows: { name: string }[] }
+      const caseInsensitive = (await discoverySearch({ cwd, query: 'REVIEW' })) as { rows: { name: string }[] }
       expect(caseInsensitive.rows.map((r) => r.name)).toEqual(['code-review'])
     } finally {
       await cleanup()
@@ -232,19 +247,18 @@ describe('discovery tool — search across both kinds', () => {
   })
 
   test('kind filter restricts results to one kind', async () => {
-    const { dbPath, cleanup } = await tempDbPath()
-    const discovery = createDiscoveryTool({ dbPath })
+    const { cwd, cleanup } = await tempCwd()
     try {
-      await discovery({ mode: 'create', kind: 'mcp-tool', name: 'search', description: 'find', handle: 'u1' })
-      await discovery({ mode: 'create', kind: 'skill', name: 'search-skill', description: 'find', handle: 'p1' })
+      await discoveryCreate({ cwd, kind: 'mcp-tool', name: 'search', description: 'find', handle: 'u1' })
+      await discoveryCreate({ cwd, kind: 'skill', name: 'search-skill', description: 'find', handle: 'p1' })
 
-      const toolsOnly = (await discovery({ mode: 'search', query: 'search', kind: 'mcp-tool' })) as {
+      const toolsOnly = (await discoverySearch({ cwd, query: 'search', kind: 'mcp-tool' })) as {
         rows: { kind: string }[]
       }
       expect(toolsOnly.rows).toHaveLength(1)
       expect(toolsOnly.rows[0]!.kind).toBe('mcp-tool')
 
-      const skillsOnly = (await discovery({ mode: 'search', query: 'search', kind: 'skill' })) as {
+      const skillsOnly = (await discoverySearch({ cwd, query: 'search', kind: 'skill' })) as {
         rows: { kind: string }[]
       }
       expect(skillsOnly.rows).toHaveLength(1)
@@ -255,10 +269,10 @@ describe('discovery tool — search across both kinds', () => {
   })
 
   test('no match returns an empty rows array', async () => {
-    const { dbPath, cleanup } = await tempDbPath()
-    const discovery = createDiscoveryTool({ dbPath })
+    const { cwd, cleanup } = await tempCwd()
     try {
-      const result = (await discovery({ mode: 'search', query: 'zzz' })) as { rows: unknown[] }
+      const result = (await discoverySearch({ cwd, query: 'zzz' })) as { rows: unknown[] }
+      expect(validateSearchOutput(result)).toBe(true)
       expect(result.rows).toEqual([])
     } finally {
       await cleanup()
@@ -266,19 +280,12 @@ describe('discovery tool — search across both kinds', () => {
   })
 
   test('limit caps the result count', async () => {
-    const { dbPath, cleanup } = await tempDbPath()
-    const discovery = createDiscoveryTool({ dbPath })
+    const { cwd, cleanup } = await tempCwd()
     try {
       for (let i = 0; i < 5; i++) {
-        await discovery({
-          mode: 'create',
-          kind: 'mcp-tool',
-          name: `match-${i}`,
-          description: 'common',
-          handle: `u${i}`,
-        })
+        await discoveryCreate({ cwd, kind: 'mcp-tool', name: `match-${i}`, description: 'common', handle: `u${i}` })
       }
-      const result = (await discovery({ mode: 'search', query: 'common', limit: 2 })) as { rows: unknown[] }
+      const result = (await discoverySearch({ cwd, query: 'common', limit: 2 })) as { rows: unknown[] }
       expect(result.rows).toHaveLength(2)
     } finally {
       await cleanup()
@@ -286,13 +293,23 @@ describe('discovery tool — search across both kinds', () => {
   })
 
   test('an empty query matches all rows (tier-1 catalog)', async () => {
-    const { dbPath, cleanup } = await tempDbPath()
-    const discovery = createDiscoveryTool({ dbPath })
+    const { cwd, cleanup } = await tempCwd()
     try {
-      await discovery({ mode: 'create', kind: 'mcp-tool', name: 'a', description: 'd', handle: 'u1' })
-      await discovery({ mode: 'create', kind: 'skill', name: 'b', description: 'd', handle: 'p1' })
-      const result = (await discovery({ mode: 'search', query: '' })) as { rows: { name: string }[] }
+      await discoveryCreate({ cwd, kind: 'mcp-tool', name: 'a', description: 'd', handle: 'u1' })
+      await discoveryCreate({ cwd, kind: 'skill', name: 'b', description: 'd', handle: 'p1' })
+      const result = (await discoverySearch({ cwd, query: '' })) as { rows: { name: string }[] }
       expect(result.rows.map((r) => r.name).sort()).toEqual(['a', 'b'])
+    } finally {
+      await cleanup()
+    }
+  })
+
+  test('rows persist across separate calls (each call reopens the store)', async () => {
+    const { cwd, cleanup } = await tempCwd()
+    try {
+      await discoveryCreate({ cwd, kind: 'skill', name: 'persisted', description: 'd', handle: 'p' })
+      const result = (await discoverySearch({ cwd, query: 'persisted' })) as { rows: { name: string }[] }
+      expect(result.rows.map((r) => r.name)).toEqual(['persisted'])
     } finally {
       await cleanup()
     }

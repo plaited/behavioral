@@ -2,27 +2,23 @@
  * Agent-facing MCP client for calling remote MCP servers.
  *
  * @remarks
- * A `useTool` unit ({@link useTool}) wrapping the seven MCP client operations:
- * `call-tool`, `list-tools`, `list-prompts`, `get-prompt`, `list-resources`,
- * `read-resource`, and `discover`. Connections are pooled in
- * {@link getSharedClient} (one live `Client` per server-url, reused across
- * calls); the tool never closes a client itself — the pool owns teardown.
+ * Seven flat, standalone `useTool` units ({@link useTool}) — one per MCP
+ * client operation: `call-tool`, `list-tools`, `list-prompts`, `get-prompt`,
+ * `list-resources`, `read-resource`, and `discover`. Each tool opens its own
+ * connection for the call using the input's `auth` config (OAuth via the
+ * keychain provider) and closes it before returning. No pool, no kernel
+ * injection, no provisioning layer — import a tool and call it.
  *
- * The tool returns remote MCP data only; it never writes to any store.
+ * The tools return remote MCP data only; they never write to any store.
  *
  * @packageDocumentation
  */
 
-import type { Client, OAuthClientProvider } from '@modelcontextprotocol/client'
+import { Client, type OAuthClientProvider, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import type { JSONSchemaType } from 'ajv'
-import type { AdapterSessionOptions, GetClientFn } from '../kernel/kernel.ts'
 import type { Keychain } from '../kernel/oauth/keychain.ts'
 import { BunKeychainOAuthProvider, type KeychainOAuthProviderOptions } from '../kernel/oauth/keychain-oauth-provider.ts'
 import { ajv, useTool } from './use-tool.ts'
-
-// Re-export the injected-fn's options shape so tool consumers don't reach
-// into the kernel for it.
-export type { AdapterSessionOptions, GetClientFn }
 
 // ---------------------------------------------------------------------------
 // Internal MCP types
@@ -201,41 +197,43 @@ const authConfigJsonSchema = {
 const validateAuth = ajv.compile(authConfigJsonSchema)
 
 // ---------------------------------------------------------------------------
-// Tool input / output types (discriminated unions on `mode`)
+// Tool input / output types — one shape per tool, no `mode` discriminator
 // ---------------------------------------------------------------------------
 
-type SharedInputFields = {
+type McpClientSharedInput = {
   url: string
   auth?: RemoteMcpAuthConfig
   headers?: Record<string, string>
   timeoutMs?: number
 }
 
-export type McpClientInput =
-  | ({ mode: 'call-tool'; tool: string; args: Record<string, unknown> } & SharedInputFields)
-  | ({ mode: 'list-tools' } & SharedInputFields)
-  | ({ mode: 'list-prompts' } & SharedInputFields)
-  | ({ mode: 'get-prompt'; name: string; args?: Record<string, string> } & SharedInputFields)
-  | ({ mode: 'list-resources' } & SharedInputFields)
-  | ({ mode: 'read-resource'; uri: string } & SharedInputFields)
-  | ({ mode: 'discover' } & SharedInputFields)
+export type McpCallToolInput = McpClientSharedInput & { tool: string; args: Record<string, unknown> }
+export type McpCallToolOutput = McpCallToolResult
 
-export type McpClientOutput =
-  | { mode: 'call-tool'; result: McpCallToolResult }
-  | { mode: 'list-tools'; result: McpTool[] }
-  | { mode: 'list-prompts'; result: McpPrompt[] }
-  | { mode: 'get-prompt'; result: McpPromptMessage[] }
-  | { mode: 'list-resources'; result: McpResource[] }
-  | { mode: 'read-resource'; result: McpResourceContent[] }
-  | { mode: 'discover'; result: McpServerCapabilities }
+export type McpListToolsInput = McpClientSharedInput
+export type McpListToolsOutput = { tools: McpTool[] }
+
+export type McpListPromptsInput = McpClientSharedInput
+export type McpListPromptsOutput = { prompts: McpPrompt[] }
+
+export type McpGetPromptInput = McpClientSharedInput & { name: string; args?: Record<string, string> }
+export type McpGetPromptOutput = { messages: McpPromptMessage[] }
+
+export type McpListResourcesInput = McpClientSharedInput
+export type McpListResourcesOutput = { resources: McpResource[] }
+
+export type McpReadResourceInput = McpClientSharedInput & { uri: string }
+export type McpReadResourceOutput = { contents: McpResourceContent[] }
+
+export type McpDiscoverInput = McpClientSharedInput
+export type McpDiscoverOutput = McpServerCapabilities
 
 // ---------------------------------------------------------------------------
-// Tool JSON schemas — hand-written oneOf with `mode` as the discriminator
-// const per branch. JSONSchemaType cannot statically verify a discriminated
-// union, so the whole object is cast through `unknown` — same pattern as
-// read.ts / frontier.ts. AJV validates the shape at runtime. `auth` and
-// `args` are permissive objects here; the tool validates `auth` at the
-// boundary via `authConfigSchema` above (single source).
+// Tool JSON schemas — one schema pair per tool, no `mode` discriminator.
+// `auth` and `args` are permissive objects here; the tools validate `auth` at
+// the boundary via `authConfigJsonSchema` above (single source). The schema
+// objects are cast through `unknown` where the open MCP SDK shapes exceed
+// `JSONSchemaType`'s static power; AJV validates at runtime.
 // ---------------------------------------------------------------------------
 
 const authJsonSchema = {
@@ -245,8 +243,9 @@ const authJsonSchema = {
   description: 'auth config — validated at the boundary (none | bearer-env | static-headers | oauth-*)',
 } as const
 
-// Shared optional fields present on every mode branch.
-const sharedInputFields = {
+// Shared optional fields present on every tool input.
+const sharedInputProperties = {
+  url: { type: 'string', minLength: 1, description: 'remote MCP server URL' },
   auth: authJsonSchema,
   headers: {
     type: 'object',
@@ -262,97 +261,21 @@ const sharedInputFields = {
   },
 } as const
 
-export const McpClientInputSchema = {
+export const McpCallToolInputSchema = {
   type: 'object',
-  oneOf: [
-    {
+  properties: {
+    ...sharedInputProperties,
+    tool: { type: 'string', minLength: 1, description: 'tool name to call' },
+    args: {
       type: 'object',
-      properties: {
-        mode: { type: 'string', const: 'call-tool' },
-        url: { type: 'string', minLength: 1, description: 'remote MCP server URL' },
-        tool: { type: 'string', minLength: 1, description: 'tool name to call' },
-        args: {
-          type: 'object',
-          additionalProperties: true,
-          description: 'tool arguments — a JSON object, validated at the boundary',
-        },
-        ...sharedInputFields,
-      },
-      required: ['mode', 'url', 'tool', 'args'],
-      additionalProperties: false,
+      additionalProperties: true,
+      description: 'tool arguments — a JSON object, validated at the boundary',
     },
-    {
-      type: 'object',
-      properties: {
-        mode: { type: 'string', const: 'list-tools' },
-        url: { type: 'string', minLength: 1, description: 'remote MCP server URL' },
-        ...sharedInputFields,
-      },
-      required: ['mode', 'url'],
-      additionalProperties: false,
-    },
-    {
-      type: 'object',
-      properties: {
-        mode: { type: 'string', const: 'list-prompts' },
-        url: { type: 'string', minLength: 1, description: 'remote MCP server URL' },
-        ...sharedInputFields,
-      },
-      required: ['mode', 'url'],
-      additionalProperties: false,
-    },
-    {
-      type: 'object',
-      properties: {
-        mode: { type: 'string', const: 'get-prompt' },
-        url: { type: 'string', minLength: 1, description: 'remote MCP server URL' },
-        name: { type: 'string', minLength: 1, description: 'prompt name' },
-        args: {
-          type: 'object',
-          additionalProperties: { type: 'string' },
-          nullable: true,
-          description: 'prompt arguments',
-        },
-        ...sharedInputFields,
-      },
-      required: ['mode', 'url', 'name'],
-      additionalProperties: false,
-    },
-    {
-      type: 'object',
-      properties: {
-        mode: { type: 'string', const: 'list-resources' },
-        url: { type: 'string', minLength: 1, description: 'remote MCP server URL' },
-        ...sharedInputFields,
-      },
-      required: ['mode', 'url'],
-      additionalProperties: false,
-    },
-    {
-      type: 'object',
-      properties: {
-        mode: { type: 'string', const: 'read-resource' },
-        url: { type: 'string', minLength: 1, description: 'remote MCP server URL' },
-        uri: { type: 'string', minLength: 1, description: 'resource URI to read' },
-        ...sharedInputFields,
-      },
-      required: ['mode', 'url', 'uri'],
-      additionalProperties: false,
-    },
-    {
-      type: 'object',
-      properties: {
-        mode: { type: 'string', const: 'discover' },
-        url: { type: 'string', minLength: 1, description: 'remote MCP server URL' },
-        ...sharedInputFields,
-      },
-      required: ['mode', 'url'],
-      additionalProperties: false,
-    },
-  ],
-  description:
-    'MCP client operation to perform (call-tool | list-tools | list-prompts | get-prompt | list-resources | read-resource | discover).',
-} as unknown as JSONSchemaType<McpClientInput>
+  },
+  required: ['url', 'tool', 'args'],
+  additionalProperties: false,
+  description: 'Call a tool on a remote MCP server.',
+} as unknown as JSONSchemaType<McpCallToolInput>
 
 const mcpContentJsonSchema = {
   type: 'object',
@@ -364,99 +287,128 @@ const mcpContentJsonSchema = {
   additionalProperties: true,
 } as const
 
-export const McpClientOutputSchema = {
+export const McpCallToolOutputSchema = {
   type: 'object',
-  oneOf: [
-    {
+  properties: {
+    content: { type: 'array', items: mcpContentJsonSchema },
+    isError: { type: 'boolean', nullable: true, description: 'true when the remote tool reported an error' },
+  },
+  required: ['content'],
+  additionalProperties: true,
+} as unknown as JSONSchemaType<McpCallToolOutput>
+
+export const McpListToolsInputSchema = {
+  type: 'object',
+  properties: { ...sharedInputProperties },
+  required: ['url'],
+  additionalProperties: false,
+  description: 'List the tools a remote MCP server exposes.',
+} as unknown as JSONSchemaType<McpListToolsInput>
+
+export const McpListToolsOutputSchema = {
+  type: 'object',
+  properties: { tools: { type: 'array', items: { type: 'object', additionalProperties: true } } },
+  required: ['tools'],
+  additionalProperties: false,
+} as unknown as JSONSchemaType<McpListToolsOutput>
+
+export const McpListPromptsInputSchema = {
+  type: 'object',
+  properties: { ...sharedInputProperties },
+  required: ['url'],
+  additionalProperties: false,
+  description: 'List the prompts a remote MCP server exposes.',
+} as unknown as JSONSchemaType<McpListPromptsInput>
+
+export const McpListPromptsOutputSchema = {
+  type: 'object',
+  properties: { prompts: { type: 'array', items: { type: 'object', additionalProperties: true } } },
+  required: ['prompts'],
+  additionalProperties: false,
+} as unknown as JSONSchemaType<McpListPromptsOutput>
+
+export const McpGetPromptInputSchema = {
+  type: 'object',
+  properties: {
+    ...sharedInputProperties,
+    name: { type: 'string', minLength: 1, description: 'prompt name' },
+    args: {
       type: 'object',
-      properties: {
-        mode: { type: 'string', const: 'call-tool' },
-        result: {
-          type: 'object',
-          properties: {
-            content: { type: 'array', items: mcpContentJsonSchema },
-            isError: { type: 'boolean', nullable: true },
-          },
-          required: ['content'],
-          additionalProperties: true,
-        },
-      },
-      required: ['mode', 'result'],
-      additionalProperties: false,
+      additionalProperties: { type: 'string' },
+      nullable: true,
+      description: 'prompt arguments',
     },
-    {
-      type: 'object',
-      properties: {
-        mode: { type: 'string', const: 'list-tools' },
-        result: { type: 'array', items: { type: 'object', additionalProperties: true } },
-      },
-      required: ['mode', 'result'],
-      additionalProperties: false,
-    },
-    {
-      type: 'object',
-      properties: {
-        mode: { type: 'string', const: 'list-prompts' },
-        result: { type: 'array', items: { type: 'object', additionalProperties: true } },
-      },
-      required: ['mode', 'result'],
-      additionalProperties: false,
-    },
-    {
-      type: 'object',
-      properties: {
-        mode: { type: 'string', const: 'get-prompt' },
-        result: { type: 'array', items: { type: 'object', additionalProperties: true } },
-      },
-      required: ['mode', 'result'],
-      additionalProperties: false,
-    },
-    {
-      type: 'object',
-      properties: {
-        mode: { type: 'string', const: 'list-resources' },
-        result: { type: 'array', items: { type: 'object', additionalProperties: true } },
-      },
-      required: ['mode', 'result'],
-      additionalProperties: false,
-    },
-    {
-      type: 'object',
-      properties: {
-        mode: { type: 'string', const: 'read-resource' },
-        result: { type: 'array', items: { type: 'object', additionalProperties: true } },
-      },
-      required: ['mode', 'result'],
-      additionalProperties: false,
-    },
-    {
-      type: 'object',
-      properties: {
-        mode: { type: 'string', const: 'discover' },
-        result: {
-          type: 'object',
-          properties: {
-            tools: { type: 'array', items: { type: 'object', additionalProperties: true } },
-            prompts: { type: 'array', items: { type: 'object', additionalProperties: true } },
-            resources: { type: 'array', items: { type: 'object', additionalProperties: true } },
-          },
-          required: ['tools', 'prompts', 'resources'],
-          additionalProperties: true,
-        },
-      },
-      required: ['mode', 'result'],
-      additionalProperties: false,
-    },
-  ],
-  description: 'MCP client operation result, discriminated by mode.',
-} as unknown as JSONSchemaType<McpClientOutput>
+  },
+  required: ['url', 'name'],
+  additionalProperties: false,
+  description: 'Fetch a rendered prompt from a remote MCP server.',
+} as unknown as JSONSchemaType<McpGetPromptInput>
+
+export const McpGetPromptOutputSchema = {
+  type: 'object',
+  properties: { messages: { type: 'array', items: { type: 'object', additionalProperties: true } } },
+  required: ['messages'],
+  additionalProperties: false,
+} as unknown as JSONSchemaType<McpGetPromptOutput>
+
+export const McpListResourcesInputSchema = {
+  type: 'object',
+  properties: { ...sharedInputProperties },
+  required: ['url'],
+  additionalProperties: false,
+  description: 'List the resources a remote MCP server exposes.',
+} as unknown as JSONSchemaType<McpListResourcesInput>
+
+export const McpListResourcesOutputSchema = {
+  type: 'object',
+  properties: { resources: { type: 'array', items: { type: 'object', additionalProperties: true } } },
+  required: ['resources'],
+  additionalProperties: false,
+} as unknown as JSONSchemaType<McpListResourcesOutput>
+
+export const McpReadResourceInputSchema = {
+  type: 'object',
+  properties: {
+    ...sharedInputProperties,
+    uri: { type: 'string', minLength: 1, description: 'resource URI to read' },
+  },
+  required: ['url', 'uri'],
+  additionalProperties: false,
+  description: 'Read a resource from a remote MCP server.',
+} as unknown as JSONSchemaType<McpReadResourceInput>
+
+export const McpReadResourceOutputSchema = {
+  type: 'object',
+  properties: { contents: { type: 'array', items: { type: 'object', additionalProperties: true } } },
+  required: ['contents'],
+  additionalProperties: false,
+} as unknown as JSONSchemaType<McpReadResourceOutput>
+
+export const McpDiscoverInputSchema = {
+  type: 'object',
+  properties: { ...sharedInputProperties },
+  required: ['url'],
+  additionalProperties: false,
+  description: "Discover a remote MCP server's tools, prompts, and resources in one call.",
+} as unknown as JSONSchemaType<McpDiscoverInput>
+
+export const McpDiscoverOutputSchema = {
+  type: 'object',
+  properties: {
+    tools: { type: 'array', items: { type: 'object', additionalProperties: true } },
+    prompts: { type: 'array', items: { type: 'object', additionalProperties: true } },
+    resources: { type: 'array', items: { type: 'object', additionalProperties: true } },
+  },
+  required: ['tools', 'prompts', 'resources'],
+  additionalProperties: true,
+} as unknown as JSONSchemaType<McpDiscoverOutput>
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-export const MCP_CLIENT_TOOL_NAME = 'mcp-client'
 const DEFAULT_BEARER_PREFIX = 'Bearer'
+const CLIENT_INFO = { name: 'behavioral', version: '0.0.0' }
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -676,83 +628,169 @@ const discoverCapabilities = async (client: Client, timeoutMs?: number): Promise
 }
 
 // ---------------------------------------------------------------------------
-// Tool run
+// Session lifecycle — one connection per call, owned by the tool
 // ---------------------------------------------------------------------------
-
-const run =
-  (getClient: GetClientFn) =>
-  async (input: McpClientInput): Promise<McpClientOutput> => {
-    const { url, auth, headers, timeoutMs } = input
-    const options = await resolveSessionOptions({ url, auth, headers, timeoutMs })
-    const client = await getClient(url, options)
-
-    switch (input.mode) {
-      case 'call-tool': {
-        const result = (await withTimeout(timeoutMs, () =>
-          client.callTool({ name: input.tool, arguments: input.args }),
-        )) as McpCallToolResult
-        return { mode: 'call-tool', result }
-      }
-      case 'list-tools': {
-        const result = (await withTimeout(timeoutMs, async () => (await client.listTools()).tools)) as McpTool[]
-        return { mode: 'list-tools', result }
-      }
-      case 'list-prompts': {
-        const result = (await withTimeout(timeoutMs, async () => (await client.listPrompts()).prompts)) as McpPrompt[]
-        return { mode: 'list-prompts', result }
-      }
-      case 'get-prompt': {
-        const result = (await withTimeout(
-          timeoutMs,
-          async () => (await client.getPrompt({ name: input.name, arguments: input.args })).messages,
-        )) as McpPromptMessage[]
-        return { mode: 'get-prompt', result }
-      }
-      case 'list-resources': {
-        const result = (await withTimeout(
-          timeoutMs,
-          async () => (await client.listResources()).resources,
-        )) as McpResource[]
-        return { mode: 'list-resources', result }
-      }
-      case 'read-resource': {
-        const result = (await withTimeout(
-          timeoutMs,
-          async () => (await client.readResource({ uri: input.uri })).contents,
-        )) as McpResourceContent[]
-        return { mode: 'read-resource', result }
-      }
-      case 'discover': {
-        const result = await discoverCapabilities(client, timeoutMs)
-        return { mode: 'discover', result }
-      }
-    }
-  }
-
-// ---------------------------------------------------------------------------
-// useTool registration — factory; pool injected at provisioning
-// ---------------------------------------------------------------------------
-
-export type McpClientTool = ReturnType<typeof useTool<McpClientInput, McpClientOutput>>
 
 /**
- * Build a provisioned MCP client tool bound to an injected pool getter. The
- * kernel owns the connection pool closure (see {@link createConnectionPool});
- * it injects the pool's `getClient` here at provisioning so the tool never
- * imports a global. The tool never closes a client itself — the pool owns
- * teardown.
+ * Open a connected MCP {@link Client} for one operation and always close it
+ * afterward. Connections are per-call: the tools hold no state, so they can be
+ * called directly or wired back into a CLI without a provisioning layer. Auth
+ * is resolved per call from the input's `auth` config (OAuth via the keychain
+ * provider). Transport `fetch` is the ambient global, so the SDK's in-process
+ * `handler.fetch` test pattern applies by assigning `globalThis.fetch`.
  */
-export const createMcpClientTool = ({ getClient }: { getClient: GetClientFn }): McpClientTool =>
-  useTool(
-    {
-      name: MCP_CLIENT_TOOL_NAME,
-      description:
-        'Call tools and list capabilities on remote MCP servers. Seven modes: ' +
-        'call-tool, list-tools, list-prompts, get-prompt, list-resources, ' +
-        'read-resource, discover. Connections are pooled per server-url and ' +
-        'reused across calls. Returns remote MCP data only — never writes a store.',
-      inputSchema: McpClientInputSchema,
-      outputSchema: McpClientOutputSchema,
-    },
-    run(getClient),
-  )
+const withSession = async <T>(input: McpClientSharedInput, operation: (client: Client) => Promise<T>): Promise<T> => {
+  const { headers, authProvider } = await resolveSessionOptions(input)
+  const client = new Client(CLIENT_INFO)
+  const transport = new StreamableHTTPClientTransport(new URL(input.url), {
+    requestInit: headers ? { headers } : undefined,
+    authProvider,
+  })
+  await client.connect(transport)
+  try {
+    return await operation(client)
+  } finally {
+    try {
+      await client.close()
+    } catch {
+      /* best-effort — a close failure must not mask the operation result */
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// useTool registration — flat, standalone tools (one per operation)
+// ---------------------------------------------------------------------------
+
+/**
+ * Call a tool on a remote MCP server. Opens a per-call connection using the
+ * input's auth config and closes it before returning. Returns the remote MCP
+ * tool result only — never writes a store.
+ */
+export const mcpCallTool = useTool(
+  {
+    name: 'mcp-call-tool',
+    description: 'Call a tool on a remote MCP server. Returns the remote MCP tool result only — never writes a store.',
+    inputSchema: McpCallToolInputSchema,
+    outputSchema: McpCallToolOutputSchema,
+  },
+  (input): Promise<McpCallToolOutput> =>
+    withSession(
+      input,
+      async (client) =>
+        (await withTimeout(input.timeoutMs, () =>
+          client.callTool({ name: input.tool, arguments: input.args }),
+        )) as McpCallToolResult,
+    ),
+)
+
+/**
+ * List the tools a remote MCP server exposes. Returns remote MCP data only —
+ * never writes a store.
+ */
+export const mcpListTools = useTool(
+  {
+    name: 'mcp-list-tools',
+    description: 'List the tools a remote MCP server exposes. Returns remote MCP data only — never writes a store.',
+    inputSchema: McpListToolsInputSchema,
+    outputSchema: McpListToolsOutputSchema,
+  },
+  (input): Promise<McpListToolsOutput> =>
+    withSession(input, async (client) => ({
+      tools: (await withTimeout(input.timeoutMs, async () => (await client.listTools()).tools)) as McpTool[],
+    })),
+)
+
+/**
+ * List the prompts a remote MCP server exposes. Returns remote MCP data only —
+ * never writes a store.
+ */
+export const mcpListPrompts = useTool(
+  {
+    name: 'mcp-list-prompts',
+    description: 'List the prompts a remote MCP server exposes. Returns remote MCP data only — never writes a store.',
+    inputSchema: McpListPromptsInputSchema,
+    outputSchema: McpListPromptsOutputSchema,
+  },
+  (input): Promise<McpListPromptsOutput> =>
+    withSession(input, async (client) => ({
+      prompts: (await withTimeout(input.timeoutMs, async () => (await client.listPrompts()).prompts)) as McpPrompt[],
+    })),
+)
+
+/**
+ * Fetch a rendered prompt from a remote MCP server. Returns remote MCP data
+ * only — never writes a store.
+ */
+export const mcpGetPrompt = useTool(
+  {
+    name: 'mcp-get-prompt',
+    description:
+      'Fetch a rendered prompt from a remote MCP server. Returns remote MCP data only — never writes a store.',
+    inputSchema: McpGetPromptInputSchema,
+    outputSchema: McpGetPromptOutputSchema,
+  },
+  (input): Promise<McpGetPromptOutput> =>
+    withSession(input, async (client) => ({
+      messages: (await withTimeout(
+        input.timeoutMs,
+        async () => (await client.getPrompt({ name: input.name, arguments: input.args })).messages,
+      )) as McpPromptMessage[],
+    })),
+)
+
+/**
+ * List the resources a remote MCP server exposes. Returns remote MCP data only
+ * — never writes a store.
+ */
+export const mcpListResources = useTool(
+  {
+    name: 'mcp-list-resources',
+    description: 'List the resources a remote MCP server exposes. Returns remote MCP data only — never writes a store.',
+    inputSchema: McpListResourcesInputSchema,
+    outputSchema: McpListResourcesOutputSchema,
+  },
+  (input): Promise<McpListResourcesOutput> =>
+    withSession(input, async (client) => ({
+      resources: (await withTimeout(
+        input.timeoutMs,
+        async () => (await client.listResources()).resources,
+      )) as McpResource[],
+    })),
+)
+
+/**
+ * Read a resource from a remote MCP server. Returns remote MCP data only —
+ * never writes a store.
+ */
+export const mcpReadResource = useTool(
+  {
+    name: 'mcp-read-resource',
+    description: 'Read a resource from a remote MCP server. Returns remote MCP data only — never writes a store.',
+    inputSchema: McpReadResourceInputSchema,
+    outputSchema: McpReadResourceOutputSchema,
+  },
+  (input): Promise<McpReadResourceOutput> =>
+    withSession(input, async (client) => ({
+      contents: (await withTimeout(
+        input.timeoutMs,
+        async () => (await client.readResource({ uri: input.uri })).contents,
+      )) as McpResourceContent[],
+    })),
+)
+
+/**
+ * Discover a remote MCP server's tools, prompts, and resources in one call.
+ * Missing capabilities resolve to empty arrays. Returns remote MCP data only —
+ * never writes a store.
+ */
+export const mcpDiscover = useTool(
+  {
+    name: 'mcp-discover',
+    description:
+      "Discover a remote MCP server's tools, prompts, and resources in one call. Missing capabilities resolve to empty arrays. Returns remote MCP data only — never writes a store.",
+    inputSchema: McpDiscoverInputSchema,
+    outputSchema: McpDiscoverOutputSchema,
+  },
+  (input): Promise<McpDiscoverOutput> => withSession(input, (client) => discoverCapabilities(client, input.timeoutMs)),
+)

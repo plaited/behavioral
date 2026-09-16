@@ -552,7 +552,7 @@ describe('plugin-loader — sh.behavioral extension', () => {
     }
   })
 
-  test('reads the OpenRouter model entry (base-with-path endpoint URL)', async () => {
+  test('reads a model entry with a base-with-path endpoint URL', async () => {
     const dir = await tempDir()
     try {
       await makePlugin(dir, {
@@ -563,10 +563,10 @@ describe('plugin-loader — sh.behavioral extension', () => {
             'sh.behavioral': {
               models: [
                 {
-                  provider: 'openrouter',
-                  modelId: 'z-ai/glm-5.3-flash',
-                  endpointUrl: 'https://openrouter.ai/api/v1',
-                  apiKeyRef: 'openrouter',
+                  provider: 'example',
+                  modelId: 'example-model',
+                  endpointUrl: 'https://example.com/api/v1',
+                  apiKeyRef: 'example',
                   locality: 'cloud',
                 },
               ],
@@ -578,10 +578,10 @@ describe('plugin-loader — sh.behavioral extension', () => {
       expect(ok(result)).toBe(true)
       expect(manifest(result).models).toEqual([
         {
-          provider: 'openrouter',
-          modelId: 'z-ai/glm-5.3-flash',
-          endpointUrl: 'https://openrouter.ai/api/v1',
-          apiKeyRef: 'openrouter',
+          provider: 'example',
+          modelId: 'example-model',
+          endpointUrl: 'https://example.com/api/v1',
+          apiKeyRef: 'example',
           locality: 'cloud',
         },
       ])
