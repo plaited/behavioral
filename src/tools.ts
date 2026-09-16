@@ -1,4 +1,3 @@
-export { BashInputSchema, BashOutputSchema } from './tools/bash.ts'
 export {
   DiscoveryCreateInputSchema,
   DiscoveryCreateOutputSchema,
@@ -11,8 +10,6 @@ export {
   DiscoveryUpdateInputSchema,
   DiscoveryUpdateOutputSchema,
 } from './tools/discovery.ts'
-export { EditInputSchema, EditOutputSchema } from './tools/edit.ts'
-export { FindInputSchema, FindOutputSchema } from './tools/find.ts'
 export {
   FrontierExploreInputSchema,
   FrontierExploreOutputSchema,
@@ -21,7 +18,6 @@ export {
   FrontierVerifyInputSchema,
   FrontierVerifyOutputSchema,
 } from './tools/frontier.ts'
-export { GrepInputSchema, GrepOutputSchema } from './tools/grep.ts'
 export {
   HtmlRenderInputSchema,
   HtmlRenderOutputSchema,
@@ -34,7 +30,6 @@ export {
   HtmlValidateAttributeValueInputSchema,
   HtmlValidateAttributeValueOutputSchema,
 } from './tools/html.ts'
-export { LsInputSchema, LsOutputSchema } from './tools/ls.ts'
 export {
   McpCallToolInputSchema,
   McpCallToolOutputSchema,
@@ -52,7 +47,6 @@ export {
   McpReadResourceOutputSchema,
 } from './tools/mcp-client.ts'
 export { PluginLoaderInputSchema, PluginLoaderOutputSchema } from './tools/plugin-loader.ts'
-export { ReadInputSchema, ReadOutputSchema } from './tools/read.ts'
 export {
   SkillDiscoverInputSchema,
   SkillDiscoverOutputSchema,
@@ -62,7 +56,6 @@ export {
   SkillReadOutputSchema,
 } from './tools/skill-client.ts'
 export { type UseTool, useTool } from './tools/use-tool.ts'
-export { WriteInputSchema, WriteOutputSchema } from './tools/write.ts'
 export {
   ModelCompactInputSchema,
   ModelCompactOutputSchema,
