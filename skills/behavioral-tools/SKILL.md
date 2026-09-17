@@ -78,8 +78,8 @@ Each module's tools, when-to-use guidance, examples, and gotchas:
   `mcp-list-tools`, `mcp-list-prompts`, `mcp-get-prompt`,
   `mcp-list-resources`, `mcp-read-resource`. Remote MCP server operations.
 - [plugin-client](references/plugin-client.md) — `plugin-client`. Load and
-  validate an Agent Plugins v1 package (plugin.json, mcp.json, skills/, the
-  sh.behavioral extension).
+  validate an Agent Plugins v1 package (plugin.json, mcp.json, skills/,
+  threads/ — portable surface only, extension namespaces unread).
 - [skill-client](references/skill-client.md) — `skill-discover`,
   `skill-read`, `skill-list-resources`, `skill-extract-links`,
   `skill-validate-links`. Local skill progressive disclosure plus markdown
