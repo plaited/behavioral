@@ -94,12 +94,24 @@ describe('plugin-client — input/output schema', () => {
         version: '0.0.1',
         mcps: {},
         skills: ['behavioral'],
-        models: [],
         threads: [],
-        spaces: {},
         warnings: [],
       }),
     ).toBe(true)
+  })
+
+  test('output schema rejects legacy sh.behavioral fields (models/spaces)', () => {
+    expect(
+      validateOutput({
+        name: 'test',
+        mcps: {},
+        skills: [],
+        threads: [],
+        warnings: [],
+        models: [],
+        spaces: {},
+      }),
+    ).toBe(false)
   })
 
   test('output schema accepts an error', () => {
@@ -139,7 +151,7 @@ describe('plugin-client — plugin.json validation', () => {
           repository: 'https://github.com/x/y',
           license: 'ISC',
           keywords: ['test'],
-          extensions: { 'sh.behavioral': { models: [] } },
+          extensions: { 'com.other.client': { arbitrary: true } },
         },
       })
       const result = await run(dir)
@@ -623,171 +635,12 @@ describe('plugin-client — skills discovery', () => {
 })
 
 // ---------------------------------------------------------------------------
-// extensions."sh.behavioral" — models, mcps/skills/threads gating, spaces
+// extensions — unread, client-owned annexes (growth-model amendment:
+// ALL sh.behavioral interpretation removed; the annex slot stays spec-sanctioned)
 // ---------------------------------------------------------------------------
 
-describe('plugin-client — sh.behavioral extension', () => {
-  test('reads models from extensions.sh.behavioral', async () => {
-    const dir = await tempDir()
-    try {
-      await makePlugin(dir, {
-        pluginJson: {
-          $schema: PLUGIN_SCHEMA,
-          name: 'test-plugin',
-          extensions: {
-            'sh.behavioral': {
-              models: [
-                {
-                  provider: 'openai',
-                  modelId: 'gpt-4o',
-                  endpointUrl: 'https://api.openai.com/v1',
-                  apiKeyRef: 'OPENAI_API_KEY',
-                  locality: 'remote',
-                },
-              ],
-            },
-          },
-        },
-      })
-      const result = await run(dir)
-      expect(ok(result)).toBe(true)
-      expect(manifest(result).models).toEqual([
-        {
-          provider: 'openai',
-          modelId: 'gpt-4o',
-          endpointUrl: 'https://api.openai.com/v1',
-          apiKeyRef: 'OPENAI_API_KEY',
-          locality: 'remote',
-        },
-      ])
-    } finally {
-      await Bun.$`rm -rf ${dir}`.quiet().nothrow()
-    }
-  })
-
-  test('rejects a raw apiKey on a model (apiKeyRef rule)', async () => {
-    const dir = await tempDir()
-    try {
-      await makePlugin(dir, {
-        pluginJson: {
-          $schema: PLUGIN_SCHEMA,
-          name: 'test-plugin',
-          extensions: {
-            'sh.behavioral': {
-              models: [
-                {
-                  provider: 'openai',
-                  modelId: 'gpt-4o',
-                  endpointUrl: 'https://api.openai.com/v1',
-                  apiKey: 'sk-secret',
-                },
-              ],
-            },
-          },
-        },
-      })
-      const result = await run(dir)
-      expect(err(result)).toBe(true)
-      expect(errorMsg(result)).toContain('apiKey')
-    } finally {
-      await Bun.$`rm -rf ${dir}`.quiet().nothrow()
-    }
-  })
-
-  test('reads a model entry with a base-with-path endpoint URL', async () => {
-    const dir = await tempDir()
-    try {
-      await makePlugin(dir, {
-        pluginJson: {
-          $schema: PLUGIN_SCHEMA,
-          name: 'test-plugin',
-          extensions: {
-            'sh.behavioral': {
-              models: [
-                {
-                  provider: 'example',
-                  modelId: 'example-model',
-                  endpointUrl: 'https://example.com/api/v1',
-                  apiKeyRef: 'example',
-                  locality: 'cloud',
-                },
-              ],
-            },
-          },
-        },
-      })
-      const result = await run(dir)
-      expect(ok(result)).toBe(true)
-      expect(manifest(result).models).toEqual([
-        {
-          provider: 'example',
-          modelId: 'example-model',
-          endpointUrl: 'https://example.com/api/v1',
-          apiKeyRef: 'example',
-          locality: 'cloud',
-        },
-      ])
-    } finally {
-      await Bun.$`rm -rf ${dir}`.quiet().nothrow()
-    }
-  })
-
-  test('reads mcps gating from extensions.sh.behavioral', async () => {
-    const dir = await tempDir()
-    try {
-      await makePlugin(dir, {
-        pluginJson: {
-          $schema: PLUGIN_SCHEMA,
-          name: 'test-plugin',
-          extensions: {
-            'sh.behavioral': { mcps: { include: ['you-web'] } },
-          },
-        },
-        mcpJson: {
-          $schema: MCP_SCHEMA,
-          mcpServers: {
-            'you-web': { type: 'streamable-http', url: 'https://api.you.com/mcp' },
-            other: { type: 'streamable-http', url: 'https://other.com/mcp' },
-          },
-        },
-      })
-      const result = await run(dir)
-      expect(ok(result)).toBe(true)
-      expect(manifest(result).mcps).toEqual({
-        'you-web': { type: 'streamable-http', url: 'https://api.you.com/mcp' },
-      })
-    } finally {
-      await Bun.$`rm -rf ${dir}`.quiet().nothrow()
-    }
-  })
-
-  test('reads spaces from extensions.sh.behavioral', async () => {
-    const dir = await tempDir()
-    try {
-      await makePlugin(dir, {
-        pluginJson: {
-          $schema: PLUGIN_SCHEMA,
-          name: 'test-plugin',
-          extensions: {
-            'sh.behavioral': {
-              spaces: {
-                'project-a': { mcps: { include: ['you-web'] } },
-              },
-            },
-          },
-        },
-      })
-      const result = await run(dir)
-      expect(ok(result)).toBe(true)
-      expect(manifest(result).spaces).toEqual({
-        'project-a': { mcps: { include: ['you-web'] } },
-      })
-    } finally {
-      await Bun.$`rm -rf ${dir}`.quiet().nothrow()
-    }
-  })
-
-  test('ignores unknown extension namespaces without validating contents', async () => {
+describe('plugin-client — extensions are unread client-owned annexes', () => {
+  test('unknown extension namespaces are ignored without validating contents', async () => {
     const dir = await tempDir()
     try {
       await makePlugin(dir, {
@@ -796,26 +649,56 @@ describe('plugin-client — sh.behavioral extension', () => {
           name: 'test-plugin',
           extensions: {
             'com.other.client': { arbitrary: 'data', bad: 123 },
-            'sh.behavioral': { models: [] },
           },
         },
       })
       const result = await run(dir)
       expect(ok(result)).toBe(true)
-      expect(manifest(result).models).toEqual([])
+      expect(manifest(result).name).toBe('test-plugin')
     } finally {
       await Bun.$`rm -rf ${dir}`.quiet().nothrow()
     }
   })
 
-  test('absent extensions = valid, output has empty models/spaces', async () => {
+  test('a legacy sh.behavioral extension block is ignored, never interpreted', async () => {
+    const dir = await tempDir()
+    try {
+      await makePlugin(dir, {
+        pluginJson: {
+          $schema: PLUGIN_SCHEMA,
+          name: 'test-plugin',
+          extensions: {
+            'sh.behavioral': {
+              models: [{ provider: 'openai', modelId: 'gpt-4o', endpointUrl: 'https://x/v1', apiKey: 'sk-secret' }],
+              mcps: { include: ['other'] },
+            },
+          },
+        },
+        mcpJson: {
+          $schema: MCP_SCHEMA,
+          mcpServers: {
+            'you-web': { type: 'streamable-http', url: 'https://api.you.com/mcp' },
+          },
+        },
+      })
+      const result = await run(dir)
+      expect(ok(result)).toBe(true)
+      // Ungated: mcp.json content survives untouched — the extension is not read
+      expect(manifest(result).mcps).toEqual({
+        'you-web': { type: 'streamable-http', url: 'https://api.you.com/mcp' },
+      })
+    } finally {
+      await Bun.$`rm -rf ${dir}`.quiet().nothrow()
+    }
+  })
+
+  test('absent extensions = valid', async () => {
     const dir = await tempDir()
     try {
       await makePlugin(dir, {})
       const result = await run(dir)
       expect(ok(result)).toBe(true)
-      expect(manifest(result).models).toEqual([])
-      expect(manifest(result).spaces).toEqual({})
+      expect(manifest(result).name).toBe('test-plugin')
     } finally {
       await Bun.$`rm -rf ${dir}`.quiet().nothrow()
     }
@@ -823,7 +706,7 @@ describe('plugin-client — sh.behavioral extension', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Threads — resolve against threads/, containment enforcement
+// Threads — plain ungated discovery from threads/
 // ---------------------------------------------------------------------------
 
 describe('plugin-client — threads', () => {
@@ -853,7 +736,7 @@ describe('plugin-client — threads', () => {
     }
   })
 
-  test('threads.include gates to specified files', async () => {
+  test('a legacy threads gating block in the extension is ignored — all threads discovered', async () => {
     const dir = await tempDir()
     try {
       await makePlugin(dir, {
@@ -868,49 +751,7 @@ describe('plugin-client — threads', () => {
       })
       const result = await run(dir)
       expect(ok(result)).toBe(true)
-      expect(manifest(result).threads).toEqual(['provision.ts'])
-    } finally {
-      await Bun.$`rm -rf ${dir}`.quiet().nothrow()
-    }
-  })
-
-  test('threads.exclude removes specified files', async () => {
-    const dir = await tempDir()
-    try {
-      await makePlugin(dir, {
-        pluginJson: {
-          $schema: PLUGIN_SCHEMA,
-          name: 'test-plugin',
-          extensions: {
-            'sh.behavioral': { threads: { exclude: ['cleanup.ts'] } },
-          },
-        },
-        threads: { 'provision.ts': '// thread', 'cleanup.ts': '// thread' },
-      })
-      const result = await run(dir)
-      expect(ok(result)).toBe(true)
-      expect(manifest(result).threads).toEqual(['provision.ts'])
-    } finally {
-      await Bun.$`rm -rf ${dir}`.quiet().nothrow()
-    }
-  })
-
-  test('threads.include path escaping plugin root → rejected', async () => {
-    const dir = await tempDir()
-    try {
-      await makePlugin(dir, {
-        pluginJson: {
-          $schema: PLUGIN_SCHEMA,
-          name: 'test-plugin',
-          extensions: {
-            'sh.behavioral': { threads: { include: ['../../escape.ts'] } },
-          },
-        },
-        threads: { 'provision.ts': '// thread' },
-      })
-      const result = await run(dir)
-      expect(err(result)).toBe(true)
-      expect(errorMsg(result)).toContain('root')
+      expect(manifest(result).threads.sort()).toEqual(['cleanup.ts', 'provision.ts'])
     } finally {
       await Bun.$`rm -rf ${dir}`.quiet().nothrow()
     }
@@ -1009,7 +850,6 @@ describe('plugin-client — real default plugin', () => {
     expect(manifest(result).skills).toContain('behavioral')
     // mcp.json has you-web server
     expect(manifest(result).mcps).toHaveProperty('you-web')
-    // sh.behavioral extension models
-    expect(Array.isArray(manifest(result).models)).toBe(true)
+    expect(manifest(result).threads).toEqual([])
   })
 })

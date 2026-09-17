@@ -1,26 +1,30 @@
 /**
  * Conformant Agent Plugins v1 client — validates a plugin package's
  * plugin.json + mcp.json, discovers skills/ from the fixed location, and
- * reads the `sh.behavioral` client extension for models / gating / spaces.
+ * discovers threads/ as a plain ungated component dir.
  *
  * @remarks
  * A stateless `useTool` unit: input `{ path, cwd }` (plugin.json path
  * resolved against the provisioned cwd), output the normalized manifest
- * `{ name, version, mcps, skills, models, threads, spaces }`. Loading is
+ * `{ name, version, mcps, skills, threads, warnings }`. Loading is
  * read-only — no writes, no provisioning.
+ *
+ * **Portable-only surface (growth-model amendment):** ALL client-extension
+ * interpretation is removed. `extensions` namespaces are unread,
+ * client-owned annexes (§8.1) — never validated, never interpreted.
+ * Gating is host structure + governor threads, not plugin self-description.
  *
  * **Validation posture (§11.3):**
  * - **Fatal** — missing/wrong `$schema`, missing/invalid `name`, invalid
- *   metadata field types, non-object extensions, bad `sh.behavioral` model
- *   declaration (e.g. raw `apiKey`). The plugin is rejected; no components
- *   are discovered.
+ *   metadata field types, non-object extensions. The plugin is rejected; no
+ *   components are discovered.
  * - **Report-and-ignore** — unknown top-level fields in plugin.json (§5.2).
  *   The plugin still loads.
  * - **Skipped** — a bad mcp.json server entry (siblings still load); a
  *   non-conformant skill dir (other skills still load); mcp.json $schema
  *   mismatch (MCP disabled, skills still load).
  * - **Ignored** — unknown extension namespaces (§8.1 — contents not
- *   validated).
+ *   validated, not read).
  *
  * @packageDocumentation
  */
@@ -43,34 +47,6 @@ export type McpServerConfig = {
   headers?: Record<string, string>
 }
 
-export type PluginModel = {
-  provider: string
-  modelId: string
-  endpointUrl: string
-  apiKeyRef?: string
-  locality?: string
-}
-
-export type Gating = {
-  include?: string[]
-  exclude?: string[]
-}
-
-export type SpaceConfig = {
-  models?: PluginModel[]
-  mcps?: Gating
-  skills?: Gating
-  threads?: Gating
-}
-
-export type ShBehavioralExtension = {
-  models?: PluginModel[]
-  mcps?: Gating
-  skills?: Gating
-  threads?: Gating
-  spaces?: Record<string, SpaceConfig>
-}
-
 /** Normalized manifest — the contract the provisioning thread consumes. */
 export type PluginManifest = {
   /** Non-fatal diagnostic signals (§5.2/§7.2.2/§11.3 SHOULD-report). */
@@ -79,9 +55,7 @@ export type PluginManifest = {
   version?: string
   mcps: Record<string, McpServerConfig>
   skills: string[]
-  models: PluginModel[]
   threads: string[]
-  spaces: Record<string, SpaceConfig>
 }
 
 export type PluginClientInput = { path: string; cwd: string }
@@ -129,58 +103,6 @@ const KNOWN_FIELDS = new Set([
   'keywords',
   'extensions',
 ])
-
-// Model schema for sh.behavioral.models — rejects raw apiKey
-const modelSchema = {
-  type: 'object',
-  properties: {
-    provider: { type: 'string', minLength: 1 },
-    modelId: { type: 'string', minLength: 1 },
-    endpointUrl: { type: 'string', minLength: 1 },
-    apiKeyRef: { type: 'string', nullable: true },
-    locality: { type: 'string', nullable: true },
-  },
-  required: ['provider', 'modelId', 'endpointUrl'],
-  additionalProperties: false,
-} as const
-
-const gatingSchema = {
-  type: 'object',
-  properties: {
-    include: { type: 'array', items: { type: 'string', minLength: 1 }, nullable: true },
-    exclude: { type: 'array', items: { type: 'string', minLength: 1 }, nullable: true },
-  },
-  additionalProperties: false,
-} as const
-
-const spaceConfigSchema = {
-  type: 'object',
-  properties: {
-    models: { type: 'array', items: modelSchema, nullable: true },
-    mcps: gatingSchema,
-    skills: gatingSchema,
-    threads: gatingSchema,
-  },
-  additionalProperties: false,
-} as const
-
-const shBehavioralSchema = {
-  type: 'object',
-  properties: {
-    models: { type: 'array', items: modelSchema, nullable: true },
-    mcps: gatingSchema,
-    skills: gatingSchema,
-    threads: gatingSchema,
-    spaces: {
-      type: 'object',
-      additionalProperties: spaceConfigSchema,
-      nullable: true,
-    },
-  },
-  additionalProperties: false,
-} as const
-
-const validateShBehavioral = ajv.compile(shBehavioralSchema)
 
 // ---------------------------------------------------------------------------
 // mcp.json schemas — two-stage: top-level then per-entry
@@ -249,12 +171,10 @@ export const PluginClientOutputSchema = {
         version: { type: 'string', nullable: true },
         mcps: { type: 'object' },
         skills: { type: 'array', items: { type: 'string' } },
-        models: { type: 'array' },
         threads: { type: 'array', items: { type: 'string' } },
-        spaces: { type: 'object' },
         warnings: { type: 'array', items: { type: 'string' } },
       },
-      required: ['name', 'mcps', 'skills', 'models', 'threads', 'spaces', 'warnings'],
+      required: ['name', 'mcps', 'skills', 'threads', 'warnings'],
       additionalProperties: false,
     },
     {
@@ -374,7 +294,6 @@ const validatePluginJson = (
   | {
       name: string
       version?: string
-      extensions: Record<string, unknown>
       unknownFields: string[]
     } => {
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
@@ -426,19 +345,18 @@ const validatePluginJson = (
     }
   }
 
-  // extensions — must be an object if present
-  let extensions: Record<string, unknown> = {}
+  // extensions — must be an object if present; its namespaces are unread,
+  // client-owned annexes (§8.1)
   if ('extensions' in obj) {
     if (typeof obj.extensions !== 'object' || obj.extensions === null || Array.isArray(obj.extensions)) {
       return { isError: true, message: 'plugin.json extensions must be an object' }
     }
-    extensions = obj.extensions as Record<string, unknown>
   }
 
   // Report-and-ignore unknown top-level fields (§5.2, non-fatal)
   const unknownFields = Object.keys(obj).filter((key) => !KNOWN_FIELDS.has(key))
 
-  return { name: obj.name as string, version: obj.version as string | undefined, extensions, unknownFields }
+  return { name: obj.name as string, version: obj.version as string | undefined, unknownFields }
 }
 
 const loadMcpJson = async (
@@ -535,46 +453,14 @@ const discoverSkills = async (skillsDir: string): Promise<string[]> => {
   }
 }
 
-const resolveThreads = async (
-  threadsDir: string,
-  pluginRoot: string,
-  gating: Gating | undefined,
-): Promise<string[] | FatalResult> => {
-  // Discover all thread files in threads/
-  let allFiles: string[] = []
+const discoverThreads = async (threadsDir: string): Promise<string[]> => {
+  // missing threads/ = valid absence; plain ungated discovery — no gating
   try {
-    allFiles = await Array.fromAsync(new Bun.Glob('*').scan({ cwd: threadsDir, onlyFiles: true }))
-  } catch {
-    // threads/ doesn't exist — valid, no files
-  }
-
-  // If no gating, return all
-  if (!gating || (!gating.include && !gating.exclude)) {
+    const allFiles = await Array.fromAsync(new Bun.Glob('*').scan({ cwd: threadsDir, onlyFiles: true }))
     return allFiles.sort()
+  } catch {
+    return []
   }
-
-  // Enforce plugin-root containment (§4.1) on include paths themselves,
-  // even if the file doesn't exist in threads/ — a path like ../escape.ts
-  // must be rejected before filtering.
-  if (gating?.include) {
-    for (const threadPath of gating.include) {
-      const resolved = path.resolve(threadsDir, threadPath)
-      if (!resolved.startsWith(pluginRoot + path.sep) && resolved !== pluginRoot) {
-        return { isError: true, message: `thread path "${threadPath}" resolves outside the plugin root` }
-      }
-    }
-  }
-
-  // Apply gating: include (allowlist) then exclude (blocklist)
-  let selected = allFiles
-  if (gating?.include) {
-    selected = selected.filter((f) => gating.include!.includes(f))
-  }
-  if (gating?.exclude) {
-    selected = selected.filter((f) => !gating.exclude!.includes(f))
-  }
-
-  return selected.sort()
 }
 
 // ---------------------------------------------------------------------------
@@ -609,7 +495,7 @@ const run = async (input: PluginClientInput): Promise<PluginClientOutput> => {
   const pluginResult = validatePluginJson(parsed)
   if ('isError' in pluginResult) return pluginResult
 
-  const { name, version, extensions, unknownFields } = pluginResult
+  const { name, version, unknownFields } = pluginResult
 
   // §5.2: unknown top-level fields are reported and ignored (non-fatal).
   const warnings: string[] = []
@@ -617,83 +503,22 @@ const run = async (input: PluginClientInput): Promise<PluginClientOutput> => {
     warnings.push(`plugin.json: ignoring unknown top-level field(s): ${unknownFields.join(', ')}`)
   }
 
-  // 3. Validate sh.behavioral extension (fatal if present but malformed)
-  let shBehavioral: ShBehavioralExtension = {}
-  if ('sh.behavioral' in extensions) {
-    // Explicit apiKey check — clear error instead of generic "additional properties"
-    const ext = extensions['sh.behavioral']
-    if (typeof ext === 'object' && ext !== null && !Array.isArray(ext)) {
-      const extObj = ext as { models?: unknown[] }
-      if (Array.isArray(extObj.models)) {
-        for (const m of extObj.models) {
-          if (typeof m === 'object' && m !== null && 'apiKey' in m) {
-            return { isError: true, message: 'sh.behavioral models must use apiKeyRef, not a raw apiKey' }
-          }
-        }
-      }
-    }
-    if (!validateShBehavioral(extensions['sh.behavioral'])) {
-      return {
-        isError: true,
-        message: `Invalid sh.behavioral extension: ${ajv.errorsText(validateShBehavioral.errors)}`,
-      }
-    }
-    shBehavioral = extensions['sh.behavioral'] as ShBehavioralExtension
-  }
-
-  // 4. Load mcp.json
+  // 3. Load mcp.json
   const pVersion = schemaVersion(PLUGIN_SCHEMA_URL)
   const mcps = await loadMcpJson(path.join(pluginRoot, 'mcp.json'), pVersion, warnings)
 
-  // Apply mcps gating from sh.behavioral
-  let gatedMcps = mcps
-  if (shBehavioral.mcps) {
-    const g = shBehavioral.mcps
-    let names = Object.keys(mcps)
-    if (g.include) {
-      names = names.filter((n) => g.include!.includes(n))
-    }
-    if (g.exclude) {
-      names = names.filter((n) => !g.exclude!.includes(n))
-    }
-    gatedMcps = {}
-    for (const n of names) {
-      const v = mcps[n]
-      if (v) gatedMcps[n] = v
-    }
-  }
+  // 4. Discover skills
+  const skills = await discoverSkills(path.join(pluginRoot, 'skills'))
 
-  // 5. Discover skills
-  let skills = await discoverSkills(path.join(pluginRoot, 'skills'))
-
-  // Apply skills gating
-  if (shBehavioral.skills) {
-    const g = shBehavioral.skills
-    if (g.include) {
-      skills = skills.filter((s) => g.include!.includes(s))
-    }
-    if (g.exclude) {
-      skills = skills.filter((s) => !g.exclude!.includes(s))
-    }
-  }
-
-  // 6. Resolve threads
-  const threadsResult = await resolveThreads(path.join(pluginRoot, 'threads'), pluginRoot, shBehavioral.threads)
-  if ('isError' in threadsResult) return threadsResult
-  const threads = threadsResult
-
-  // 7. Extract models + spaces
-  const models = shBehavioral.models ?? []
-  const spaces = shBehavioral.spaces ?? {}
+  // 5. Discover threads (plain, ungated)
+  const threads = await discoverThreads(path.join(pluginRoot, 'threads'))
 
   return {
     name,
     version,
-    mcps: gatedMcps,
+    mcps,
     skills,
-    models,
     threads,
-    spaces,
     warnings,
   }
 }
@@ -705,19 +530,20 @@ const run = async (input: PluginClientInput): Promise<PluginClientOutput> => {
 /**
  * Load and validate a plugin package as a conformant Agent Plugins v1 client.
  * Validates plugin.json (closed schema, §5.2/§5.5), mcp.json (two-stage,
- * failure isolation), discovers skills/ from the fixed location, and reads
- * the `sh.behavioral` extension for models / gating / spaces. Returns the
- * normalized manifest `{ name, version, mcps, skills, models, threads,
- * spaces }`, or `{ isError, message }` on failure.
+ * failure isolation), discovers skills/ from the fixed location, and
+ * discovers threads/ as a plain ungated component dir. Extension namespaces
+ * are unread, client-owned annexes (portable-only surface). Returns the
+ * normalized manifest `{ name, version, mcps, skills, threads, warnings }`,
+ * or `{ isError, message }` on failure.
  */
 export const pluginClient = useTool(
   {
     name: PLUGIN_CLIENT_TOOL_NAME,
     description:
       'Load and validate a plugin package (Agent Plugins v1 conformant ' +
-      'client). Validates plugin.json + mcp.json, discovers skills/, reads ' +
-      'the sh.behavioral extension. Returns { name, version, mcps, skills, ' +
-      'models, threads, spaces } or { isError, message }.',
+      'client). Validates plugin.json + mcp.json, discovers skills/ and ' +
+      'threads/. Returns { name, version, mcps, skills, threads, warnings } ' +
+      'or { isError, message }.',
     inputSchema: PluginClientInputSchema,
     outputSchema: PluginClientOutputSchema,
   },

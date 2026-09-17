@@ -4,14 +4,20 @@ One tool that loads a plugin package as a conformant
 [Agent Plugins](https://agent-plugins.org/specification) v1 client: validates
 `plugin.json` (closed manifest schema, name constraints), `mcp.json`
 (two-stage, per-entry failure isolation), discovers `skills/` from the fixed
-location, and reads the `sh.behavioral` client extension (models, gating,
-spaces). Read-only — no writes, no provisioning, no subprocess launch.
+location, and discovers `threads/` as a plain ungated component dir.
+Read-only — no writes, no provisioning, no subprocess launch.
+
+**Portable-only surface.** The tool reads no client extensions — every
+`extensions` namespace is an unread, client-owned annex (spec §8.1).
+Gating is host structure + governor threads, not plugin self-description;
+model declarations live in the host's `~/.behavioral/config.json`, never in
+a plugin.
 
 ## Tool
 
 `plugin-client` takes `{ path, cwd }` — the plugin.json path resolved against
 the provisioned cwd — and returns the normalized manifest:
-`{ name, version, mcps, skills, models, threads, spaces, warnings }`, or
+`{ name, version, mcps, skills, threads, warnings }`, or
 `{ isError: true, message }` on fatal failure.
 
 ```bash
@@ -24,8 +30,7 @@ Per the spec's resilience model:
 
 - **Fatal** (plugin rejected, nothing loads): missing/wrong `$schema`,
   invalid `name` (§5.5 constraints), wrong metadata field types, non-object
-  `extensions`, malformed `sh.behavioral` model declarations (e.g. a raw
-  `apiKey` — must be `apiKeyRef`).
+  `extensions`.
 - **Skipped** (siblings still load): a bad `mcp.json` server entry —
   wrong variant fields, a shell-string `command` (must be one bare token or
   `./`-prefixed), a `cwd` outside the closed `./`/`${PLUGIN_ROOT}`/
@@ -35,6 +40,8 @@ Per the spec's resilience model:
 - **MCP disabled** (skills still load): unparseable `mcp.json`, top-level
   schema violation, or `$schema` version mismatch with `plugin.json`.
 - **Reported and ignored**: unknown `plugin.json` top-level fields.
+- **Ignored entirely**: every `extensions` namespace — contents not
+  validated, never interpreted.
 
 Every skipped/disabled/ignored case appends a diagnostic to the output's
 `warnings` array — check `warnings` before assuming a component list is
@@ -42,9 +49,9 @@ complete.
 
 ## Notes
 
-- Gating (`sh.behavioral` mcps/skills/threads include/exclude lists) is
-  applied to the discovered components before output; thread include paths
-  are containment-checked against the plugin root (§4.1).
-- The `mcps` output is the post-gating map of valid server entries.
+- `mcps` is the map of valid server entries from `mcp.json` — no gating
+  applied.
+- `threads` is the plain sorted listing of `threads/` — no gating, no
+  containment checks.
 - `behavioral tools --schema output --tool plugin-client` — the manifest
   output schema.

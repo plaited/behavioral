@@ -15,12 +15,5 @@
     "self-improving",
     "mcp",
     "cli"
-  ],
-  "extensions": {
-    "sh.behavioral": {
-      "mcps": { "include": ["you-web"] },
-      "threads": { "include": [] },
-      "spaces": {}
-    }
-  }
+  ]
 }

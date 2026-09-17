@@ -46,6 +46,9 @@ describe('behavioral init', () => {
       expect(result.force).toBe(false)
       expect(result.installed).toContain('.agents/plugins/behavioral')
       expect(await Bun.file(path.join(result.installed, 'plugin.json')).exists()).toBe(true)
+      // portable-only manifest: no client-extension block installed
+      const installedManifest = JSON.parse(await Bun.file(path.join(result.installed, 'plugin.json')).text())
+      expect(installedManifest).not.toHaveProperty('extensions')
       expect(await Bun.file(path.join(result.installed, 'mcp.json')).exists()).toBe(true)
       expect(await Bun.file(path.join(result.installed, 'skills', 'behavioral', 'SKILL.md')).exists()).toBe(true)
     } finally {
@@ -100,6 +103,9 @@ test('installed plugin parses via the conformant plugin-client', async () => {
       expect(manifest.name).toBe('behavioral')
       expect(manifest.skills).toContain('behavioral')
       expect(manifest.mcps).toHaveProperty('you-web')
+      // portable-only output shape: no models/spaces fields
+      expect('models' in manifest).toBe(false)
+      expect('spaces' in manifest).toBe(false)
     }
   } finally {
     await Bun.$`rm -rf ${tmpDir}`.quiet().nothrow()
