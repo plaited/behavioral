@@ -2,6 +2,7 @@
 import type { JSONSchemaType } from 'ajv'
 import { parse, walk } from 'css-tree'
 import {
+  B_META,
   B_SCALE,
   B_TARGET,
   BOOLEAN_ATTRS,
@@ -11,6 +12,7 @@ import {
   SWAP_TARGETS,
 } from '../controller/controller.constants.ts'
 import { swapBoundary } from '../controller/swap-boundary.ts'
+import { parseBMeta } from '../kernel/bmeta.ts'
 import { CSSPropertiesSchema, CUSTOM_PROPERTY_REF_PATTERN, validateCSSValue } from './css.schemas.ts'
 import { ElementAttributeListSchema, validateAttribute } from './html.schemas.ts'
 import { useTool } from './use-tool.ts'
@@ -138,6 +140,9 @@ const validateAndEscapeHtmlRaw = (html: string): ValidateAndEscapeHtmlResult => 
   const cssViolations: CssViolation[] = []
   let currentStyleBlock = ''
   let searchFrom = 0
+  // b-meta carrier accumulator — script elements cannot nest, so one slot
+  // suffices: element() opens it, text() fills it, onEndTag validates it.
+  let bMetaBlock: string | null = null
 
   const out = new HTMLRewriter()
     .on('*', {
@@ -204,6 +209,27 @@ const validateAndEscapeHtmlRaw = (html: string): ValidateAndEscapeHtmlResult => 
             })
           }
         })
+      },
+    })
+    .on(`script[${B_META}]`, {
+      // b-meta carrier: `<script type="application/json" b-meta>` — locate,
+      // parse, and validate the embedded BMeta block; violations flow through
+      // the existing violation channel. Non-JSON scripts and non-b-meta
+      // scripts are inert.
+      element(el) {
+        if (el.getAttribute('type') !== 'application/json') return
+        bMetaBlock = ''
+        el.onEndTag(() => {
+          const block = bMetaBlock ?? ''
+          bMetaBlock = null
+          const result = parseBMeta(block)
+          if (!result.ok) {
+            htmlViolations.push({ tag: 'script', attribute: B_META, message: result.message })
+          }
+        })
+      },
+      text(chunk) {
+        if (bMetaBlock !== null) bMetaBlock += chunk.text
       },
     })
     .transform(html)

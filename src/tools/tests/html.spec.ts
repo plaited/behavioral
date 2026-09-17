@@ -65,6 +65,73 @@ describe('htmlValidateAndEscape — aggregate violations', () => {
   })
 })
 
+describe('htmlValidateAndEscape — b-meta carrier', () => {
+  const validMeta = {
+    type: 'html',
+    title: 'Space briefing',
+    description: 'Shared context about the space',
+    generated: { by: 'turn-42', at: '2026-09-17T00:00:00Z' },
+    status: 'stable',
+  }
+
+  test('a well-formed b-meta JSON script in head passes and its content is preserved', async () => {
+    const html =
+      `<html><head><script type="application/json" b-meta>${JSON.stringify(validMeta)}</script></head>` +
+      '<body><p>x</p></body></html>'
+    const result = await htmlValidateAndEscape({ html })
+    expect(result.isError).toBeFalsy()
+    expect(result.html).toContain('"title":"Space briefing"')
+  })
+
+  test('malformed JSON in a b-meta block → violation on script/b-meta', async () => {
+    const html = `<head><script type="application/json" b-meta>{ not json }</script></head>`
+    const result = await htmlValidateAndEscape({ html })
+    expect(result.isError).toBe(true)
+    expect(result.htmlViolations).toHaveLength(1)
+    expect(result.htmlViolations![0]).toMatchObject({ tag: 'script', attribute: 'b-meta' })
+    expect(result.htmlViolations![0]!.message).toContain('JSON')
+  })
+
+  test('schema-invalid b-meta blocks → violations (missing required, unknown field, bad status)', async () => {
+    const cases = [
+      // missing title/description/generated/status
+      { type: 'html' },
+      // unknown field (additionalProperties: false)
+      { ...validMeta, apiKey: 'sk-secret' },
+      // status outside the enum
+      { ...validMeta, status: 'published' },
+    ]
+    for (const meta of cases) {
+      const html = `<head><script type="application/json" b-meta>${JSON.stringify(meta)}</script></head>`
+      const result = await htmlValidateAndEscape({ html })
+      expect(result.isError).toBe(true)
+      expect(result.htmlViolations).toHaveLength(1)
+      expect(result.htmlViolations![0]).toMatchObject({ tag: 'script', attribute: 'b-meta' })
+    }
+  })
+
+  test('empty b-meta block → violation', async () => {
+    const html = `<head><script type="application/json" b-meta></script></head>`
+    const result = await htmlValidateAndEscape({ html })
+    expect(result.isError).toBe(true)
+    expect(result.htmlViolations![0]).toMatchObject({ tag: 'script', attribute: 'b-meta' })
+  })
+
+  test('a script[type=application/json] without b-meta is inert (not validated)', async () => {
+    const html = `<head><script type="application/json">{"arbitrary":true}</script></head>`
+    const result = await htmlValidateAndEscape({ html })
+    expect(result.isError).toBeFalsy()
+    expect(result.html).toContain('"arbitrary":true')
+  })
+
+  test('b-meta attribute is a valid attribute on script (b-* vocabulary)', async () => {
+    // the bare b-meta attribute must not trip the per-tag attribute schema
+    const result = await htmlValidateAndEscape({ html: '<head><script b-meta></script></head>' })
+    expect(result.isError).toBeFalsy()
+    expect(result.htmlViolations).toBeUndefined()
+  })
+})
+
 describe('htmlValidateAndEscape — text not escaped', () => {
   test('text entities are preserved (no double-escaping)', async () => {
     const html = `<p>Tom &amp; Jerry &lt;raw&gt;</p>`

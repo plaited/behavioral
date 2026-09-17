@@ -1,6 +1,6 @@
 import type { ValidateFunction } from 'ajv'
 import Ajv2020 from 'ajv/dist/2020'
-import { B_FORM, B_SCALE, B_TARGET, B_TRIGGER, SCALE } from '../controller/controller.constants.ts'
+import { B_FORM, B_META, B_SCALE, B_TARGET, B_TRIGGER, SCALE } from '../controller/controller.constants.ts'
 import { CSSPropertiesSchema, CUSTOM_PROPERTY_REF_PATTERN, validateCSSValue } from './css.schemas.ts'
 
 export const CLASS = 'class'
@@ -315,6 +315,7 @@ export const BehavioralAttributesSchema = {
     [B_SCALE]: { type: 'string', enum: Object.values(SCALE) },
     [B_TARGET]: { anyOf: [{ type: 'string' }, { type: 'number' }] },
     [B_TRIGGER]: { type: 'string', pTriggerFormat: true },
+    [B_META]: { type: 'string' },
     [STYLE]: { type: 'string', pStyleFormat: true },
   },
 }
