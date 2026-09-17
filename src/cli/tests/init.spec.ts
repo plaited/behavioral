@@ -87,14 +87,14 @@ test('re-run with force overwrites and reports force: true', async () => {
   }
 })
 
-test('installed plugin parses via the conformant plugin-loader', async () => {
+test('installed plugin parses via the conformant plugin-client', async () => {
   const tmpDir = path.resolve((await Bun.$`mktemp -d`.quiet().text()).trim())
   try {
     const { code, stdout } = await runInit([JSON.stringify({ scope: 'project', 'you-web': { apiKey: 'k' } })], tmpDir)
     expect(code).toBe(0)
     const result = JSON.parse(stdout)
-    const { pluginLoader } = await import('../../tools/plugin-loader.ts')
-    const manifest = await pluginLoader({ path: 'plugin.json', cwd: result.installed })
+    const { pluginClient } = await import('../../tools/plugin-client.ts')
+    const manifest = await pluginClient({ path: 'plugin.json', cwd: result.installed })
     expect('isError' in manifest).toBe(false)
     if (!('isError' in manifest)) {
       expect(manifest.name).toBe('behavioral')

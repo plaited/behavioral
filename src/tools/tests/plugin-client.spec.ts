@@ -1,16 +1,16 @@
 import { describe, expect, test } from 'bun:test'
 import * as path from 'node:path'
 import {
-  PluginLoaderInputSchema,
-  type PluginLoaderOutput,
-  PluginLoaderOutputSchema,
+  PluginClientInputSchema,
+  type PluginClientOutput,
+  PluginClientOutputSchema,
   type PluginManifest,
-  pluginLoader,
-} from '../plugin-loader.ts'
+  pluginClient,
+} from '../plugin-client.ts'
 import { ajv } from '../use-tool.ts'
 
-const validateInput = ajv.compile(PluginLoaderInputSchema)
-const validateOutput = ajv.compile(PluginLoaderOutputSchema)
+const validateInput = ajv.compile(PluginClientInputSchema)
+const validateOutput = ajv.compile(PluginClientOutputSchema)
 
 const PLUGIN_SCHEMA = 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json'
 const MCP_SCHEMA = 'https://agent-plugins.org/schemas/1.0.0/mcp.schema.json'
@@ -58,20 +58,20 @@ const makePlugin = async (dir: string, files: PluginFiles): Promise<string> => {
   return dir
 }
 
-const run = (dir: string): Promise<PluginLoaderOutput> =>
-  pluginLoader({ path: 'plugin.json', cwd: dir }) as Promise<PluginLoaderOutput>
+const run = (dir: string): Promise<PluginClientOutput> =>
+  pluginClient({ path: 'plugin.json', cwd: dir }) as Promise<PluginClientOutput>
 
-const ok = (r: PluginLoaderOutput): r is PluginManifest => !('isError' in r)
-const err = (r: PluginLoaderOutput): r is { isError: true; message: string } => 'isError' in r
+const ok = (r: PluginClientOutput): r is PluginManifest => !('isError' in r)
+const err = (r: PluginClientOutput): r is { isError: true; message: string } => 'isError' in r
 
-/** Access a field from a PluginLoaderOutput, asserting it's a manifest first. */
-const manifest = (r: PluginLoaderOutput): PluginManifest => {
+/** Access a field from a PluginClientOutput, asserting it's a manifest first. */
+const manifest = (r: PluginClientOutput): PluginManifest => {
   if ('isError' in r) throw new Error(`expected manifest, got error: ${r.message}`)
   return r
 }
 
-/** Access a field from a PluginLoaderOutput, asserting it's an error first. */
-const errorMsg = (r: PluginLoaderOutput): string => {
+/** Access a field from a PluginClientOutput, asserting it's an error first. */
+const errorMsg = (r: PluginClientOutput): string => {
   if (!('isError' in r)) throw new Error('expected error, got manifest')
   return r.message
 }
@@ -80,7 +80,7 @@ const errorMsg = (r: PluginLoaderOutput): string => {
 // Input / output schema contract
 // ---------------------------------------------------------------------------
 
-describe('plugin-loader — input/output schema', () => {
+describe('plugin-client — input/output schema', () => {
   test('input schema requires path + cwd', () => {
     expect(validateInput({ path: 'plugin.json' })).toBe(false)
     expect(validateInput({ cwd: '/x' })).toBe(false)
@@ -97,6 +97,7 @@ describe('plugin-loader — input/output schema', () => {
         models: [],
         threads: [],
         spaces: {},
+        warnings: [],
       }),
     ).toBe(true)
   })
@@ -110,7 +111,7 @@ describe('plugin-loader — input/output schema', () => {
 // plugin.json validation — fatal vs report-and-ignore
 // ---------------------------------------------------------------------------
 
-describe('plugin-loader — plugin.json validation', () => {
+describe('plugin-client — plugin.json validation', () => {
   test('parses a minimal valid plugin.json (only $schema + name)', async () => {
     const dir = await tempDir()
     try {
@@ -262,7 +263,7 @@ describe('plugin-loader — plugin.json validation', () => {
 // mcp.json validation — two-stage, failure isolation
 // ---------------------------------------------------------------------------
 
-describe('plugin-loader — mcp.json validation', () => {
+describe('plugin-client — mcp.json validation', () => {
   test('missing mcp.json = valid absence, mcps output is empty', async () => {
     const dir = await tempDir()
     try {
@@ -352,6 +353,147 @@ describe('plugin-loader — mcp.json validation', () => {
     }
   })
 
+  test('stdio command with shell string is skipped (§7.2.1 single token)', async () => {
+    const dir = await tempDir()
+    try {
+      await makePlugin(dir, {
+        mcpJson: {
+          $schema: MCP_SCHEMA,
+          mcpServers: {
+            shell: { type: 'stdio', command: 'bash -c ls' },
+          },
+        },
+      })
+      const result = await run(dir)
+      expect(ok(result)).toBe(true)
+      expect(manifest(result).mcps).toEqual({})
+      expect(manifest(result).warnings.some((w) => w.includes('shell') && w.includes('command'))).toBe(true)
+    } finally {
+      await Bun.$`rm -rf ${dir}`.quiet().nothrow()
+    }
+  })
+
+  test('stdio command with absolute path is skipped (bare name or ./ only)', async () => {
+    const dir = await tempDir()
+    try {
+      await makePlugin(dir, {
+        mcpJson: {
+          $schema: MCP_SCHEMA,
+          mcpServers: {
+            abs: { type: 'stdio', command: '/usr/bin/thing' },
+          },
+        },
+      })
+      const result = await run(dir)
+      expect(ok(result)).toBe(true)
+      expect(manifest(result).mcps).toEqual({})
+    } finally {
+      await Bun.$`rm -rf ${dir}`.quiet().nothrow()
+    }
+  })
+
+  test('stdio cwd accepts ./, ${PLUGIN_ROOT}, ${PLUGIN_DATA} forms (§7.2.1)', async () => {
+    const dir = await tempDir()
+    try {
+      const valid: Record<string, { type: 'stdio'; command: string; cwd: string }> = {
+        a: { type: 'stdio', command: 'bun', cwd: './sub' },
+        b: { type: 'stdio', command: 'bun', cwd: '${PLUGIN_ROOT}' },
+        c: { type: 'stdio', command: 'bun', cwd: '${PLUGIN_ROOT}/bin' },
+        d: { type: 'stdio', command: 'bun', cwd: '${PLUGIN_DATA}' },
+        e: { type: 'stdio', command: 'bun', cwd: '${PLUGIN_DATA}/state' },
+      }
+      await makePlugin(dir, {
+        mcpJson: { $schema: MCP_SCHEMA, mcpServers: valid },
+      })
+      const result = await run(dir)
+      expect(ok(result)).toBe(true)
+      expect(manifest(result).mcps).toEqual(valid)
+    } finally {
+      await Bun.$`rm -rf ${dir}`.quiet().nothrow()
+    }
+  })
+
+  test('stdio cwd with unanchored or escaping form is skipped', async () => {
+    const dir = await tempDir()
+    try {
+      await makePlugin(dir, {
+        mcpJson: {
+          $schema: MCP_SCHEMA,
+          mcpServers: {
+            rel: { type: 'stdio', command: 'bun', cwd: 'sub' },
+            abs: { type: 'stdio', command: 'bun', cwd: '/abs' },
+            up: { type: 'stdio', command: 'bun', cwd: '../up' },
+            esc: { type: 'stdio', command: 'bun', cwd: '${PLUGIN_ROOT}/../escape' },
+          },
+        },
+      })
+      const result = await run(dir)
+      expect(ok(result)).toBe(true)
+      expect(manifest(result).mcps).toEqual({})
+      expect(manifest(result).warnings.filter((w) => w.includes('cwd')).length).toBeGreaterThanOrEqual(4)
+    } finally {
+      await Bun.$`rm -rf ${dir}`.quiet().nothrow()
+    }
+  })
+
+  test('http url rules: absolute, no userinfo/fragment, non-loopback needs https', async () => {
+    const dir = await tempDir()
+    try {
+      await makePlugin(dir, {
+        mcpJson: {
+          $schema: MCP_SCHEMA,
+          mcpServers: {
+            goodLocalhost: { type: 'streamable-http', url: 'http://localhost:3000/mcp' },
+            goodHttps: { type: 'streamable-http', url: 'https://api.example.com/mcp' },
+            plainHttp: { type: 'streamable-http', url: 'http://api.example.com/mcp' },
+            userinfo: { type: 'streamable-http', url: 'https://user:pass@api.example.com/mcp' },
+            fragment: { type: 'streamable-http', url: 'https://api.example.com/mcp#frag' },
+            ftp: { type: 'streamable-http', url: 'ftp://api.example.com/mcp' },
+            loopbackIp: { type: 'streamable-http', url: 'http://127.0.0.1:3000/mcp' },
+          },
+        },
+      })
+      const result = await run(dir)
+      expect(ok(result)).toBe(true)
+      expect(manifest(result).mcps).toEqual({
+        goodLocalhost: { type: 'streamable-http', url: 'http://localhost:3000/mcp' },
+        goodHttps: { type: 'streamable-http', url: 'https://api.example.com/mcp' },
+        loopbackIp: { type: 'streamable-http', url: 'http://127.0.0.1:3000/mcp' },
+      })
+      expect(manifest(result).warnings.filter((w) => w.includes('url')).length).toBe(4)
+    } finally {
+      await Bun.$`rm -rf ${dir}`.quiet().nothrow()
+    }
+  })
+
+  test('header names must be valid HTTP tokens without case-insensitive duplicates (§7.2.1)', async () => {
+    const dir = await tempDir()
+    try {
+      await makePlugin(dir, {
+        mcpJson: {
+          $schema: MCP_SCHEMA,
+          mcpServers: {
+            ok: { type: 'streamable-http', url: 'https://x.com/mcp', headers: { 'X-Tenant': 'a', Accept: 'b' } },
+            badName: { type: 'streamable-http', url: 'https://x.com/mcp', headers: { 'Bad Header': 'x' } },
+            dupCase: {
+              type: 'streamable-http',
+              url: 'https://x.com/mcp',
+              headers: { 'X-A': '1', 'x-a': '2' },
+            },
+          },
+        },
+      })
+      const result = await run(dir)
+      expect(ok(result)).toBe(true)
+      expect(manifest(result).mcps).toEqual({
+        ok: { type: 'streamable-http', url: 'https://x.com/mcp', headers: { 'X-Tenant': 'a', Accept: 'b' } },
+      })
+      expect(manifest(result).warnings.filter((w) => w.includes('header')).length).toBe(2)
+    } finally {
+      await Bun.$`rm -rf ${dir}`.quiet().nothrow()
+    }
+  })
+
   test('bad mcp.json entry is skipped, siblings still load', async () => {
     const dir = await tempDir()
     try {
@@ -436,7 +578,7 @@ describe('plugin-loader — mcp.json validation', () => {
 // Skills discovery from skills/
 // ---------------------------------------------------------------------------
 
-describe('plugin-loader — skills discovery', () => {
+describe('plugin-client — skills discovery', () => {
   test('missing skills/ = valid absence, skills output is empty', async () => {
     const dir = await tempDir()
     try {
@@ -484,7 +626,7 @@ describe('plugin-loader — skills discovery', () => {
 // extensions."sh.behavioral" — models, mcps/skills/threads gating, spaces
 // ---------------------------------------------------------------------------
 
-describe('plugin-loader — sh.behavioral extension', () => {
+describe('plugin-client — sh.behavioral extension', () => {
   test('reads models from extensions.sh.behavioral', async () => {
     const dir = await tempDir()
     try {
@@ -684,7 +826,7 @@ describe('plugin-loader — sh.behavioral extension', () => {
 // Threads — resolve against threads/, containment enforcement
 // ---------------------------------------------------------------------------
 
-describe('plugin-loader — threads', () => {
+describe('plugin-client — threads', () => {
   test('absent threads/ + no threads extension → empty threads output', async () => {
     const dir = await tempDir()
     try {
@@ -779,7 +921,7 @@ describe('plugin-loader — threads', () => {
 // Error cases
 // ---------------------------------------------------------------------------
 
-describe('plugin-loader — error cases', () => {
+describe('plugin-client — error cases', () => {
   test('returns isError when plugin.json does not exist', async () => {
     const dir = await tempDir()
     try {
@@ -820,7 +962,42 @@ describe('plugin-loader — error cases', () => {
 // Real default plugin at repo root
 // ---------------------------------------------------------------------------
 
-describe('plugin-loader — real default plugin', () => {
+describe('plugin-client — warnings channel', () => {
+  test('unknown plugin.json top-level field → warning, plugin still loads', async () => {
+    const dir = await tempDir()
+    try {
+      await makePlugin(dir, {
+        pluginJson: {
+          $schema: PLUGIN_SCHEMA,
+          name: 'test-plugin',
+          customField: 'ignored',
+        },
+      })
+      const result = await run(dir)
+      expect(ok(result)).toBe(true)
+      expect(manifest(result).name).toBe('test-plugin')
+      expect(manifest(result).warnings.some((w) => w.includes('customField'))).toBe(true)
+    } finally {
+      await Bun.$`rm -rf ${dir}`.quiet().nothrow()
+    }
+  })
+
+  test('clean plugin → empty warnings', async () => {
+    const dir = await tempDir()
+    try {
+      await makePlugin(dir, {
+        mcpJson: { $schema: MCP_SCHEMA, mcpServers: {} },
+      })
+      const result = await run(dir)
+      expect(ok(result)).toBe(true)
+      expect(manifest(result).warnings).toEqual([])
+    } finally {
+      await Bun.$`rm -rf ${dir}`.quiet().nothrow()
+    }
+  })
+})
+
+describe('plugin-client — real default plugin', () => {
   test('parses the src/plugin default plugin clean', async () => {
     const pluginDir = `${import.meta.dir}/../../../src/plugin`
     const resolved = path.resolve(pluginDir)

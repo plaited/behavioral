@@ -43,7 +43,7 @@ import {
   mcpListTools,
   mcpReadResource,
 } from '../tools/mcp-client.ts'
-import { pluginLoader } from '../tools/plugin-loader.ts'
+import { pluginClient } from '../tools/plugin-client.ts'
 import { skillDiscover, skillListResources, skillRead } from '../tools/skill-client.ts'
 import { typescriptLspDiscover, typescriptLspExecute } from '../tools/typescript.ts'
 import { ajv } from '../tools/use-tool.ts'
@@ -101,7 +101,7 @@ const FLEET: FleetEntry[] = [
   entry(mcpListResources),
   entry(mcpReadResource),
   entry(mcpDiscover),
-  entry(pluginLoader),
+  entry(pluginClient),
   entry(skillDiscover),
   entry(skillRead),
   entry(skillListResources),

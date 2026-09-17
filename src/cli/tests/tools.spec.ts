@@ -31,7 +31,7 @@ describe('behavioral tools', () => {
     expect(stderr).toContain('git-context')
     expect(stderr).toContain('typescript-execute')
     expect(stderr).toContain('typescript-discover')
-    expect(stderr).toContain('plugin-loader')
+    expect(stderr).toContain('plugin-client')
   })
 
   test('bare --schema prints the fleet index with name + description per tool', async () => {
