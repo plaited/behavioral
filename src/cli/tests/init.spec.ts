@@ -4,11 +4,16 @@ import * as path from 'node:path'
 const repoRoot = path.resolve(import.meta.dir, '../../..')
 const binPath = path.join(repoRoot, 'bin/behavioral.ts')
 
-const runInit = async (args: string[], cwd = repoRoot): Promise<{ code: number; stdout: string; stderr: string }> => {
+const runInit = async (
+  args: string[],
+  cwd = repoRoot,
+  env: Record<string, string> = {},
+): Promise<{ code: number; stdout: string; stderr: string }> => {
   const proc = Bun.spawn(['bun', binPath, 'init', ...args], {
     stdout: 'pipe',
     stderr: 'pipe',
     cwd,
+    env: { ...process.env, ...env },
   })
   const [stdout, stderr, code] = await Promise.all([
     new Response(proc.stdout).text(),
@@ -34,6 +39,35 @@ describe('behavioral init', () => {
     expect(schema.properties).toHaveProperty('scope')
     expect(schema.properties).toHaveProperty('force')
     expect(schema.properties).toHaveProperty('you-web')
+  })
+
+  test('provisions the ~/.behavioral home idempotently (HOME overridden)', async () => {
+    const tmpHome = path.resolve((await Bun.$`mktemp -d`.quiet().text()).trim())
+    try {
+      const { code, stdout } = await runInit([JSON.stringify({})], repoRoot, { HOME: tmpHome })
+      expect(code).toBe(0)
+      const result = JSON.parse(stdout)
+      const homeRoot = path.join(tmpHome, '.behavioral')
+      expect(result.home.root).toBe(homeRoot)
+      expect(result.home.gitInitialized).toBe(true)
+      expect(result.home.configSeeded).toBe(true)
+      expect((await Bun.$`test -d ${path.join(homeRoot, 'root', 'threads')}`.quiet()).exitCode).toBe(0)
+      expect((await Bun.$`test -d ${path.join(homeRoot, 'root', 'html')}`.quiet()).exitCode).toBe(0)
+      expect((await Bun.$`test -d ${path.join(homeRoot, 'root', 'logs', 'archive')}`.quiet()).exitCode).toBe(0)
+      expect(await Bun.file(path.join(homeRoot, '.gitignore')).text()).toBe('db.sqlite\nlogs/\n')
+      expect(JSON.parse(await Bun.file(path.join(homeRoot, 'config.json')).text())).toEqual({ models: [] })
+
+      // second run: already-installed plugin errors, but home provisioning
+      // is idempotent and reports nothing new
+      const second = await runInit([JSON.stringify({})], repoRoot, { HOME: tmpHome })
+      expect(second.code).toBe(0)
+      const secondResult = JSON.parse(second.stdout)
+      expect(secondResult.isError).toBe(true)
+      expect(secondResult.home.gitInitialized).toBe(false)
+      expect(secondResult.home.configSeeded).toBe(false)
+    } finally {
+      await Bun.$`rm -rf ${tmpHome}`.quiet().nothrow()
+    }
   })
 
   test('installs to project scope and copies plugin.json + skills/ + mcp.json', async () => {

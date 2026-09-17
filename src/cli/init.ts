@@ -18,6 +18,7 @@
 
 import * as path from 'node:path'
 import type { JSONSchemaType } from 'ajv'
+import { behavioralHomeRoot, type ProvisionResult, provisionBehavioralHome } from '../kernel/behavioral-home.ts'
 import { makeCli } from './cli.ts'
 
 // ---------------------------------------------------------------------------
@@ -41,11 +42,13 @@ type InitCliOutput = {
   scope: 'user' | 'project'
   auth: 'apiKey' | 'oauth' | 'unresolved'
   force: boolean
+  home: ProvisionResult
 }
 
 type InitError = {
   isError: true
   message: string
+  home: ProvisionResult
 }
 
 // ---------------------------------------------------------------------------
@@ -93,8 +96,20 @@ const InitCliOutputSchema = {
       description: 'resolved auth method',
     },
     force: { type: 'boolean', description: 'whether the install was forced' },
+    home: {
+      type: 'object',
+      properties: {
+        root: { type: 'string', description: 'the behavioral home root (~/.behavioral)' },
+        gitInitialized: { type: 'boolean', description: 'whether git init ran this invocation' },
+        gitignoreWritten: { type: 'boolean', description: 'whether .gitignore was written this invocation' },
+        configSeeded: { type: 'boolean', description: 'whether config.json was seeded this invocation' },
+      },
+      required: ['root', 'gitInitialized', 'gitignoreWritten', 'configSeeded'],
+      additionalProperties: false,
+      description: 'idempotent provisioning result for the ~/.behavioral growth-model home',
+    },
   },
-  required: ['installed', 'scope', 'auth', 'force'],
+  required: ['installed', 'scope', 'auth', 'force', 'home'],
   additionalProperties: false,
   description: 'Init CLI output — the install path, auth resolution, and force flag',
 } as unknown as JSONSchemaType<InitCliOutput>
@@ -104,8 +119,20 @@ const InitErrorSchema = {
   properties: {
     isError: { type: 'boolean', const: true, description: 'marks an error result' },
     message: { type: 'string', description: 'human-readable error message' },
+    home: {
+      type: 'object',
+      properties: {
+        root: { type: 'string', description: 'the behavioral home root (~/.behavioral)' },
+        gitInitialized: { type: 'boolean', description: 'whether git init ran this invocation' },
+        gitignoreWritten: { type: 'boolean', description: 'whether .gitignore was written this invocation' },
+        configSeeded: { type: 'boolean', description: 'whether config.json was seeded this invocation' },
+      },
+      required: ['root', 'gitInitialized', 'gitignoreWritten', 'configSeeded'],
+      additionalProperties: false,
+      description: 'idempotent provisioning result for the ~/.behavioral growth-model home',
+    },
   },
-  required: ['isError', 'message'],
+  required: ['isError', 'message', 'home'],
   additionalProperties: false,
   description: 'Init CLI error output',
 } as unknown as JSONSchemaType<InitError>
@@ -171,6 +198,10 @@ const storeApiKey = async (apiKey: string): Promise<void> => {
 // ---------------------------------------------------------------------------
 
 const run = async (input: InitCliInput): Promise<InitCliOutput | InitError> => {
+  // Idempotent home provisioning happens first — it is safe and convergent
+  // even when the plugin install then short-circuits on "already installed".
+  const home = await provisionBehavioralHome(behavioralHomeRoot())
+
   const targetDir = resolveScopeDir(input.scope)
 
   if (await pluginExists(targetDir)) {
@@ -178,6 +209,7 @@ const run = async (input: InitCliInput): Promise<InitCliOutput | InitError> => {
       return {
         isError: true,
         message: 'already installed — pass force: true to overwrite',
+        home,
       }
     }
     await Bun.$`rm -rf ${targetDir}`.quiet()
@@ -201,6 +233,7 @@ const run = async (input: InitCliInput): Promise<InitCliOutput | InitError> => {
     scope: input.scope,
     auth: authResult.auth,
     force: input.force,
+    home,
   }
 }
 
@@ -213,7 +246,14 @@ export const initCli = makeCli({
   inputSchema: InitCliInputSchema,
   outputSchema: InitCliOutputUnionSchema,
   help: [
-    'First-time setup — install the default behavioral plugin and configure you-web auth.',
+    'First-time setup — install the default behavioral plugin, configure you-web auth,',
+    'and provision the ~/.behavioral growth-model home (idempotent).',
+    '',
+    'Home provisioning (~/.behavioral):',
+    '  - root space skeleton: root/{threads,html,logs/archive}',
+    '  - git init (the learning log repo) if absent',
+    '  - .gitignore (db.sqlite, logs/) and seed config.json if absent',
+    '  - never clobbers existing files or user edits',
     '',
     'Installs the bundled plugin from src/plugin/ into:',
     '  user scope    → ~/.agents/plugins/behavioral/',
