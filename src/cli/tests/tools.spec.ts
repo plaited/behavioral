@@ -32,6 +32,8 @@ describe('behavioral tools', () => {
     expect(stderr).toContain('typescript-execute')
     expect(stderr).toContain('typescript-discover')
     expect(stderr).toContain('plugin-client')
+    expect(stderr).toContain('skill-extract-links')
+    expect(stderr).toContain('skill-validate-links')
   })
 
   test('bare --schema prints the fleet index with name + description per tool', async () => {
@@ -41,7 +43,7 @@ describe('behavioral tools', () => {
     const output = JSON.parse(stdout)
     expect(output.command).toBe('tools')
     expect(Array.isArray(output.tools)).toBe(true)
-    expect(output.tools.length).toBeGreaterThanOrEqual(30)
+    expect(output.tools.length).toBeGreaterThanOrEqual(32)
     const gitHistory = output.tools.find((t: { name: string }) => t.name === 'git-history')
     expect(gitHistory?.description).toBeString()
     const names = output.tools.map((t: { name: string }) => t.name)

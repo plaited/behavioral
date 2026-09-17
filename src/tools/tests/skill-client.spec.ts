@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test'
+import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import * as path from 'node:path'
 import {
   SkillDiscoverInputSchema,
@@ -8,8 +10,10 @@ import {
   SkillReadInputSchema,
   SkillReadOutputSchema,
   skillDiscover,
+  skillExtractLinks,
   skillListResources,
   skillRead,
+  skillValidateLinks,
 } from '../skill-client.ts'
 import { ajv } from '../use-tool.ts'
 
@@ -149,5 +153,110 @@ describe('skill-client tool — list-resources (tier 3 bundled-resource preview)
     expect(scriptFile!.type).toBe('file')
     expect(refFile).toBeDefined()
     expect(refFile!.type).toBe('file')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// skill-extract-links — local markdown link extraction (ported from the old
+// src/cli/markdown.ts extract-links mode)
+// ---------------------------------------------------------------------------
+
+describe('skill-client — skill-extract-links', () => {
+  test('tool contract: kebab name and link-extraction description', () => {
+    expect(skillExtractLinks.name).toBe('skill-extract-links')
+    expect(skillExtractLinks.description.toLowerCase()).toContain('link')
+  })
+
+  test('returns sorted, de-duplicated local links with display text', async () => {
+    const output = await skillExtractLinks({
+      markdown: 'See [b](scripts/b.ts) and [a](scripts/a.ts) ![d](assets/d.png) [a again](scripts/a.ts)',
+    })
+    expect(output.links).toEqual([
+      { value: 'assets/d.png', text: 'd' },
+      { value: 'scripts/a.ts', text: 'a' },
+      { value: 'scripts/b.ts', text: 'b' },
+    ])
+  })
+
+  test('drops external and fragment-only links; keeps inline HTML', async () => {
+    const output = await skillExtractLinks({
+      markdown:
+        '[site](https://example.com) [mail](mailto:a@b.c) [frag](#section) <a href="docs/guide.md">guide</a> <img src="assets/logo.png" alt="logo">',
+    })
+    expect(output.links).toEqual([
+      { value: 'assets/logo.png', text: 'logo' },
+      { value: 'docs/guide.md', text: 'guide' },
+    ])
+  })
+
+  test('empty result for markdown with no local links', async () => {
+    const output = await skillExtractLinks({ markdown: 'No links here, just text.' })
+    expect(output.links).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// skill-validate-links — resolve local links against a cwd (ported from the
+// old src/cli/markdown.ts validate-links mode)
+// ---------------------------------------------------------------------------
+
+describe('skill-client — skill-validate-links', () => {
+  const tempDir = async (): Promise<string> => mkdtemp(path.join(tmpdir(), 'behavioral-skill-links-'))
+
+  test('tool contract: kebab name and link-validation description', () => {
+    expect(skillValidateLinks.name).toBe('skill-validate-links')
+    expect(skillValidateLinks.description.toLowerCase()).toContain('missing')
+  })
+
+  test('returns present and missing links resolved against cwd', async () => {
+    const baseDir = await tempDir()
+    try {
+      await mkdir(path.join(baseDir, 'docs'), { recursive: true })
+      await Bun.write(path.join(baseDir, 'docs', 'guide.md'), '# guide')
+
+      const output = await skillValidateLinks({
+        cwd: baseDir,
+        markdownBody: 'See [guide](docs/guide.md) and [missing](docs/missing.md)',
+      })
+      expect(output.present).toEqual([{ value: 'docs/guide.md', text: 'guide' }])
+      expect(output.missing).toEqual([{ value: 'docs/missing.md', text: 'missing' }])
+    } finally {
+      await rm(baseDir, { recursive: true, force: true })
+    }
+  })
+
+  test('rootRelative resolves leading-slash links against cwd', async () => {
+    const baseDir = await tempDir()
+    try {
+      await mkdir(path.join(baseDir, 'tables'), { recursive: true })
+      await Bun.write(path.join(baseDir, 'tables', 'customers.md'), '# customers')
+
+      const output = await skillValidateLinks({
+        cwd: baseDir,
+        markdownBody: 'See [customers](/tables/customers.md) and [gone](/tables/gone.md)',
+        rootRelative: true,
+      })
+      expect(output.present).toEqual([{ value: '/tables/customers.md', text: 'customers' }])
+      expect(output.missing).toEqual([{ value: '/tables/gone.md', text: 'gone' }])
+    } finally {
+      await rm(baseDir, { recursive: true, force: true })
+    }
+  })
+
+  test('without rootRelative, leading-slash links resolve against the filesystem root (legacy)', async () => {
+    const baseDir = await tempDir()
+    try {
+      await mkdir(path.join(baseDir, 'tables'), { recursive: true })
+      await Bun.write(path.join(baseDir, 'tables', 'customers.md'), '# customers')
+
+      const output = await skillValidateLinks({
+        cwd: baseDir,
+        markdownBody: 'See [customers](/tables/customers.md)',
+      })
+      expect(output.present).toEqual([])
+      expect(output.missing).toEqual([{ value: '/tables/customers.md', text: 'customers' }])
+    } finally {
+      await rm(baseDir, { recursive: true, force: true })
+    }
   })
 })

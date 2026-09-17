@@ -66,6 +66,27 @@ export type SkillListResourcesInput = { cwd: string; location: string }
 
 export type SkillListResourcesOutput = { resources: ResourceEntry[] }
 
+/** A local markdown link: normalized target + display text. */
+export type LocalMarkdownLink = {
+  value: string
+  text: string
+}
+
+export type SkillExtractLinksInput = { markdown: string }
+
+export type SkillExtractLinksOutput = { links: LocalMarkdownLink[] }
+
+export type SkillValidateLinksInput = {
+  cwd: string
+  markdownBody: string
+  rootRelative?: boolean
+}
+
+export type SkillValidateLinksOutput = {
+  present: LocalMarkdownLink[]
+  missing: LocalMarkdownLink[]
+}
+
 // ---------------------------------------------------------------------------
 // Tool JSON schemas — one schema pair per tool, no `mode` discriminator.
 // AJV validates at runtime; `SkillRecord`'s open index signature means the
@@ -183,6 +204,61 @@ export const SkillListResourcesOutputSchema = {
   required: ['resources'],
   additionalProperties: false,
 } as unknown as JSONSchemaType<SkillListResourcesOutput>
+
+const localMarkdownLinkJsonSchema = {
+  type: 'object',
+  properties: {
+    value: { type: 'string', minLength: 1, description: 'normalized local link target' },
+    text: { type: 'string', minLength: 1, description: 'link display text, or the target when unlabeled' },
+  },
+  required: ['value', 'text'],
+  additionalProperties: false,
+} as const
+
+export const SkillExtractLinksInputSchema = {
+  type: 'object',
+  properties: {
+    markdown: { type: 'string', minLength: 1, description: 'markdown source to extract local links from' },
+  },
+  required: ['markdown'],
+  additionalProperties: false,
+  description: 'Extract sorted, de-duplicated local file links from markdown text.',
+} as unknown as JSONSchemaType<SkillExtractLinksInput>
+
+export const SkillExtractLinksOutputSchema = {
+  type: 'object',
+  properties: {
+    links: { type: 'array', items: localMarkdownLinkJsonSchema, description: 'sorted unique local links' },
+  },
+  required: ['links'],
+  additionalProperties: false,
+} as unknown as JSONSchemaType<SkillExtractLinksOutput>
+
+export const SkillValidateLinksInputSchema = {
+  type: 'object',
+  properties: {
+    cwd: cwdJsonSchema,
+    markdownBody: { type: 'string', minLength: 1, description: 'markdown body whose local links are checked' },
+    rootRelative: {
+      type: 'boolean',
+      nullable: true,
+      description: 'treat leading-slash links as relative to cwd (project/bundle root) instead of the filesystem root',
+    },
+  },
+  required: ['cwd', 'markdownBody'],
+  additionalProperties: false,
+  description: 'Check that local markdown links resolve to files under cwd.',
+} as unknown as JSONSchemaType<SkillValidateLinksInput>
+
+export const SkillValidateLinksOutputSchema = {
+  type: 'object',
+  properties: {
+    present: { type: 'array', items: localMarkdownLinkJsonSchema, description: 'links that resolve under cwd' },
+    missing: { type: 'array', items: localMarkdownLinkJsonSchema, description: 'links that do not resolve' },
+  },
+  required: ['present', 'missing'],
+  additionalProperties: false,
+} as unknown as JSONSchemaType<SkillValidateLinksOutput>
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -420,6 +496,247 @@ const listResources = async (cwd: string, location: string): Promise<ResourceEnt
 }
 
 // ---------------------------------------------------------------------------
+// Local markdown-link extraction + validation (ported from the removed
+// src/cli/markdown.ts — escape-aware inline parser + HTMLRewriter pass)
+// ---------------------------------------------------------------------------
+
+/** Normalize a link target; null for external/fragment-only links. */
+const normalizeMarkdownLink = (value: string): string | null => {
+  if (
+    !value ||
+    value.startsWith('http://') ||
+    value.startsWith('https://') ||
+    value.startsWith('mailto:') ||
+    value.startsWith('#')
+  ) {
+    return null
+  }
+
+  const [linkPath] = value.split('#')
+  if (!linkPath) return null
+  return path.normalize(linkPath)
+}
+
+const extractMarkdownLinkDestination = (value: string): string => {
+  const trimmedValue = value.trim()
+  if (!trimmedValue) return trimmedValue
+
+  if (trimmedValue.startsWith('<')) {
+    const closingBracketIndex = trimmedValue.indexOf('>')
+    if (closingBracketIndex > 0) {
+      return trimmedValue.slice(1, closingBracketIndex)
+    }
+  }
+
+  const firstWhitespaceIndex = trimmedValue.search(/\s/)
+  if (firstWhitespaceIndex === -1) return trimmedValue
+  return trimmedValue.slice(0, firstWhitespaceIndex)
+}
+
+const stripHtmlTags = (value: string): string => {
+  const textParts: string[] = []
+  let pendingTag: string[] | null = null
+
+  for (const character of value) {
+    if (pendingTag) {
+      pendingTag.push(character)
+      if (character === '>') {
+        pendingTag = null
+      }
+      continue
+    }
+
+    if (character === '<') {
+      pendingTag = ['<']
+      continue
+    }
+
+    textParts.push(character)
+  }
+
+  if (pendingTag) {
+    textParts.push(...pendingTag)
+  }
+
+  return textParts.join('')
+}
+
+const isEscapedCharacter = (value: string, index: number): boolean => {
+  let slashCount = 0
+  for (let currentIndex = index - 1; currentIndex >= 0 && value[currentIndex] === '\\'; currentIndex -= 1) {
+    slashCount += 1
+  }
+  return slashCount % 2 === 1
+}
+
+const findInlineDestinationEnd = (value: string, startIndex: number): number => {
+  for (let index = startIndex; index < value.length; index += 1) {
+    const character = value[index]
+    if (character === '\n' || character === '\r') return -1
+    if (value[index] !== ')' || isEscapedCharacter(value, index)) continue
+    return index
+  }
+  return -1
+}
+
+const extractInlineMarkdownLinks = (markdownBody: string): Array<{ text: string; destination: string }> => {
+  const links: Array<{ text: string; destination: string }> = []
+
+  for (let index = 0; index < markdownBody.length; index += 1) {
+    const character = markdownBody[index]
+    if (character === undefined) continue
+
+    const startsImageLink =
+      character === '!' && markdownBody[index + 1] === '[' && !isEscapedCharacter(markdownBody, index)
+    const startsTextLink = character === '[' && !isEscapedCharacter(markdownBody, index)
+    if (!startsImageLink && !startsTextLink) continue
+
+    const openBracketIndex = startsImageLink ? index + 1 : index
+    let scanIndex = openBracketIndex + 1
+    let bracketDepth = 1
+    let closeBracketIndex = -1
+
+    while (scanIndex < markdownBody.length) {
+      const scanCharacter = markdownBody[scanIndex]
+      if (scanCharacter === undefined) break
+
+      if (scanCharacter === '[' && !isEscapedCharacter(markdownBody, scanIndex)) {
+        bracketDepth += 1
+      } else if (scanCharacter === ']' && !isEscapedCharacter(markdownBody, scanIndex)) {
+        bracketDepth -= 1
+        if (bracketDepth === 0) {
+          closeBracketIndex = scanIndex
+          break
+        }
+      }
+
+      scanIndex += 1
+    }
+
+    if (closeBracketIndex === -1) {
+      index = openBracketIndex
+      continue
+    }
+
+    const openParenIndex = closeBracketIndex + 1
+    if (markdownBody[openParenIndex] !== '(') {
+      index = closeBracketIndex
+      continue
+    }
+
+    const destinationStartIndex = openParenIndex + 1
+    const destinationEndIndex = findInlineDestinationEnd(markdownBody, destinationStartIndex)
+    if (destinationEndIndex === -1) {
+      index = openParenIndex
+      continue
+    }
+
+    const destination = markdownBody.slice(destinationStartIndex, destinationEndIndex)
+    if (destination.trim().length > 0) {
+      links.push({
+        text: markdownBody.slice(openBracketIndex + 1, closeBracketIndex),
+        destination,
+      })
+    }
+
+    index = destinationEndIndex
+  }
+
+  return links
+}
+
+const extractLocalLinksFromMarkdown = async (markdownBody: string): Promise<LocalMarkdownLink[]> => {
+  const links = new Set<string>()
+  const html = Bun.markdown.html(markdownBody)
+  const rewriter = new HTMLRewriter()
+
+  // Display text for each target: first inline occurrence wins (markdown
+  // links, then <a>/<img> fallbacks), defaulting to the target itself.
+  const linkTextByTarget = new Map<string, string>()
+  const setText = (target: string | null, text: string): void => {
+    if (!target || linkTextByTarget.has(target)) return
+    linkTextByTarget.set(target, text.trim() || target)
+  }
+  for (const link of extractInlineMarkdownLinks(markdownBody)) {
+    setText(normalizeMarkdownLink(extractMarkdownLinkDestination(link.destination)), link.text)
+  }
+  const htmlAnchorPattern = /<a\b[^>]*\bhref=(['"])(.*?)\1[^>]*>([\s\S]*?)<\/a>/gi
+  for (const match of markdownBody.matchAll(htmlAnchorPattern)) {
+    setText(normalizeMarkdownLink(match[2] ?? ''), stripHtmlTags(match[3] ?? ''))
+  }
+  const htmlImagePattern = /<img\b[^>]*>/gi
+  for (const match of markdownBody.matchAll(htmlImagePattern)) {
+    const imageTag = match[0] ?? ''
+    const sourceMatch = imageTag.match(/\bsrc=(['"])(.*?)\1/i)
+    const altMatch = imageTag.match(/\balt=(['"])(.*?)\1/i)
+    setText(sourceMatch ? normalizeMarkdownLink(sourceMatch[2] ?? '') : null, altMatch?.[2] ?? '')
+  }
+
+  for (const selector of ['a', 'img']) {
+    rewriter.on(selector, {
+      element(element) {
+        const attribute = selector === 'a' ? 'href' : 'src'
+        const value = element.getAttribute(attribute)
+        const normalizedLink = value ? normalizeMarkdownLink(value) : null
+        if (normalizedLink) {
+          links.add(normalizedLink)
+        }
+      },
+    })
+  }
+
+  // Consume the rewriter result so extraction side effects apply. Bun's
+  // transform returns a string when handed a string body.
+  const rewritten = rewriter.transform(html) as string | Response | Blob | ArrayBufferLike
+  if (typeof rewritten === 'string') {
+    void rewritten
+  } else if (rewritten instanceof Response || rewritten instanceof Blob) {
+    await rewritten.text()
+  } else {
+    void new TextDecoder().decode(new Uint8Array(rewritten))
+  }
+
+  return [...links].sort().map((value) => ({
+    value,
+    text: linkTextByTarget.get(value) ?? value,
+  }))
+}
+
+const validateMarkdownLocalLinks = async ({
+  cwd,
+  markdownBody,
+  rootRelative,
+}: {
+  cwd: string
+  markdownBody: string
+  rootRelative: boolean
+}): Promise<SkillValidateLinksOutput> => {
+  const present: LocalMarkdownLink[] = []
+  const missing: LocalMarkdownLink[] = []
+  const links = await extractLocalLinksFromMarkdown(markdownBody)
+
+  for (const link of links) {
+    // When rootRelative, a leading '/' marks a root-relative path resolved
+    // against cwd rather than the filesystem root.
+    const linkPath = rootRelative && link.value.startsWith('/') ? link.value.slice(1) : link.value
+    const absolutePath = path.resolve(cwd, linkPath)
+    const file = Bun.file(absolutePath)
+    const entry = { value: link.value, text: link.text || link.value }
+    if (await file.exists()) {
+      present.push(entry)
+    } else {
+      missing.push(entry)
+    }
+  }
+
+  const byValueThenText = (left: LocalMarkdownLink, right: LocalMarkdownLink): number =>
+    left.value.localeCompare(right.value) || left.text.localeCompare(right.text)
+  present.sort(byValueThenText)
+  missing.sort(byValueThenText)
+  return { present, missing }
+}
+
+// ---------------------------------------------------------------------------
 // useTool registration — one tool per mode
 // ---------------------------------------------------------------------------
 
@@ -467,4 +784,36 @@ export const skillListResources = useTool(
     outputSchema: SkillListResourcesOutputSchema,
   },
   async ({ cwd, location }) => ({ resources: await listResources(cwd, location) }),
+)
+
+/**
+ * Extract sorted, de-duplicated local file links from markdown text — both
+ * markdown links and inline HTML, dropping external and fragment-only targets.
+ */
+export const skillExtractLinks = useTool(
+  {
+    name: 'skill-extract-links',
+    description:
+      'Extract local file links from markdown text as a sorted, de-duplicated { value, text } list. Covers markdown links and inline HTML <a>/<img>; drops external (http/mailto) and fragment-only links.',
+    inputSchema: SkillExtractLinksInputSchema,
+    outputSchema: SkillExtractLinksOutputSchema,
+  },
+  async ({ markdown }) => ({ links: await extractLocalLinksFromMarkdown(markdown) }),
+)
+
+/**
+ * Check that local markdown links resolve to files under a base directory.
+ * `rootRelative` selects whether leading-`/` links resolve against cwd
+ * (project/bundle root) or the filesystem root (legacy default).
+ */
+export const skillValidateLinks = useTool(
+  {
+    name: 'skill-validate-links',
+    description:
+      'Check that local markdown links resolve to files. Returns { present, missing } link lists resolved against the provisioned cwd. Set rootRelative: true when leading-slash links are project/bundle-root-relative; the default treats them as filesystem-root.',
+    inputSchema: SkillValidateLinksInputSchema,
+    outputSchema: SkillValidateLinksOutputSchema,
+  },
+  async ({ cwd, markdownBody, rootRelative }) =>
+    validateMarkdownLocalLinks({ cwd, markdownBody, rootRelative: rootRelative ?? false }),
 )
