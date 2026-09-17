@@ -63,17 +63,14 @@
     ]
   },
   "dependencies": {
-    "@daytonaio/sdk": "^0.211.2",
-    "@modelcontextprotocol/client": "^2.0.0",
     "ajv": "8.20.0"
   },
   "devDependencies": {
+    "@modelcontextprotocol/client": "^2.0.0",
     "@biomejs/biome": "2.5.12",
     "@commitlint/cli": "21.2.2",
     "@commitlint/config-conventional": "21.2.2",
-    "@earendil-works/pi-coding-agent": "0.82.1",
     "@modelcontextprotocol/server": "^2.0.0",
-    "@tauri-apps/cli": "^2.11.4",
     "@types/bun": "^1.4.1",
     "@webref/css": "^8.7.4",
     "commitlint": "21.2.2",

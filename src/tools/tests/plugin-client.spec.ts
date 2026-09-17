@@ -838,18 +838,6 @@ describe('plugin-client — warnings channel', () => {
   })
 })
 
-describe('plugin-client — real default plugin', () => {
-  test('parses the src/plugin default plugin clean', async () => {
-    const pluginDir = `${import.meta.dir}/../../../src/plugin`
-    const resolved = path.resolve(pluginDir)
-    const result = await run(resolved)
-    expect(validateOutput(result)).toBe(true)
-    expect(ok(result)).toBe(true)
-    expect(manifest(result).name).toBe('behavioral')
-    // skills/behavioral/ should be discovered
-    expect(manifest(result).skills).toContain('behavioral')
-    // mcp.json has you-web server
-    expect(manifest(result).mcps).toHaveProperty('you-web')
-    expect(manifest(result).threads).toEqual([])
-  })
-})
+// (The repo no longer ships a bundled plugin package — the growth model
+// keeps plugin packaging as a deferred distribution format. Conformance is
+// covered by the makePlugin fixtures above.)
