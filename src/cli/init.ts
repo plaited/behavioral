@@ -19,6 +19,7 @@
 import * as path from 'node:path'
 import type { JSONSchemaType } from 'ajv'
 import { behavioralHomeRoot, type ProvisionResult, provisionBehavioralHome } from '../kernel/behavioral-home.ts'
+import { reconcileScan, type ScanResult } from '../kernel/reconcile-scan.ts'
 import { makeCli } from './cli.ts'
 
 // ---------------------------------------------------------------------------
@@ -43,12 +44,14 @@ type InitCliOutput = {
   auth: 'apiKey' | 'oauth' | 'unresolved'
   force: boolean
   home: ProvisionResult
+  scan: ScanResult
 }
 
 type InitError = {
   isError: true
   message: string
   home: ProvisionResult
+  scan: ScanResult
 }
 
 // ---------------------------------------------------------------------------
@@ -85,6 +88,21 @@ const InitCliInputSchema = {
   description: 'Init CLI input — install the default behavioral plugin and configure auth',
 } as unknown as JSONSchemaType<InitCliInput>
 
+const scanSchema = {
+  type: 'object',
+  properties: {
+    spaces: { type: 'array', items: { type: 'string' }, description: 'the spaces scanned' },
+    created: { type: 'integer', description: 'rows created' },
+    updated: { type: 'integer', description: 'rows updated' },
+    deleted: { type: 'integer', description: 'rows deleted (artifacts vanished)' },
+    skippedInvalid: { type: 'integer', description: 'committed artifacts with malformed BMeta — never indexed' },
+    skippedUncommitted: { type: 'integer', description: 'uncommitted artifacts — unlearned, correctly absent' },
+  },
+  required: ['spaces', 'created', 'updated', 'deleted', 'skippedInvalid', 'skippedUncommitted'],
+  additionalProperties: false,
+  description: 'reconcile-scan result — the sole discovery-store writer, run at provisioning',
+} as const
+
 const InitCliOutputSchema = {
   type: 'object',
   properties: {
@@ -108,8 +126,9 @@ const InitCliOutputSchema = {
       additionalProperties: false,
       description: 'idempotent provisioning result for the ~/.behavioral growth-model home',
     },
+    scan: scanSchema,
   },
-  required: ['installed', 'scope', 'auth', 'force', 'home'],
+  required: ['installed', 'scope', 'auth', 'force', 'home', 'scan'],
   additionalProperties: false,
   description: 'Init CLI output — the install path, auth resolution, and force flag',
 } as unknown as JSONSchemaType<InitCliOutput>
@@ -131,8 +150,9 @@ const InitErrorSchema = {
       additionalProperties: false,
       description: 'idempotent provisioning result for the ~/.behavioral growth-model home',
     },
+    scan: scanSchema,
   },
-  required: ['isError', 'message', 'home'],
+  required: ['isError', 'message', 'home', 'scan'],
   additionalProperties: false,
   description: 'Init CLI error output',
 } as unknown as JSONSchemaType<InitError>
@@ -198,9 +218,12 @@ const storeApiKey = async (apiKey: string): Promise<void> => {
 // ---------------------------------------------------------------------------
 
 const run = async (input: InitCliInput): Promise<InitCliOutput | InitError> => {
-  // Idempotent home provisioning happens first — it is safe and convergent
-  // even when the plugin install then short-circuits on "already installed".
+  // Idempotent home provisioning happens first, then the reconcile scan —
+  // at-provisioning is one of the scan's two run points (post-turn is the
+  // other). Both are safe and convergent even when the plugin install then
+  // short-circuits on "already installed".
   const home = await provisionBehavioralHome(behavioralHomeRoot())
+  const scan = await reconcileScan({ cwd: process.cwd() })
 
   const targetDir = resolveScopeDir(input.scope)
 
@@ -210,6 +233,7 @@ const run = async (input: InitCliInput): Promise<InitCliOutput | InitError> => {
         isError: true,
         message: 'already installed — pass force: true to overwrite',
         home,
+        scan,
       }
     }
     await Bun.$`rm -rf ${targetDir}`.quiet()
@@ -234,6 +258,7 @@ const run = async (input: InitCliInput): Promise<InitCliOutput | InitError> => {
     auth: authResult.auth,
     force: input.force,
     home,
+    scan,
   }
 }
 
@@ -247,7 +272,7 @@ export const initCli = makeCli({
   outputSchema: InitCliOutputUnionSchema,
   help: [
     'First-time setup — install the default behavioral plugin, configure you-web auth,',
-    'and provision the ~/.behavioral growth-model home (idempotent).',
+    'provision the ~/.behavioral growth-model home (idempotent), and run the reconcile scan.',
     '',
     'Home provisioning (~/.behavioral):',
     '  - root space skeleton: root/{threads,html,logs/archive}',
