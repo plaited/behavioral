@@ -114,20 +114,23 @@ ingress + a plugin-shipped behavior surface.
 
 ## Decision Log
 
-### 2026-09-17 — Growth model: space-first `.behavioral/`, git as authority, discovery as the read-model
+### 2026-09-17 — Growth model: space-first `~/.behavioral/`, git as authority, discovery as the read-model
 
 Supersedes the growth-model reading of Q3/Q7 (2026-09-09): the plugin format
 stays the **distribution input** for third-party behaviors, but the agent's own
 growth is a function of the space, not of plugin mutation. The distinction the
 plan previously blurred — and the Agent Plugins spec itself draws — is that the
 format prescribes packaging, not enablement/update/growth; client-extension
-behavior is explicitly client-owned. `sh.behavioral` keeps exactly one job:
-third-party plugins declaring behavioral-specific components (threads under
-that plugin's `threads/`, models, space suggestions) at install time. The
-default plugin's own `extensions.sh.behavioral` block shrinks to nothing
-beyond metadata — the `"threads": {"include": []}` self-gating wart disappears
-(host policy doesn't need a package's self-description to gate it; the default
-plugin is the only client and only plugin — self-dealing).
+behavior is explicitly client-owned. **All `sh.behavioral` interpretation is
+removed from the client**: `plugin-client` reads only the portable surface —
+manifest + mcp.json conformance, `skills/` discovery, plain ungated `threads/`
+component discovery, the warnings channel. Model declarations move to a
+host-owned config file (below); gating is host structure + governor threads;
+spaces config is gone. The annex stays the spec-sanctioned slot if third-party
+behavioral-specific declarations ever need it — re-adding it later is a reader,
+not a format change. The default plugin's `extensions.sh.behavioral` block
+disappears entirely — the `"threads": {"include": []}` self-gating wart with
+it.
 
 **Growth is files in the space, git-tracked.** The agent learns by writing
 threads and html into the space's learned dir; the autoresearch gate (Q8/F:
@@ -146,16 +149,31 @@ with identical structure; isolation is enforced by scoping to the space root
 once, at provisioning:
 
 ```
-.behavioral/
+~/.behavioral/              # USER HOME, not per-project (see below)
+  config.json               # host config: models + future host settings (git-tracked)
   db.sqlite                 # gitignored; single discovery db (see below)
   root/                     # the $root space — name reserved
     threads/                # learned + governor threads (git-tracked)
     html/                    # shared-context HTML knowledge (git-tracked)
-    logs/                    # per-run turn traces, jsonl (runtime exhaust)
+    logs/                    # gitignored; per-run turn traces, jsonl (runtime exhaust)
       archive/               # compacted/rotated runs
   <space-name>/             # identical shape per space
     threads/ html/ logs/ archive/
 ```
+
+**The tree lives at `~/.behavioral` — user-level, not per-project.** Learning
+follows the user across projects; spaces remain projects (Q6/A) keyed by name
+in the tree. The authority model requires git history there, so **`~/.behavioral`
+is initialized as its own git repository** — an idempotent `git init` +
+skeleton at first provisioning (`behavioral init`) — and the learning log is
+that repo's history: `threads/`, `html/`, `config.json` tracked; `db.sqlite`
+and `logs/` gitignored (exhaust is data for the teacher, not the learning log).
+Precedent: skill-client already scans user-level `~/.agents/skills`.
+**Models are declared in `~/.behavioral/config.json`** — `{ models: [{
+provider, modelId, endpointUrl, apiKeyRef, locality? }] }`, AJV-validated,
+user-curated (users add models to this file directly; plugins never declare
+model endpoints); the apiKeyRef-not-raw-apiKey rule moves from `sh.behavioral`
+validation to this config schema.
 
 Space-first beats per-concern trees (`threads/<space>/` etc.) because per-space
 queries are the discovery store's job, not the filesystem's; every concern-tool
@@ -166,7 +184,7 @@ are agent-shared context that happens to be renderable by the dev server
 dev server (Phase 6) serves this tree as its render surface and connects to
 the trigger ingress.
 
-**Single discovery db, provisioner-scoped.** One `.behavioral/db.sqlite`,
+**Single discovery db, provisioner-scoped.** One `~/.behavioral/db.sqlite`,
 every row carrying `space` + `metadata.commitSha`. **Space identity is
 provisioner-injected, never agent-supplied** — the discovery tools bind the
 `space` filter server-side (no `space` field in the agent-facing input schema),
@@ -196,7 +214,7 @@ description text) → go deep on the file (tier 2: `skill-read`, shell read,
 scoped to the artifact (tier 3: provenance — when learned, by which turn,
 alongside what). Discovery answers *what/where*, files answer *what it is*,
 git answers *how it got here*. **One writer: the reconcile scan** — a kernel
-thread running post-turn/at-provisioning, walking `.behavioral/<space>/`,
+thread running post-turn/at-provisioning, walking `~/.behavioral/<space>/`,
 `.agents/skills/`, and installed plugins, deriving rows from files +
 `git log -1` per artifact, upserting via the discovery tools, deleting rows
 whose files vanished. The agent never hand-writes rows (mid-turn search
@@ -230,17 +248,18 @@ that leave their git history behind when distributed; our corpus is
 space-local and git-attached, and git is the designated learning log — a
 parallel hand-maintained log.html would be drift-prone duplication of it. If
 an export/share need appears, generate a log view from git at export time
-(derived, never maintained). Distinct and kept: `.behavioral/<space>/logs/`
+(derived, never maintained). Distinct and kept: `~/.behavioral/<space>/logs/`
 jsonl turn traces are runtime exhaust for the autoresearch teacher, not
 history.
 
 Consequences for prior entries: Phase 5.5's "self-improving loop is plugin
 mutation, observed and gated" becomes "mutates the space's learned surface
-(files + commits), observed by git, gated by verify+replay"; Q8/E prereq (1)
-"fill the default plugin's `sh.behavioral` extension" shrinks to metadata;
-`plugin-client` is unchanged — it is the interchange reader, which is what its
-conformance was for. Open (deferred, no consumer yet): whether host-side
-models/spaces config moves to a host-owned space config file; promotion of a
+(files + commits in the `~/.behavioral` repo), observed by git, gated by
+verify+replay"; Q8/E prereq (1) "fill the default plugin's `sh.behavioral`
+extension" is dropped (nothing to fill — models come from config.json, and the
+manifest carries no extension block); `plugin-client` output drops
+models/spaces/gating, keeping the portable surface — it is the interchange
+reader, which is what its conformance was for. Open (deferred): promotion of a
 proven learned behavior into a distributable plugin is a later packaging step,
 not the growth mechanism.
 
