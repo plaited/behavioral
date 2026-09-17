@@ -114,6 +114,136 @@ ingress + a plugin-shipped behavior surface.
 
 ## Decision Log
 
+### 2026-09-17 — Growth model: space-first `.behavioral/`, git as authority, discovery as the read-model
+
+Supersedes the growth-model reading of Q3/Q7 (2026-09-09): the plugin format
+stays the **distribution input** for third-party behaviors, but the agent's own
+growth is a function of the space, not of plugin mutation. The distinction the
+plan previously blurred — and the Agent Plugins spec itself draws — is that the
+format prescribes packaging, not enablement/update/growth; client-extension
+behavior is explicitly client-owned. `sh.behavioral` keeps exactly one job:
+third-party plugins declaring behavioral-specific components (threads under
+that plugin's `threads/`, models, space suggestions) at install time. The
+default plugin's own `extensions.sh.behavioral` block shrinks to nothing
+beyond metadata — the `"threads": {"include": []}` self-gating wart disappears
+(host policy doesn't need a package's self-description to gate it; the default
+plugin is the only client and only plugin — self-dealing).
+
+**Growth is files in the space, git-tracked.** The agent learns by writing
+threads and html into the space's learned dir; the autoresearch gate (Q8/F:
+`frontier-verify` safety + `frontier-replay`-reaches-reference-trace usefulness)
+decides keep/discard; **git history is the learning log** — diff = the review
+artifact, rollback = `git revert`, "remove the governor" = `git rm` with the
+reason preserved. Weighed against in-memory (evaporates at cold-per-turn exit)
+and a persisted db-as-authority (no diff/review/rollback story, corruptible,
+duplicates git, contradicts the discovery-store-is-regenerable rule): files+git
+win decisively for the authoritative surface; memory is scratch (candidates
+under evaluation); the db stays a regenerable index. In-memory objects as the
+growth mechanism were rejected as no-learning-at-all for a cold agent.
+
+**Directory pattern: space-first.** Every space — root included — is one folder
+with identical structure; isolation is enforced by scoping to the space root
+once, at provisioning:
+
+```
+.behavioral/
+  db.sqlite                 # gitignored; single discovery db (see below)
+  root/                     # the $root space — name reserved
+    threads/                # learned + governor threads (git-tracked)
+    html/                    # shared-context HTML knowledge (git-tracked)
+    logs/                    # per-run turn traces, jsonl (runtime exhaust)
+      archive/               # compacted/rotated runs
+  <space-name>/             # identical shape per space
+    threads/ html/ logs/ archive/
+```
+
+Space-first beats per-concern trees (`threads/<space>/` etc.) because per-space
+queries are the discovery store's job, not the filesystem's; every concern-tool
+re-deriving the space mapping is a fresh isolation seam; and per-space history
+stays atomic under one prefix. The word is **`html/`**, not `views/` — these
+are agent-shared context that happens to be renderable by the dev server
+(Q5's "the UI is a space the agent acts on"); name by medium, not role. The
+dev server (Phase 6) serves this tree as its render surface and connects to
+the trigger ingress.
+
+**Single discovery db, provisioner-scoped.** One `.behavioral/db.sqlite`,
+every row carrying `space` + `metadata.commitSha`. **Space identity is
+provisioner-injected, never agent-supplied** — the discovery tools bind the
+`space` filter server-side (no `space` field in the agent-facing input schema),
+so a space agent cannot address another space's rows by construction; root is
+the unscoped identity (cross-space navigation). **Governor threads are NOT
+the load-bearing isolation layer** — a gate that is itself removable learned
+content (the agent's own governors are learnable/removable by design) is
+self-referential as access control, and no per-space governor set can see the
+global space. Structure isolates (SQL-level scoping); threads govern on top
+(sole-writer enforcement, surface shaping, plugin-asset gating, rate limits) —
+block-at-the-event-layer, observable in the deadlock trace's candidate set,
+promoted through `frontier-verify` like every learned thread (no special
+casing — a pure-blocker that blocks a floor-requested event deadlocks the turn
+and fails its own gate). WAL mode; contention is rare under cold-per-turn.
+Weighed per-space db files (per-space blast radius, duplicated scans + a root
+index-of-indexes) — worth little when the thing isolated is regenerable.
+
+**Discovery is the navigation layer — read-model over the authority.** The
+contract: **files+git are the write-path and the authority; the db is a
+materialized view, regenerable, never authoritative.** New kinds join
+`skill`/`mcp-tool`: `thread` and `html`, plus plugin-shipped components
+(skills from installed plugins' `skills/`, their MCP servers) with a
+`source: plugin` metadata marker — one search surface covers skills, threads,
+html, MCP tools, and plugins. The tier loop: `discovery-search` (tier 1:
+description text) → go deep on the file (tier 2: `skill-read`, shell read,
+`plugin-client`) → the row's `commitSha` into `git-history` with `paths`
+scoped to the artifact (tier 3: provenance — when learned, by which turn,
+alongside what). Discovery answers *what/where*, files answer *what it is*,
+git answers *how it got here*. **One writer: the reconcile scan** — a kernel
+thread running post-turn/at-provisioning, walking `.behavioral/<space>/`,
+`.agents/skills/`, and installed plugins, deriving rows from files +
+`git log -1` per artifact, upserting via the discovery tools, deleting rows
+whose files vanished. The agent never hand-writes rows (mid-turn search
+missing a not-yet-committed artifact is correct — uncommitted means
+unlearned). Root's scan indexes all spaces.
+
+**Embedded metadata: the `b-meta` block (OKF vocabulary).** Thread and html
+artifacts self-describe so the scan derives tier-1 rows without hand-entry.
+Vocabulary borrowed from the [Open Knowledge Format](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)
+(§4/§5): `type`, `title`, `description` (the search text), `tags`,
+`generated: {by, at}` (which turn/model authored), `verified: [{by, at}]`
+(the **autoresearch gate writes its keep decision here** — the trust tiers
+unverified → machine-confirmed → human-reviewed are exactly the promotion
+ladder), `status: draft|stable|deprecated` (candidate → promoted → retired),
+`stale_after`, `sources` (provenance when a page distills research). OKF is a
+reference, not a dependency — we take the value families, not the bundle
+format. One schema, two carriers by medium:
+- **html:** `<script type="application/json" b-meta>...</script>` in `<head>`
+  — inert by HTML spec, `b-meta` joins the `b-*` prefix vocabulary
+  (`b-trigger`/`b-target`/`b-form`/`b-scale`/`b-meta`); `html-validate-and-escape`
+  gains a locate-parse-validate rule for it; beats `<meta>` (flat key/value),
+  sidecar files (breaks artifact atomicity/diff cohesion), comments (not
+  queryable).
+- **threads:** `export const meta: BMeta = {...}` — TS-native, type-checked
+  against the same shared JSON schema, no comment-block parsing; the scan
+  imports it in a worker to index. (YAML/JSON at the top of a `.ts` file is a
+  syntax error — carrier split by medium, one schema.)
+
+**No log files — git is the history.** OKF's `log.md` (§9) exists for bundles
+that leave their git history behind when distributed; our corpus is
+space-local and git-attached, and git is the designated learning log — a
+parallel hand-maintained log.html would be drift-prone duplication of it. If
+an export/share need appears, generate a log view from git at export time
+(derived, never maintained). Distinct and kept: `.behavioral/<space>/logs/`
+jsonl turn traces are runtime exhaust for the autoresearch teacher, not
+history.
+
+Consequences for prior entries: Phase 5.5's "self-improving loop is plugin
+mutation, observed and gated" becomes "mutates the space's learned surface
+(files + commits), observed by git, gated by verify+replay"; Q8/E prereq (1)
+"fill the default plugin's `sh.behavioral` extension" shrinks to metadata;
+`plugin-client` is unchanged — it is the interchange reader, which is what its
+conformance was for. Open (deferred, no consumer yet): whether host-side
+models/spaces config moves to a host-owned space config file; promotion of a
+proven learned behavior into a distributable plugin is a later packaging step,
+not the growth mechanism.
+
 ### 2026-09-13 — Bun.WebView swap pulled forward to the next task
 
 - The pilot pulled the Bun.WebView harness swap out of the WS-removal task
