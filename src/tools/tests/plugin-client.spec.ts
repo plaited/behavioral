@@ -295,14 +295,14 @@ describe('plugin-client — mcp.json validation', () => {
         mcpJson: {
           $schema: MCP_SCHEMA,
           mcpServers: {
-            'you-web': { type: 'streamable-http', url: 'https://api.you.com/mcp' },
+            'web-tools': { type: 'streamable-http', url: 'https://api.example.com/mcp' },
           },
         },
       })
       const result = await run(dir)
       expect(ok(result)).toBe(true)
       expect(manifest(result).mcps).toEqual({
-        'you-web': { type: 'streamable-http', url: 'https://api.you.com/mcp' },
+        'web-tools': { type: 'streamable-http', url: 'https://api.example.com/mcp' },
       })
     } finally {
       await Bun.$`rm -rf ${dir}`.quiet().nothrow()
@@ -677,7 +677,7 @@ describe('plugin-client — extensions are unread client-owned annexes', () => {
         mcpJson: {
           $schema: MCP_SCHEMA,
           mcpServers: {
-            'you-web': { type: 'streamable-http', url: 'https://api.you.com/mcp' },
+            'web-tools': { type: 'streamable-http', url: 'https://api.example.com/mcp' },
           },
         },
       })
@@ -685,7 +685,7 @@ describe('plugin-client — extensions are unread client-owned annexes', () => {
       expect(ok(result)).toBe(true)
       // Ungated: mcp.json content survives untouched — the extension is not read
       expect(manifest(result).mcps).toEqual({
-        'you-web': { type: 'streamable-http', url: 'https://api.you.com/mcp' },
+        'web-tools': { type: 'streamable-http', url: 'https://api.example.com/mcp' },
       })
     } finally {
       await Bun.$`rm -rf ${dir}`.quiet().nothrow()
