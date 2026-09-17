@@ -26,7 +26,7 @@ import {
   discoveryUpdate,
 } from '../tools/discovery.ts'
 import { frontierExplore, frontierReplay, frontierVerify } from '../tools/frontier.ts'
-import { gitContext, gitHistory, gitStatus, gitWorktrees } from '../tools/git-context.ts'
+import { gitContext, gitHistory, gitStatus, gitWorktrees } from '../tools/git.ts'
 import {
   htmlRender,
   htmlScaleCheck,
@@ -45,7 +45,7 @@ import {
 } from '../tools/mcp-client.ts'
 import { pluginLoader } from '../tools/plugin-loader.ts'
 import { skillDiscover, skillListResources, skillRead } from '../tools/skill-client.ts'
-import { typescriptLspDiscover, typescriptLspExecute } from '../tools/typescript-lsp.ts'
+import { typescriptLspDiscover, typescriptLspExecute } from '../tools/typescript.ts'
 import { ajv } from '../tools/use-tool.ts'
 import { makeCli } from './cli.ts'
 
