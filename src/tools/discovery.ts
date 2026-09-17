@@ -1,32 +1,36 @@
 /**
  * Agent-facing discovery store — CRUD + search over a unified catalog of
- * remote MCP tools and local skills.
+ * MCP tools, skills, learned threads, and html artifacts.
  *
  * @remarks
  * Flat, standalone `useTool` units — one per operation: `discovery-create`,
  * `discovery-read`, `discovery-update`, `discovery-delete`, and
  * `discovery-search`. Import a tool and call it; no provisioning layer, no
- * shared connection. Each call opens the SQLite store, ensures the table, runs
- * the operation, and closes. A CLI could dispatch to these directly.
+ * shared connection. Each call opens the SQLite store, ensures the schema,
+ * runs the operation, and closes.
  *
- * Backs the search-mediated progressive-disclosure loop: a kernel behavioral
- * thread populates the store via create/update from `mcp-client` / skill
- * discovery results, then searches it (tier 1) to surface candidates to the
- * model; the model picks and loads tier-2/tier-3 content through the relevant
- * client tool. These tools are the dumb primitives; the smarts live in the
- * thread.
+ * **Store location (growth-model amendment):** one `~/.behavioral/db.sqlite`
+ * in WAL mode — every row carries `space`. The path derives from the home
+ * root, never from agent input (`cwd`/`dbPath` are absent from every schema,
+ * rejected by `additionalProperties: false`).
  *
- * The store path is **derived, not supplied**: every tool takes the
- * provisioned `cwd` (same convention as the file tools and `skill-client`) and
- * resolves `<cwd>/.behavioral/discovery.sqlite`. There is deliberately no
- * `dbPath` input field, so a model cannot choose an absolute store path
- * (`additionalProperties: false` rejects it at the schema boundary). Unified
- * rows: `kind ∈ {'mcp-tool','skill'}`, plus `id`, `name`, `description`,
- * `handle` (server-url for mcp-tool, SKILL.md path for skill), `metadata_json`
- * (inputSchema for mcp-tool, frontmatter for skill), `updated_at`.
+ * **Provisioner-side space scoping:** space identity is provisioner-injected,
+ * never agent-supplied — there is no `space` field in the agent-facing input
+ * schemas, so a space agent cannot address another space's rows by
+ * construction. {@link provisionDiscoverySpace} binds the identity at
+ * provisioning; `root` is the unscoped identity (cross-space navigation).
+ * The kernel calls it when it provisions a space; unscoped (root) is the
+ * default.
  *
- * Not git-backed — local SQLite, regenerable (re-scan filesystem, re-discover
- * servers).
+ * Unified rows: `kind ∈ {'mcp-tool','skill','thread','html'}`, plus `id`,
+ * `space`, `name`, `description`, `handle` (server-url for mcp-tool, SKILL.md
+ * path for skill, artifact path for thread/html), `metadata_json` (inputSchema
+ * for mcp-tool, frontmatter for skill, BMeta-derived fields for thread/html),
+ * `updated_at`. Plugin-shipped components are indexed by the reconcile scan
+ * with the {@link DISCOVERY_PLUGIN_SOURCE} metadata marker.
+ *
+ * Not git-backed — local SQLite, regenerable (the reconcile scan is the sole
+ * writer once it lands).
  *
  * MINIMAL: search is case-insensitive LIKE over name + description, not FTS5,
  * and each call opens/closes its own connection rather than sharing one.
@@ -40,17 +44,19 @@
 import { Database } from 'bun:sqlite'
 import * as path from 'node:path'
 import type { JSONSchemaType } from 'ajv'
+import { behavioralHomeRoot, DB_FILE, ROOT_SPACE } from '../kernel/behavioral-home.ts'
 import { useTool } from './use-tool.ts'
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-export type DiscoveryKind = 'mcp-tool' | 'skill'
+export type DiscoveryKind = 'mcp-tool' | 'skill' | 'thread' | 'html'
 
 export type DiscoveryRow = {
   id: string
   kind: DiscoveryKind
+  space: string
   name: string
   description: string
   handle: string
@@ -58,10 +64,7 @@ export type DiscoveryRow = {
   updated_at: number
 }
 
-/** Every operation takes the provisioned cwd; the store path derives from it. */
-type WithCwd = { cwd: string }
-
-export type DiscoveryCreateInput = WithCwd & {
+export type DiscoveryCreateInput = {
   kind: DiscoveryKind
   name: string
   description: string
@@ -70,10 +73,10 @@ export type DiscoveryCreateInput = WithCwd & {
 }
 export type DiscoveryCreateOutput = { row: DiscoveryRow }
 
-export type DiscoveryReadInput = WithCwd & { id: string }
+export type DiscoveryReadInput = { id: string }
 export type DiscoveryReadOutput = { row: DiscoveryRow | null }
 
-export type DiscoveryUpdateInput = WithCwd & {
+export type DiscoveryUpdateInput = {
   id: string
   name?: string
   description?: string
@@ -82,66 +85,108 @@ export type DiscoveryUpdateInput = WithCwd & {
 }
 export type DiscoveryUpdateOutput = { row: DiscoveryRow | null; isError?: boolean; message?: string }
 
-export type DiscoveryDeleteInput = WithCwd & { id: string }
+export type DiscoveryDeleteInput = { id: string }
 export type DiscoveryDeleteOutput = { deleted: boolean }
 
-export type DiscoverySearchInput = WithCwd & { query: string; kind?: DiscoveryKind; limit?: number }
+export type DiscoverySearchInput = { query: string; kind?: DiscoveryKind; limit?: number }
 export type DiscoverySearchOutput = { rows: DiscoveryRow[] }
 
 // ---------------------------------------------------------------------------
-// Tool JSON schemas — one schema pair per tool, no `mode` discriminator.
-// `dbPath` is deliberately absent from every schema — the store path derives
-// from `cwd`, so a model-supplied absolute path is rejected by
-// `additionalProperties: false`. Cast through `unknown` where the open row
-// shape exceeds `JSONSchemaType`'s static power; AJV validates at runtime.
+// Provisioner-side space identity — NOT agent-facing input.
 // ---------------------------------------------------------------------------
 
-const cwdJsonSchema = {
-  type: 'string',
-  minLength: 1,
-  description: "the tool's provisioned cwd — the store resolves to <cwd>/.behavioral/discovery.sqlite",
-} as const
+let provisionedSpace: string = ROOT_SPACE
 
-const kindJsonSchema = { type: 'string', enum: ['mcp-tool', 'skill'] } as const
+/**
+ * Bind the provisioned space identity for subsequent discovery calls. Called
+ * by the kernel at provisioning; the agent-facing input schemas carry no
+ * `space` field, so a space agent cannot address another space's rows by
+ * construction. `root` (the default) is the unscoped identity — it sees every
+ * space's rows.
+ */
+export const provisionDiscoverySpace = (space: string): void => {
+  provisionedSpace = space
+}
+
+/** The currently bound space identity (host-side introspection for the scan). */
+export const discoverySpace = (): string => provisionedSpace
+
+/** True when the bound identity is unscoped root. */
+const isUnscoped = (): boolean => provisionedSpace === ROOT_SPACE
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+/** Metadata marker the reconcile scan writes on plugin-shipped components. */
+export const DISCOVERY_PLUGIN_SOURCE = 'plugin'
+
+const DEFAULT_SEARCH_LIMIT = 100
+
+const KINDS_SQL = "'mcp-tool','skill','thread','html'"
+
+const CREATE_TABLE_SQL = `
+CREATE TABLE IF NOT EXISTS discovery (
+  id TEXT PRIMARY KEY,
+  kind TEXT NOT NULL CHECK(kind IN (${KINDS_SQL})),
+  space TEXT NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL,
+  handle TEXT NOT NULL,
+  metadata_json TEXT,
+  updated_at INTEGER NOT NULL
+)
+`
+
+// ---------------------------------------------------------------------------
+// Tool JSON schemas — one schema pair per tool, no `mode` discriminator.
+// No location input: the store path derives from the home root. No `space`
+// input: the identity binds provisioner-side. Both are rejected by
+// `additionalProperties: false` — a fabricated cross-space or store-path
+// query fails at the schema boundary. Cast through `unknown` where the open
+// row shape exceeds `JSONSchemaType`'s static power; AJV validates at runtime.
+// ---------------------------------------------------------------------------
+
+const kindJsonSchema = { type: 'string', enum: ['mcp-tool', 'skill', 'thread', 'html'] } as const
 const metadataJsonSchema = {
   type: 'object',
   additionalProperties: true,
   nullable: true,
-  description: 'metadata blob — inputSchema for mcp-tool, frontmatter for skill',
+  description: 'metadata blob — inputSchema for mcp-tool, frontmatter for skill, BMeta fields for thread/html',
 } as const
 
 const discoveryRowJsonSchema = {
   type: 'object',
   properties: {
     id: { type: 'string' },
-    kind: { type: 'string', enum: ['mcp-tool', 'skill'] },
+    kind: { type: 'string', enum: ['mcp-tool', 'skill', 'thread', 'html'] },
+    space: { type: 'string', description: 'the space the row belongs to (root is the unscoped identity)' },
     name: { type: 'string' },
     description: { type: 'string' },
     handle: { type: 'string' },
     metadata: { type: 'object', additionalProperties: true, nullable: true },
     updated_at: { type: 'integer' },
   },
-  required: ['id', 'kind', 'name', 'description', 'handle', 'updated_at'],
+  required: ['id', 'kind', 'space', 'name', 'description', 'handle', 'updated_at'],
   additionalProperties: false,
 } as const
 
 export const DiscoveryCreateInputSchema = {
   type: 'object',
   properties: {
-    cwd: cwdJsonSchema,
     kind: kindJsonSchema,
-    name: { type: 'string', minLength: 1, description: 'tool or skill name' },
+    name: { type: 'string', minLength: 1, description: 'tool, skill, thread, or artifact name' },
     description: { type: 'string', description: 'short description for tier-1 search' },
     handle: {
       type: 'string',
       minLength: 1,
-      description: 'server-url for mcp-tool, SKILL.md path for skill',
+      description: 'server-url for mcp-tool, SKILL.md path for skill, artifact path for thread/html',
     },
     metadata: metadataJsonSchema,
   },
-  required: ['cwd', 'kind', 'name', 'description', 'handle'],
+  required: ['kind', 'name', 'description', 'handle'],
   additionalProperties: false,
-  description: 'Create one discovery row in <cwd>/.behavioral/discovery.sqlite.',
+  description: 'Create one discovery row in ~/.behavioral/db.sqlite, stamped with the provisioned space.',
 } as unknown as JSONSchemaType<DiscoveryCreateInput>
 
 export const DiscoveryCreateOutputSchema = {
@@ -154,12 +199,11 @@ export const DiscoveryCreateOutputSchema = {
 export const DiscoveryReadInputSchema = {
   type: 'object',
   properties: {
-    cwd: cwdJsonSchema,
     id: { type: 'string', minLength: 1, description: 'row id' },
   },
-  required: ['cwd', 'id'],
+  required: ['id'],
   additionalProperties: false,
-  description: 'Read one discovery row by id.',
+  description: 'Read one discovery row by id, scoped to the provisioned space.',
 } as unknown as JSONSchemaType<DiscoveryReadInput>
 
 export const DiscoveryReadOutputSchema = {
@@ -172,14 +216,13 @@ export const DiscoveryReadOutputSchema = {
 export const DiscoveryUpdateInputSchema = {
   type: 'object',
   properties: {
-    cwd: cwdJsonSchema,
     id: { type: 'string', minLength: 1, description: 'row id' },
     name: { type: 'string', nullable: true, description: 'new name' },
     description: { type: 'string', nullable: true, description: 'new description' },
     handle: { type: 'string', nullable: true, description: 'new handle' },
     metadata: metadataJsonSchema,
   },
-  required: ['cwd', 'id'],
+  required: ['id'],
   additionalProperties: false,
   description: 'Update one discovery row; omitted fields are left unchanged.',
 } as unknown as JSONSchemaType<DiscoveryUpdateInput>
@@ -198,12 +241,11 @@ export const DiscoveryUpdateOutputSchema = {
 export const DiscoveryDeleteInputSchema = {
   type: 'object',
   properties: {
-    cwd: cwdJsonSchema,
     id: { type: 'string', minLength: 1, description: 'row id' },
   },
-  required: ['cwd', 'id'],
+  required: ['id'],
   additionalProperties: false,
-  description: 'Delete one discovery row by id.',
+  description: 'Delete one discovery row by id, scoped to the provisioned space.',
 } as unknown as JSONSchemaType<DiscoveryDeleteInput>
 
 export const DiscoveryDeleteOutputSchema = {
@@ -216,14 +258,14 @@ export const DiscoveryDeleteOutputSchema = {
 export const DiscoverySearchInputSchema = {
   type: 'object',
   properties: {
-    cwd: cwdJsonSchema,
     query: { type: 'string', description: 'substring to match against name and description (empty = all)' },
     kind: { ...kindJsonSchema, nullable: true, description: 'optional kind filter' },
     limit: { type: 'integer', minimum: 1, nullable: true, description: 'max results (default 100)' },
   },
-  required: ['cwd', 'query'],
+  required: ['query'],
   additionalProperties: false,
-  description: 'Search the discovery store by name/description substring, optionally narrowed by kind.',
+  description:
+    'Search the discovery store by name/description substring, optionally narrowed by kind. Scoped to the provisioned space.',
 } as unknown as JSONSchemaType<DiscoverySearchInput>
 
 export const DiscoverySearchOutputSchema = {
@@ -234,32 +276,13 @@ export const DiscoverySearchOutputSchema = {
 } as unknown as JSONSchemaType<DiscoverySearchOutput>
 
 // ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-const STORE_DIR = '.behavioral'
-const STORE_FILE = 'discovery.sqlite'
-const DEFAULT_SEARCH_LIMIT = 100
-
-const CREATE_TABLE_SQL = `
-CREATE TABLE IF NOT EXISTS discovery (
-  id TEXT PRIMARY KEY,
-  kind TEXT NOT NULL CHECK(kind IN ('mcp-tool','skill')),
-  name TEXT NOT NULL,
-  description TEXT NOT NULL,
-  handle TEXT NOT NULL,
-  metadata_json TEXT,
-  updated_at INTEGER NOT NULL
-)
-`
-
-// ---------------------------------------------------------------------------
 // Row (de)serialization
 // ---------------------------------------------------------------------------
 
 type StoredRow = {
   id: string
   kind: DiscoveryKind
+  space: string
   name: string
   description: string
   handle: string
@@ -282,6 +305,7 @@ const toDiscoveryRow = (row: StoredRow): DiscoveryRow => {
   return {
     id: row.id,
     kind: row.kind,
+    space: row.space,
     name: row.name,
     description: row.description,
     handle: row.handle,
@@ -291,22 +315,23 @@ const toDiscoveryRow = (row: StoredRow): DiscoveryRow => {
 }
 
 // ---------------------------------------------------------------------------
-// Store lifecycle — <cwd>/.behavioral/discovery.sqlite, per-call connection
+// Store lifecycle — ~/.behavioral/db.sqlite (WAL), per-call connection
 // ---------------------------------------------------------------------------
 
 /**
  * Open the store for one operation, ensure the schema, run `operation`, and
- * close. The store path is `<cwd>/.behavioral/discovery.sqlite`; `cwd` is the
- * provisioned project root. No shared connection, no factory — the tools hold
- * no state.
+ * close. The store is the single `~/.behavioral/db.sqlite` in WAL mode; its
+ * path derives from the home root, never from agent input. No shared
+ * connection, no factory — the tools hold no state.
  */
-const withStore = async <T>(cwd: string, operation: (db: Database) => T): Promise<T> => {
-  const dbPath = path.join(cwd, STORE_DIR, STORE_FILE)
+const withStore = async <T>(operation: (db: Database) => T): Promise<T> => {
+  const dbPath = path.join(behavioralHomeRoot(), DB_FILE)
   // bun:sqlite creates the file but not its parent directory — ensure the
-  // store dir exists before opening (mirrors the `write` tool's mkdir -p).
+  // home root exists before opening.
   await Bun.$`mkdir -p ${path.dirname(dbPath)}`.quiet().nothrow()
   const db = new Database(dbPath)
   try {
+    db.exec('PRAGMA journal_mode = WAL')
     db.exec(CREATE_TABLE_SQL)
     return operation(db)
   } finally {
@@ -315,68 +340,88 @@ const withStore = async <T>(cwd: string, operation: (db: Database) => T): Promis
 }
 
 // ---------------------------------------------------------------------------
+// Space scoping — the provisioner-side WHERE clause.
+// Root is unscoped (cross-space navigation); a provisioned space sees only
+// its own rows.
+// ---------------------------------------------------------------------------
+
+const scopeCondition = (): { clause: string; params: string[] } =>
+  isUnscoped()
+    ? { clause: '', params: [] }
+    : // root is the shared global catalog — a provisioned space sees its own
+      // rows plus root's, never another project space's.
+      { clause: " AND (space = ? OR space = 'root')", params: [provisionedSpace] }
+
+// ---------------------------------------------------------------------------
 // useTool registration — flat, standalone tools (one per operation)
 // ---------------------------------------------------------------------------
 
 /**
- * Create a row in the unified catalog of remote MCP tools and local skills
- * (kind "mcp-tool" | "skill"). `handle` is the server-url for mcp-tool or the
- * SKILL.md path for skill; `metadata` carries the inputSchema (mcp-tool) or
- * frontmatter (skill).
+ * Create a row in the unified catalog. `handle` is the server-url for
+ * mcp-tool, the SKILL.md path for skill, or the artifact path for
+ * thread/html; `metadata` carries the inputSchema (mcp-tool), frontmatter
+ * (skill), or BMeta-derived fields (thread/html). The row is stamped with the
+ * provisioned space.
  */
 export const discoveryCreate = useTool(
   {
     name: 'discovery-create',
     description:
-      'Create a row in the unified catalog of remote MCP tools and local skills (kind "mcp-tool" | "skill"). handle is the server-url for mcp-tool or the SKILL.md path for skill; metadata carries the inputSchema (mcp-tool) or frontmatter (skill).',
+      'Create a row in the unified catalog (kind "mcp-tool" | "skill" | "thread" | "html"). handle is the server-url for mcp-tool, the SKILL.md path for skill, or the artifact path for thread/html; metadata carries kind-specific fields. Stamped with the provisioned space.',
     inputSchema: DiscoveryCreateInputSchema,
     outputSchema: DiscoveryCreateOutputSchema,
   },
-  ({ cwd, kind, name, description, handle, metadata }) =>
-    withStore(cwd, (db): DiscoveryCreateOutput => {
+  ({ kind, name, description, handle, metadata }) =>
+    withStore((db): DiscoveryCreateOutput => {
       const id = crypto.randomUUID()
       const updatedAt = Date.now()
       const metadataJson = metadata ? JSON.stringify(metadata) : null
       db.prepare(
-        'INSERT INTO discovery (id, kind, name, description, handle, metadata_json, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      ).run(id, kind, name, description, handle, metadataJson, updatedAt)
+        'INSERT INTO discovery (id, kind, space, name, description, handle, metadata_json, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      ).run(id, kind, provisionedSpace, name, description, handle, metadataJson, updatedAt)
       const row = toDiscoveryRow(db.prepare('SELECT * FROM discovery WHERE id = ?').get(id) as StoredRow)
       return { row }
     }),
 )
 
 /**
- * Read one discovery row by id. Returns row null when no such row exists.
+ * Read one discovery row by id, scoped to the provisioned space. Returns row
+ * null when no such row exists in scope.
  */
 export const discoveryRead = useTool(
   {
     name: 'discovery-read',
-    description: 'Read one discovery row by id. Returns row null when no such row exists.',
+    description:
+      'Read one discovery row by id, scoped to the provisioned space. Returns row null when no such row exists.',
     inputSchema: DiscoveryReadInputSchema,
     outputSchema: DiscoveryReadOutputSchema,
   },
-  ({ cwd, id }) =>
-    withStore(cwd, (db): DiscoveryReadOutput => {
-      const stored = db.prepare('SELECT * FROM discovery WHERE id = ?').get(id) as StoredRow | null
+  ({ id }) =>
+    withStore((db): DiscoveryReadOutput => {
+      const { clause, params } = scopeCondition()
+      const stored = db.prepare(`SELECT * FROM discovery WHERE id = ?${clause}`).get(id, ...params) as StoredRow | null
       return { row: stored ? toDiscoveryRow(stored) : null }
     }),
 )
 
 /**
  * Update one discovery row by id; omitted fields are left unchanged. Returns
- * row null with isError when no such row exists.
+ * row null with isError when no such row exists in scope.
  */
 export const discoveryUpdate = useTool(
   {
     name: 'discovery-update',
     description:
-      'Update one discovery row by id; omitted fields are left unchanged. Returns row null with isError when no such row exists.',
+      'Update one discovery row by id (scoped to the provisioned space); omitted fields are left unchanged. Returns row null with isError when no such row exists.',
     inputSchema: DiscoveryUpdateInputSchema,
     outputSchema: DiscoveryUpdateOutputSchema,
   },
-  ({ cwd, id, name, description, handle, metadata }) =>
-    withStore(cwd, (db): DiscoveryUpdateOutput => {
-      const existing = db.prepare('SELECT * FROM discovery WHERE id = ?').get(id) as StoredRow | null
+  ({ id, name, description, handle, metadata }) =>
+    withStore((db): DiscoveryUpdateOutput => {
+      const { clause, params } = scopeCondition()
+      const existing = db
+        .prepare(`SELECT * FROM discovery WHERE id = ?${clause}`)
+        .get(id, ...params) as StoredRow | null
       if (!existing) {
         return { row: null, isError: true, message: `No discovery row with id ${id}` }
       }
@@ -396,44 +441,50 @@ export const discoveryUpdate = useTool(
 )
 
 /**
- * Delete one discovery row by id. Returns deleted false when no such row exists.
+ * Delete one discovery row by id, scoped to the provisioned space. Returns
+ * deleted false when no such row exists in scope.
  */
 export const discoveryDelete = useTool(
   {
     name: 'discovery-delete',
-    description: 'Delete one discovery row by id. Returns deleted false when no such row exists.',
+    description:
+      'Delete one discovery row by id, scoped to the provisioned space. Returns deleted false when no such row exists.',
     inputSchema: DiscoveryDeleteInputSchema,
     outputSchema: DiscoveryDeleteOutputSchema,
   },
-  ({ cwd, id }) =>
-    withStore(cwd, (db): DiscoveryDeleteOutput => {
-      const result = db.prepare('DELETE FROM discovery WHERE id = ?').run(id)
+  ({ id }) =>
+    withStore((db): DiscoveryDeleteOutput => {
+      const { clause, params } = scopeCondition()
+      const result = db.prepare(`DELETE FROM discovery WHERE id = ?${clause}`).run(id, ...params)
       return { deleted: result.changes > 0 }
     }),
 )
 
 /**
  * Search the unified catalog (tier 1) by case-insensitive name/description
- * substring; an empty query matches all rows. Optional kind filter and limit
- * (default 100). The model searches to find candidates, then loads full
- * content via mcp-client / skill-client.
+ * substring; an empty query matches all rows in scope. Optional kind filter
+ * and limit (default 100). The model searches to find candidates, then loads
+ * full content via skill-client / plugin-client / the artifact file itself.
  */
 export const discoverySearch = useTool(
   {
     name: 'discovery-search',
     description:
-      'Search the unified catalog (tier 1) by case-insensitive name/description substring; an empty query matches all rows. Optional kind filter and limit (default 100). The model searches to find candidates, then loads full content via mcp-client / skill-client.',
+      'Search the unified catalog (tier 1) by case-insensitive name/description substring; an empty query matches all rows. Optional kind filter and limit (default 100). Scoped to the provisioned space.',
     inputSchema: DiscoverySearchInputSchema,
     outputSchema: DiscoverySearchOutputSchema,
   },
-  ({ cwd, query, kind, limit }) =>
-    withStore(cwd, (db): DiscoverySearchOutput => {
+  ({ query, kind, limit }) =>
+    withStore((db): DiscoverySearchOutput => {
       const effectiveLimit = limit ?? DEFAULT_SEARCH_LIMIT
       // Case-insensitive LIKE over name + description. An empty query matches
       // all rows (tier-1 catalog). LIKE is case-insensitive for ASCII by
       // default; LOWER() covers non-ASCII consistently.
       let sql = 'SELECT * FROM discovery WHERE (LOWER(name) LIKE LOWER(?) OR LOWER(description) LIKE LOWER(?))'
       const params: (string | number)[] = [`%${query}%`, `%${query}%`]
+      const scope = scopeCondition()
+      sql += scope.clause
+      params.push(...scope.params)
       if (kind) {
         sql += ' AND kind = ?'
         params.push(kind)
