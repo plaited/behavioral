@@ -114,6 +114,63 @@ ingress + a plugin-shipped behavior surface.
 
 ## Decision Log
 
+### 2026-09-17 — Autoresearch extracted to `behavioral-agenthub` (clean break)
+
+- The autoresearch program — the loop, Harbor evaluation, and the
+  experiment infrastructure — moves OUT of this repo into a new, separate
+  repo: `git@github.com:plaited/behavioral-agenthub.git` (bare repo,
+  created by the pilot). Bun-native, patterned on
+  `github.com/ygivenx/agenthub` (karpathy's agent-first collaboration
+  platform: bare git repo + SQLite message board; agents push git
+  bundles; commit-DAG queries — children/leaves/lineage/diff; channels/
+  posts/replies; per-agent API keys + rate limits) with **Daytona
+  sandboxes + DGX Spark** as the agent infrastructure for the skills +
+  threads program.
+- Rationale (from the 09-13 evaluation, now decided): the loop targets
+  behavioral itself, so in-repo experiments risk candidate churn in the
+  harness's history and product gates applying to research scratch; the
+  loop must consume **behavioral-as-artifact** (CLI/package seam), not
+  behavioral-as-source-tree. `bun link` locally during development.
+- **Skill-reference doc split (docs follow the code they describe):**
+  `skills/behavioral/references/autoresearch.md` MOVES to agenthub (it
+  documents the loop — now agenthub's program; agenthub pulls it via the
+  pinned gh ref and adapts it as its design doc; behavioral deletes it).
+  `eval.md` and `frontier-analysis.md` STAY — they document behavioral's
+  own primitives (`useTrace` eval capture; the frontier tools agenthub
+  calls via CLI) — agenthub reads them via gh, never copies.
+- **Provenance pins** (gh pinned-ref access survives later deletion here):
+  - Reference loop: `plaited/behavioral` `src/kernel/autoresearch.ts` @
+    `82f73a360bfe056173c97cd0958de455f02c1aea` (last touched by
+    `503f6c6e`, the model-worker move).
+  - Daytona sandbox wrapper history: commit `cb34ac3c` (feat(scripts):
+    daytona sandbox wrapper for the autoresearch loop) — check current
+    location via that commit if the file moved.
+  - Harbor `tasks/` (the evaluation content) moves to agenthub.
+- **In-behavioral cleanup — MOSTLY DONE (2026-09-17, pilot commits
+  4ed5df56..b32512b3):** loop deleted from src/kernel (26937ef2,
+  "the loop leaves for agenthub"); src/plugin/ removed (ecaeb49a);
+  Harbor tasks/ removed (b32512b3 — the pinned 82f73a36 ref is now the
+  only source); init reworked to home-skeleton-only (26937ef2, -1038
+  lines); skill deduplicated against behavioral-tools (a7ec0846) —
+  autoresearch.md removed from the skill, eval.md cross-links fixed,
+  frontier-analysis.md now correctly states there is no
+  `@behavioral/sh/tools` export (the CLI is the surface); deps
+  @tauri-apps/cli and @daytonaio/sdk both gone from package.json;
+  untracked leftovers resolved. REMAINING: plan Q8/D + Q8/E text still
+  references OpenRouter (6 refs) — supersede with config.json models +
+  the agenthub extraction note.
+- **Seam note — RESOLVED (2026-09-17): CLI-only consumption; no package
+  export needed.** `src/cli/tools.ts` already wraps the whole tool fleet
+  as CLI commands named by `tool.name` (`behavioral frontierVerify
+  '<json>'`, `frontierExplore`, `frontierReplay`), registered in
+  `bin/behavioral.ts`, with self-describing contracts via
+  `--schema input|output`. The gate is 2-3 deterministic calls per
+  candidate — subprocess cost is noise vs. generation/sandboxing; the
+  dispatcher's boundary AJV validates the candidate Thread for free
+  (malformed -> gate schema error -> discard-not-crash). `bun link`
+  exposes the `behavioral` BIN from the local working tree (no package
+  imports at all). Imperative export stays a MINIMAL fallback note only.
+
 ### 2026-09-17 — Growth model: space-first `~/.behavioral/`, git as authority, discovery as the read-model
 
 Supersedes the growth-model reading of Q3/Q7 (2026-09-09): the plugin format
