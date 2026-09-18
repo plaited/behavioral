@@ -91,16 +91,11 @@ ingress + a plugin-shipped behavior surface.
   Unix-socket bridge + minimal Rust stub relay). The seam-landing open
   item (browser specs never ran green in this env) resolves via task (1),
   not an env fix — fixing the Playwright env would be throwaway work
-  against a harness already scheduled for replacement. Then the
-  autoresearch loop prerequisites, Q8/E, in order:
-  (1) fill the default plugin content (`plugin.json` `sh.behavioral` extension
-  + `mcp.json` you-web); (2) author the real **core thread** in `threads/` (the
-  loop's subject); (3) kernel primitives to run an arbitrary thread + capture
-  the trace/exhaust per run; (4) define the task-success metric (Q8/C,
-  RESOLVED — Q8/F); (5) install `@daytonaio/sdk` + provision OpenRouter. Then
-  the autoresearch loop script (Q8/A). Also still open: the public-event
-  ingress registry (Q1/B); Slice F (provision discovery primitives); the dev
-  server (Q5).
+  against a harness already scheduled for replacement. The autoresearch loop
+  itself has left this repo (the 2026-09-17 extraction decision, below) — its
+  in-repo prerequisite list is superseded; see Q8/E. What remains in-repo:
+  the transport workstream above, then the public-event ingress registry
+  (Q1/B), Slice F (provision discovery primitives), and the dev server (Q5).
 - **Known pre-existing test failures (not from recent work):** controller
   specs — **resolved 2026-09-13** by the Bun.WebView harness swap
   (d2d025ca; the sharper diagnosis: `@playwright/cli open` crashed as a
@@ -110,6 +105,16 @@ ingress + a plugin-shipped behavior surface.
   `minItems`/`maxItems` disambiguates to `add_thread_error`, so the consumer
   thread was rejected wholesale, not a runtime matching bug as previously
   guessed). Fix: close the tuple with `minItems`/`maxItems`.
+- **Known flake (documented 2026-09-17, fix deferred):** `shell.spec.ts` —
+  "the line cap group-kills a flooding command at maxLines" intermittently
+  times out at bun-test's 5s default **under full-suite load only**; the
+  isolated spec is green. The test's internal race budget is 2s, and the
+  group-kill + reap of a `while true` flooding process stalls past the
+  outer 5s timeout when the whole suite contends. Untouched pre-existing
+  `src/workers/shell` code — no product bug is suspected (the kill does
+  resolve; it is a timing race between the flood and the kill under load).
+  Fix when next in `src/workers/`: likely raise the test's explicit timeout
+  or assert the kill result rather than racing the flood.
 
 
 ## Decision Log
@@ -156,9 +161,9 @@ ingress + a plugin-shipped behavior surface.
   frontier-analysis.md now correctly states there is no
   `@behavioral/sh/tools` export (the CLI is the surface); deps
   @tauri-apps/cli and @daytonaio/sdk both gone from package.json;
-  untracked leftovers resolved. REMAINING: plan Q8/D + Q8/E text still
-  references OpenRouter (6 refs) — supersede with config.json models +
-  the agenthub extraction note.
+  untracked leftovers resolved. DONE 2026-09-17: plan Q8/D + Q8/E text
+  superseded (config.json models + the agenthub extraction note) and the
+  stale in-repo Q8/E prerequisite list in Current State removed.
 - **Seam note — RESOLVED (2026-09-17): CLI-only consumption; no package
   export needed.** `src/cli/tools.ts` already wraps the whole tool fleet
   as CLI commands named by `tool.name` (`behavioral frontierVerify
@@ -738,20 +743,28 @@ socket-bridge for real-IPC
   *accomplishes its task*. The loop needs a task-success metric alongside the
   safety gate, or it optimizes safety without usefulness. OPEN — the metric is
   undefined (see Open Questions).
-- Q8/D — **Generators are swappable: scripted first, then OpenRouter model.**
-  (a) a scripted generator (deterministic, proves the loop mechanics) as
-  scaffolding; (b) a `model-respond` generator via an OpenRouter endpoint
-  (provisioner-injected key, the `provider` routing field). OpenRouter's
-  Responses-spec conformance must be verified at build time; if it doesn't
-  conform, a thin adapter or a spec-conformant provider is needed.
-- Q8/E — **Prerequisites before the loop script** (dependency order): (1) fill
-  the default plugin content (`plugin.json` `sh.behavioral` extension +
-  `mcp.json` you-web) so the loader has something real to load; (2) author the
-  real **core thread** in `threads/` (the loop's subject — not the MINIMAL
-  scaffolding `TURN_LOOP_THREAD`); (3) kernel primitives to run an *arbitrary*
-  thread (today `runTurn` is hardcoded to `TURN_LOOP_THREAD`) and to capture
-  the trace/exhaust per run; (4) define the second signal (Q8/C); (5) install
-  `@daytonaio/sdk` + provision OpenRouter. Then the loop script.
+- Q8/D — **Generators are swappable: scripted first, then a model generator.**
+  *(SUPERSEDED 2026-09-17: the loop is agenthub's, and models come from
+  `~/.behavioral/config.json`, not provider literals.)* (a) a scripted
+  generator (deterministic, proves the loop mechanics) as scaffolding;
+  (b) agenthub's model generator is a `model-respond` call against a
+  config.json-declared model (`apiKeyRef`, the `provider` routing field) —
+  provider choice (OpenRouter or any Responses-conformant endpoint) is the
+  user's config, and Responses-spec conformance is verified per endpoint at
+  build time; if an endpoint doesn't conform, a thin adapter or a
+  spec-conformant provider is needed.
+- Q8/E — **Prerequisites before the loop script.** *(SUPERSEDED 2026-09-17:
+  the loop and its remaining prerequisites now live in the agenthub repo —
+  see the extraction entry. In-repo consequences: prereq (1) is dropped
+  entirely by the growth-model entry — there is no `sh.behavioral` extension
+  to fill and no bundled plugin; models come from config.json. Prereq (3)'s
+  kernel primitives exist — arbitrary-thread run + trace capture in
+  `src/kernel/kernel.ts`, the reconcile scan landed in `4ed5df56`. Prereq
+  (5) is agenthub's problem.)* Original dependency order: (1) fill the
+  default plugin content — DROPPED; (2) author the real core thread —
+  agenthub-side; (3) kernel primitives to run an arbitrary thread — DONE;
+  (4) define the second signal — RESOLVED, Q8/F; (5) install
+  `@daytonaio/sdk` + provision OpenRouter — agenthub's.
 - Q8/F — **The task-success metric (Q8/C) is resolved.** Per-candidate
   keep/discard gate: `frontier-verify` (safety — no deadlock/livelock) AND
   `frontier-replay` over a reference trace reaches the target frontier
