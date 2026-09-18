@@ -3,7 +3,7 @@ import { behavioral } from '../behavioral.ts'
 import type { Idioms, JsonObject } from '../behavioral.types.ts'
 import { onSelection } from './helpers.ts'
 
-/** Author-facing thread arguments accepted by `useAddThread()(label, threadArgs)`. */
+/** Author-facing thread arguments accepted by `addThread`. */
 type ThreadArgs = { rules: Idioms[]; once?: true }
 
 type WinningLine = [number, number, number]
@@ -117,8 +117,7 @@ const enforceTurns: ThreadArgs = {
 test('take turns', () => {
   // Create a new bProgram instance.
   const program = behavioral()
-  const { useAddThread, trigger } = program
-  const addThread = useAddThread()
+  const { addThread, trigger } = program
 
   addThread({ label: 'enforceTurns', ...enforceTurns })
   // Initialize the board.
@@ -178,8 +177,7 @@ for (const square of squares) {
 test('squares taken', () => {
   // Create a new bProgram instance.
   const program = behavioral()
-  const { useAddThread, trigger } = program
-  const addThread = useAddThread()
+  const { addThread, trigger } = program
 
   addThread({ label: 'enforceTurns', ...enforceTurns })
   for (const [key, threadArgs] of Object.entries(squaresTaken)) {
@@ -258,8 +256,7 @@ const detectWins = (player: 'X' | 'O') =>
 test('detect winner', () => {
   // Create a new bProgram instance.
   const program = behavioral()
-  const { useAddThread, trigger } = program
-  const addThread = useAddThread()
+  const { addThread, trigger } = program
 
   addThread({ label: 'enforceTurns', ...enforceTurns })
   for (const [key, threadArgs] of Object.entries(squaresTaken)) {
@@ -324,8 +321,7 @@ const stopGame: ThreadArgs = {
 test('stop game', () => {
   // Create a new bProgram instance.
   const program = behavioral()
-  const { useAddThread, trigger } = program
-  const addThread = useAddThread()
+  const { addThread, trigger } = program
 
   addThread({ label: 'enforceTurns', ...enforceTurns })
   for (const [key, threadArgs] of Object.entries(squaresTaken)) {
@@ -405,8 +401,7 @@ for (const square of squares) {
 test('defaultMoves', () => {
   // Create a new bProgram instance.
   const program = behavioral()
-  const { useAddThread, trigger } = program
-  const addThread = useAddThread()
+  const { addThread, trigger } = program
 
   addThread({ label: 'enforceTurns', ...enforceTurns })
   for (const [key, threadArgs] of Object.entries(squaresTaken)) {
@@ -472,8 +467,7 @@ const startAtCenter: ThreadArgs = {
 test('start at center', () => {
   // Create a new bProgram instance.
   const program = behavioral()
-  const { useAddThread, trigger } = program
-  const addThread = useAddThread()
+  const { addThread, trigger } = program
 
   addThread({ label: 'enforceTurns', ...enforceTurns })
   for (const [key, threadArgs] of Object.entries(squaresTaken)) {
@@ -564,8 +558,7 @@ const preventCompletionOfLineWithTwoXs = () => {
 test('prevent completion of line with two Xs', () => {
   // Create a new bProgram instance.
   const program = behavioral()
-  const { useAddThread, trigger } = program
-  const addThread = useAddThread()
+  const { addThread, trigger } = program
 
   addThread({ label: 'enforceTurns', ...enforceTurns })
   for (const [key, threadArgs] of Object.entries(squaresTaken)) {

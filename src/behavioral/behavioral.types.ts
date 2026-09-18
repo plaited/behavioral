@@ -1,6 +1,11 @@
 import type { JSONSchemaType } from 'ajv'
 import Ajv2020 from 'ajv/dist/2020'
-import { type FRONTIER_STATUS, IDIOMS, type TRACE_MESSAGE_KINDS, type WORKER_MESSAGE_KINDS } from './behavioral.constants.ts'
+import {
+  type FRONTIER_STATUS,
+  IDIOMS,
+  type TRACE_MESSAGE_KINDS,
+  type WORKER_MESSAGE_KINDS,
+} from './behavioral.constants.ts'
 
 /**
  * Shared Ajv instance for the behavioral kernel.
@@ -397,7 +402,7 @@ export type InterruptTrace = TraceBase & {
   step: number
 }
 
-export type Transformer = { query: string; target: string; thread: string, space?: string }
+export type Transformer = { query: string; target: string; thread: string; space?: string }
 
 export type TransformTrace = TraceBase & {
   kind: typeof TRACE_MESSAGE_KINDS.transform
@@ -573,18 +578,16 @@ export type SendTrace = {
   subscribe(listener: (msg: Trace) => void | Promise<void>): () => void
 }
 
-
 export type AddThreadsMessage = {
-  kind: typeof WORKER_MESSAGE_KINDS.addThreads,
+  kind: typeof WORKER_MESSAGE_KINDS.addThreads
   threads: Thread[]
 }
 export type StepMessage = {
-  kind: typeof WORKER_MESSAGE_KINDS.step,
+  kind: typeof WORKER_MESSAGE_KINDS.step
 }
 export type TriggerMessage = {
-  kind: typeof WORKER_MESSAGE_KINDS.trigger,
+  kind: typeof WORKER_MESSAGE_KINDS.trigger
   event: BPEvent
 }
-
 
 export type WorkerMessage = AddThreadsMessage | StepMessage | TriggerMessage

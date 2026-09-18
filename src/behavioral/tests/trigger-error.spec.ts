@@ -8,8 +8,7 @@ const onType = (type: string) => ({ type })
 describe('trigger', () => {
   test('routes triggered events into the BP engine', () => {
     const program = behavioral()
-    const { useAddThread, trigger } = program
-    const addThread = useAddThread()
+    const { addThread, trigger } = program
     const received: string[] = []
 
     addThread({ label: 'listener', rules: [{ waitFor: [onType('allowed_event')] }], once: true })
@@ -24,8 +23,7 @@ describe('trigger', () => {
 
   test('preserves detail payload on triggered events', () => {
     const program = behavioral()
-    const { useAddThread, trigger } = program
-    const addThread = useAddThread()
+    const { addThread, trigger } = program
     const received: Array<{ id: number }> = []
 
     addThread({ label: 'listener', rules: [{ waitFor: [onType('payload_event')] }], once: true })
@@ -90,8 +88,7 @@ describe('trigger_error isolation — no error pooling across calls', () => {
 
   test('valid trigger between invalid ones does not leak stale errors into the next trace', () => {
     const program = behavioral()
-    const { useAddThread, trigger } = program
-    const addThread = useAddThread()
+    const { addThread, trigger } = program
 
     const triggerErrors: unknown[][] = []
     program.useTrace((msg) => {
@@ -123,8 +120,7 @@ describe('trigger_error isolation — no error pooling across calls', () => {
 describe('trigger — event-carried space', () => {
   test('stamps the event space on the selected candidate', () => {
     const program = behavioral()
-    const { useAddThread, trigger, useTrace } = program
-    const addThread = useAddThread()
+    const { addThread, trigger, useTrace } = program
     const selections: SelectionTrace[] = []
     useTrace((msg) => {
       if (msg.kind === 'selection') selections.push(msg)
@@ -140,8 +136,7 @@ describe('trigger — event-carried space', () => {
 
   test('absent space selects at root (no space stamp)', () => {
     const program = behavioral()
-    const { useAddThread, trigger, useTrace } = program
-    const addThread = useAddThread()
+    const { addThread, trigger, useTrace } = program
     const selections: SelectionTrace[] = []
     useTrace((msg) => {
       if (msg.kind === 'selection') selections.push(msg)

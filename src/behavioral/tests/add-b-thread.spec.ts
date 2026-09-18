@@ -10,8 +10,7 @@ describe('addThread', () => {
   test('supports dynamic thread installation from trace listeners', () => {
     const actual: string[] = []
     const program = behavioral()
-    const { useAddThread, trigger } = program
-    const addThread = useAddThread()
+    const { addThread, trigger } = program
 
     addThread({ label: 'addHotOnce', rules: [{ request: { type: 'hot_1' } }], once: true })
     addThread({
@@ -62,8 +61,7 @@ describe('addThread', () => {
     const traces: Trace[] = []
     const completions: string[] = []
     const program = behavioral()
-    const { useAddThread, trigger, useTrace } = program
-    const addThread = useAddThread()
+    const { addThread, trigger, useTrace } = program
 
     useTrace((trace: Trace) => {
       traces.push(trace)
@@ -104,8 +102,7 @@ describe('addThread', () => {
 
   test('deadlock traces publish frontier status and step continuity', () => {
     const traces: Trace[] = []
-    const { useAddThread, trigger, useTrace } = behavioral()
-    const addThread = useAddThread()
+    const { addThread, trigger, useTrace } = behavioral()
 
     useTrace((trace: Trace) => {
       traces.push(trace)
@@ -134,15 +131,15 @@ describe('addThread quiescence', () => {
   test('addThread alone does not step — the program stays idle until a trigger arrives', () => {
     const traces: Trace[] = []
     const program = behavioral()
-    const addThread = program.useAddThread()
+    const { addThread } = program
     program.useTrace((trace: Trace) => {
       traces.push(trace)
     })
 
     addThread({ label: 'requester', rules: [{ request: { type: 'x' } }], once: true })
 
-    // `useAddThread` is inert: no super-step runs until an event enters via
-    // `trigger` (the contentless-kick contract).
+    // `addThread` is inert: no super-step runs until an event enters via
+    // `trigger` or `step`.
     expect(traces).toHaveLength(0)
   })
 })

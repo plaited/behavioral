@@ -80,10 +80,22 @@ ingress + a plugin-shipped behavior surface.
   Transforms execute in-engine: jq-wasm `first()` via `evaluateTransform`
   (errors-as-data: jq_error | no_detail | empty_output |
   non_object_output → `transform_error` trace, target never fires);
-  re-entry via useAddThread + the trailing step(). 141/141 behavioral tests,
-  zero tsc errors in src/behavioral. **KICK_EVENT_TYPE is removed from the
-  behavioral surface — deliberate. src/kernel still imports it and is RED
-  until the kernel refactor swaps its two trigger callsites for `step()`.**
+  re-entry via addThread + the trailing step(). 141/141 behavioral tests,
+  zero tsc errors in src/behavioral.
+- **Landed (2026-09-18, uncommitted-to-committed): API + worker-shape refactor.**
+  `useAddThread(space)(args)` is dead — `addThread(args)` with `space` on the
+  `Thread` itself (schema + type). `instanceId` kept as auto-ueid per
+  instantiation (merged multi-worker streams + reference-trace integrity are
+  the retained value; caller injection removed as the daemon artifact).
+  `evaluateTransform` lives in `jq.ts` alone (library; SAB nested worker entry
+  is the bridge slice); `behavioral.utils` is wasm-free so frontier tools no
+  longer load jq.wasm at init. Worker entry: `src/workers/behavioral.ts`
+  (postMessage traces, onmessage {trigger|addThreads|step}). All 10 spec
+  files migrated (135 usages).
+  **`src/workers/use-behavioral.ts` is an empty stub — the client slice is
+  next.** **KICK_EVENT_TYPE removed from the behavioral surface — deliberate.
+  src/kernel still imports it and uses `useAddThread` and is RED until the
+  kernel refactor swaps re-entry to `step()`.**
 - **In-flight / next:** (0) **Controller transport seam — LANDED
   2026-09-13** (red 1b32de04 + green 9f306044; see Decision Log 2026-09-13
   "Transport seam landed"). Remaining transport-workstream tasks, in order

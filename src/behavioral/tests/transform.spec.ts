@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { behavioral } from '../behavioral.ts'
 import { TRACE_MESSAGE_KINDS } from '../behavioral.constants.ts'
+import { behavioral } from '../behavioral.ts'
 import type {
   PendingBidsTrace,
   SelectionTrace,
@@ -27,7 +27,7 @@ import type {
 describe('transform idiom — in-engine jq execution', () => {
   test('single transform: whole first output re-enters request-origin', () => {
     const program = behavioral()
-    const addThread = program.useAddThread()
+    const { addThread } = program
     addThread({
       label: 'shaper',
       rules: [{ transform: [{ type: 'order', query: '.order', target: 'ship' }] }],
@@ -53,8 +53,9 @@ describe('transform idiom — in-engine jq execution', () => {
 
   test('space-scoped: the re-entry carries the declaring thread space', () => {
     const program = behavioral()
-    const addThread = program.useAddThread('s1')
+    const { addThread } = program
     addThread({
+      space: 's1',
       label: 'shaper',
       rules: [{ transform: [{ type: 'order', query: '.order', target: 'ship' }] }],
     })
@@ -77,7 +78,7 @@ describe('transform idiom — in-engine jq execution', () => {
 
   test('fan-out: multiple transform listeners on one event all fire', () => {
     const program = behavioral()
-    const addThread = program.useAddThread()
+    const { addThread } = program
     addThread({
       label: 'multi-shaper',
       rules: [
@@ -110,7 +111,7 @@ describe('transform idiom — in-engine jq execution', () => {
 
   test('partial fan-out: a failed transformer does not prevent sibling targets', () => {
     const program = behavioral()
-    const addThread = program.useAddThread()
+    const { addThread } = program
     addThread({
       label: 'shaper',
       rules: [
@@ -145,7 +146,7 @@ describe('transform idiom — in-engine jq execution', () => {
 
   test('jq_error: an invalid query traces stderr and never fires the target', () => {
     const program = behavioral()
-    const addThread = program.useAddThread()
+    const { addThread } = program
     addThread({
       label: 'shaper',
       rules: [{ transform: [{ type: 'order', query: '.order.', target: 'ship' }] }],
@@ -170,7 +171,7 @@ describe('transform idiom — in-engine jq execution', () => {
 
   test('empty_output: a query producing no output traces and never fires the target', () => {
     const program = behavioral()
-    const addThread = program.useAddThread()
+    const { addThread } = program
     addThread({
       label: 'shaper',
       rules: [{ transform: [{ type: 'order', query: '.missing? // empty', target: 'ship' }] }],
@@ -193,7 +194,7 @@ describe('transform idiom — in-engine jq execution', () => {
 
   test('no_detail: a transform listener on a detail-less event traces and never fires the target', () => {
     const program = behavioral()
-    const addThread = program.useAddThread()
+    const { addThread } = program
     addThread({
       label: 'shaper',
       rules: [{ transform: [{ type: 'order', query: '.order', target: 'ship' }] }],
@@ -218,7 +219,7 @@ describe('transform idiom — in-engine jq execution', () => {
 
   test('daemon semantics: an ingressMatch:false waiter matches the re-entered target', () => {
     const program = behavioral()
-    const addThread = program.useAddThread()
+    const { addThread } = program
     addThread({ label: 'shaper', rules: [{ transform: [{ type: 'order', query: '.order', target: 'ship' }] }] })
     addThread({
       label: 'ship-waiter',
@@ -242,7 +243,7 @@ describe('transform idiom — in-engine jq execution', () => {
 
   test('transform trace shape: transformers carry query, target, thread — emitted before the payload selection', () => {
     const program = behavioral()
-    const addThread = program.useAddThread()
+    const { addThread } = program
     addThread({
       label: 'observer-test',
       rules: [
@@ -282,7 +283,7 @@ describe('transform idiom — in-engine jq execution', () => {
 
   test('no transform trace when no transform listeners match', () => {
     const program = behavioral()
-    const addThread = program.useAddThread()
+    const { addThread } = program
     addThread({ label: 'waiter', rules: [{ waitFor: [{ type: 'other' }] }] })
 
     const traces: Trace[] = []

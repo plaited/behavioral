@@ -15,11 +15,11 @@ import {
 import {
   advanceRunningToPending,
   computeFrontier,
-  evaluateTransform,
   generateRulesFunctions,
   resumePendingThreadsForSelectedEvent,
   useThread,
 } from './behavioral.utils.ts'
+import { evaluateTransform } from './jq.ts'
 
 const createSubject = (): SendTrace => {
   const listeners = new Set<(value: Trace) => void | Promise<void>>()
@@ -98,7 +98,7 @@ const createSubject = (): SendTrace => {
  * nothing else.
  */
 export const behavioral = () => {
-  const instanceId =  ueid('bp_')
+  const instanceId = ueid('bp_')
   /**
    * @internal
    * Set of threads that have yielded and are waiting for event selection.
