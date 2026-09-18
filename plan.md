@@ -75,15 +75,15 @@ ingress + a plugin-shipped behavior surface.
   dead (cold-per-turn, mid-turn stdin triggers); deployed-headless parked as
   the server-side complement (Workers/DO or containers, TS-native either way).
   The atproto pack stays deferred with its "future GUI" trigger now named.
-- **In-flight (uncommitted, 2026-09-18): step/StepTrace + in-engine transforms.**
+- **Landed (2026-09-18): step/StepTrace + in-engine transforms — GREEN.**
   `step()` is public (super-steps emit StepTrace; trigger marks ingress).
-  Transform execution drafted inside `nextStep` — jq-wasm `first()` re-entry
-  once-thread picked up by the trailing step(), no kick. Gaps flagged to pilot:
-  errors-as-data wrapper missing (JqError would throw through the engine core),
-  `transformers[]` doesn't carry `space` yet (spaceless re-entry bug), empty/
-  non-object output unguarded. `transform_error` trace kind TBD in constants.
-  Spec rewrite (`transform.spec.ts`) still ahead; `frontier.ts` transform model
-  later.
+  Transforms execute in-engine: jq-wasm `first()` via `evaluateTransform`
+  (errors-as-data: jq_error | no_detail | empty_output |
+  non_object_output → `transform_error` trace, target never fires);
+  re-entry via useAddThread + the trailing step(). 141/141 behavioral tests,
+  zero tsc errors in src/behavioral. **KICK_EVENT_TYPE is removed from the
+  behavioral surface — deliberate. src/kernel still imports it and is RED
+  until the kernel refactor swaps its two trigger callsites for `step()`.**
 - **In-flight / next:** (0) **Controller transport seam — LANDED
   2026-09-13** (red 1b32de04 + green 9f306044; see Decision Log 2026-09-13
   "Transport seam landed"). Remaining transport-workstream tasks, in order

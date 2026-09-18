@@ -15,10 +15,10 @@ import {
 import {
   advanceRunningToPending,
   computeFrontier,
+  evaluateTransform,
   generateRulesFunctions,
   resumePendingThreadsForSelectedEvent,
   useThread,
-  evaluateTransform
 } from './behavioral.utils.ts'
 
 const createSubject = (): SendTrace => {
@@ -90,11 +90,12 @@ const createSubject = (): SendTrace => {
  * **Channel invariant:** a selected event carries `ingress: true` iff it was admitted
  * externally through `trigger`; everything internal (dispatch-bridge results, transform
  * targets, `threads.registered`) arrives as a thread request added through `useAddThread`.
- * Re-entering code adds a `once` thread requesting the event, then fires the contentless
- * {@link KICK_EVENT_TYPE} kick to start the super-step. Listeners restrict themselves to a
+ * Re-entering code adds a `once` thread requesting the event, then starts the
+ * super-step — engine-internal code (the transform executor) calls the internal
+ * `step()` directly; `addThread` alone is inert. Listeners restrict themselves to a
  * channel with the optional `ingressMatch` flag (`true` = external only, `false` = internal only,
- * absent = either). `trigger` is therefore external admission plus the contentless kick,
- * nothing else; an external actor triggering the kick is harmless by construction.
+ * absent = either). `trigger` is therefore external admission plus one super-step,
+ * nothing else.
  */
 export const behavioral = (options?: { instanceId?: string }) => {
   const instanceId = options?.instanceId ?? ueid('bp_')
@@ -249,7 +250,7 @@ export const behavioral = (options?: { instanceId?: string }) => {
         instanceId,
         transformers,
       })
-      for (const {query, target, thread, space} of transformers) {
+      for (const { query, target, thread, space } of transformers) {
         const result = evaluateTransform(query, selectedEvent.detail)
         if (result.ok) {
           useAddThread(space)({
@@ -258,7 +259,17 @@ export const behavioral = (options?: { instanceId?: string }) => {
             rules: [{ request: { type: target, detail: result.value } }],
           })
         } else {
-          sendTrace({ kind:TRACE_MESSAGE_KINDS.transform_error, ..., query, thread, target, ...result })
+          // Errors-as-data: the target never fires; the failure is traced.
+          sendTrace?.({
+            kind: TRACE_MESSAGE_KINDS.transform_error,
+            timestamp: Date.now(),
+            step: stepId,
+            instanceId,
+            transformer: { query, target, thread, space },
+            reason: result.reason,
+            ...(result.stderr === undefined ? {} : { stderr: result.stderr }),
+            ...(result.exitCode === undefined ? {} : { exitCode: result.exitCode }),
+          })
         }
       }
     }
@@ -326,7 +337,6 @@ export const behavioral = (options?: { instanceId?: string }) => {
      */
     step(true)
   }
-
 
   /**
    * @internal
