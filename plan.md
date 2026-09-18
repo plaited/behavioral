@@ -1256,6 +1256,27 @@ repo and risks staleness.
 
 ## Open Questions
 
+- **Sequencing: frontier-verify vs jq worker bridge.** Two follow-ons from the
+  2026-09-18 in-engine transform decision, order pending pilot: (1)
+  `frontier.ts` verify/replay must model transform execution (import
+  `evaluateTransform`, synthesize the engine's own re-entry threads) — the
+  growth-model gate's truth depends on it; recommendation: first. (2) The
+  pathological-query hang is fixable via a synchronous Atomics bridge —
+  **verified 2026-09-18: Bun main-thread `Atomics.wait` works and worker
+  `notify` wakes it (~36ms round-trip)** — spawn worker + SAB
+  (status/result), block on wait, `terminate()` on timeout → new reason
+  `jq_timeout`; engine stays sync (blocking syscall, not an async yield);
+  signature/wiring unchanged. Recommendation: second. Multi-output queries
+  stay first-wins (v1); observable `multiOutput` flag is the cheap later
+  upgrade.
+  **Webview constraint (Tauri mobile):** browsers forbid main-thread
+  `Atomics.wait` (and SAB needs crossOriginIsolation), so the sync bridge does
+  not carry into the webview — there the engine runs inside a Web Worker with
+  the UI thread async over it, and a hung engine worker is killed by the host
+  (`terminate()`, turn-level) or by a nested-worker bridge inside the engine
+  worker (workers may `Atomics.wait`). Port seam: `Bun.deepEquals` in
+  `behavioral.utils` + `frontier.ts` must swap to the pure `deepEqual` in
+  `src/utils.ts`.
 - **Phase-text fold pending pilot approval (kick removal + PD-thread deletion).**
   With in-engine transforms using useAddThread + the trailing `step()`, the kick
   is now needed only for kernel-bridge re-entry (model/tool I/O); if that

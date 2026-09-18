@@ -1,13 +1,13 @@
 import { ueid } from '../utils.ts'
 import { FRONTIER_STATUS, TRACE_MESSAGE_KINDS } from './behavioral.constants.ts'
 import {
+  type AddThread,
   type CandidateBid,
   type PendingBid,
   type RunningBid,
   type SendTrace,
   type Trace,
   type Trigger,
-  type UseAddThread,
   type UseTrace,
   validateBPEvent,
   validateThread,
@@ -97,8 +97,8 @@ const createSubject = (): SendTrace => {
  * absent = either). `trigger` is therefore external admission plus one super-step,
  * nothing else.
  */
-export const behavioral = (options?: { instanceId?: string }) => {
-  const instanceId = options?.instanceId ?? ueid('bp_')
+export const behavioral = () => {
+  const instanceId =  ueid('bp_')
   /**
    * @internal
    * Set of threads that have yielded and are waiting for event selection.
@@ -189,9 +189,10 @@ export const behavioral = (options?: { instanceId?: string }) => {
     }
   }
 
-  const useAddThread: UseAddThread = (space) => (args) => {
+  const addThread: AddThread = (args) => {
+    const attemptedSpace = args?.space
     if (validateThread(args)) {
-      const { label, rules, once } = args
+      const { label, rules, once, space } = args
       try {
         const syncPoints = generateRulesFunctions(rules, space)
         const thread = useThread(syncPoints, once)
@@ -215,7 +216,7 @@ export const behavioral = (options?: { instanceId?: string }) => {
         timestamp: Date.now(),
         instanceId,
         error: validateThread.errors ?? [],
-        space,
+        ...(typeof attemptedSpace === 'string' && { space: attemptedSpace }),
       })
     }
   }
@@ -253,7 +254,8 @@ export const behavioral = (options?: { instanceId?: string }) => {
       for (const { query, target, thread, space } of transformers) {
         const result = evaluateTransform(query, selectedEvent.detail)
         if (result.ok) {
-          useAddThread(space)({
+          addThread({
+            space,
             label: `Transform(${thread} => ${target})`,
             once: true,
             rules: [{ request: { type: target, detail: result.value } }],
@@ -267,8 +269,8 @@ export const behavioral = (options?: { instanceId?: string }) => {
             instanceId,
             transformer: { query, target, thread, space },
             reason: result.reason,
-            ...(result.stderr === undefined ? {} : { stderr: result.stderr }),
-            ...(result.exitCode === undefined ? {} : { exitCode: result.exitCode }),
+            ...(result.stderr !== undefined && { stderr: result.stderr }),
+            ...(result.exitCode !== undefined && { exitCode: result.exitCode }),
           })
         }
       }
@@ -355,7 +357,7 @@ export const behavioral = (options?: { instanceId?: string }) => {
    */
   return Object.freeze({
     /** Add thread to program. */
-    useAddThread,
+    addThread,
     /** Function to inject external events into the program. */
     trigger,
     /** Hook to subscribe to internal state traces for monitoring/debugging. */
