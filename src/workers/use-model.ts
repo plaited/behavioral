@@ -20,6 +20,14 @@ import { setEnvironmentData } from 'node:worker_threads'
 import type { JSONSchemaType } from 'ajv'
 import { useTool } from '../tools/use-tool.ts'
 import {
+  ErrorSchema,
+  FunctionToolSchema,
+  InputItemSchema,
+  OutputItemSchema,
+  TruncationSchema,
+  UsageSchema,
+} from './model.schemas.ts'
+import {
   MODEL_ENDPOINTS_KEY,
   type ModelCompactInput,
   type ModelCompactOutput,
@@ -33,14 +41,6 @@ import {
   type Script,
   type ScriptedResponse,
 } from './model.types.ts'
-import {
-  ErrorSchema,
-  FunctionToolSchema,
-  InputItemSchema,
-  OutputItemSchema,
-  TruncationSchema,
-  UsageSchema,
-} from './open-responses.schemas.ts'
 
 // ---------------------------------------------------------------------------
 // JSON schemas (host-facing tool boundary — the single validation point)

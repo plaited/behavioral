@@ -17,7 +17,7 @@ import type {
   OutputItem,
   Truncation,
   Usage,
-} from './open-responses.schemas.ts'
+} from './model.schemas.ts'
 
 /** Reasoning effort levels. */
 export type ReasoningEffort = 'xhigh' | 'high' | 'medium' | 'low' | 'minimal' | 'none'
