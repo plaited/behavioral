@@ -75,6 +75,15 @@ ingress + a plugin-shipped behavior surface.
   dead (cold-per-turn, mid-turn stdin triggers); deployed-headless parked as
   the server-side complement (Workers/DO or containers, TS-native either way).
   The atproto pack stays deferred with its "future GUI" trigger now named.
+- **In-flight (uncommitted, 2026-09-18): step/StepTrace + in-engine transforms.**
+  `step()` is public (super-steps emit StepTrace; trigger marks ingress).
+  Transform execution drafted inside `nextStep` — jq-wasm `first()` re-entry
+  once-thread picked up by the trailing step(), no kick. Gaps flagged to pilot:
+  errors-as-data wrapper missing (JqError would throw through the engine core),
+  `transformers[]` doesn't carry `space` yet (spaceless re-entry bug), empty/
+  non-object output unguarded. `transform_error` trace kind TBD in constants.
+  Spec rewrite (`transform.spec.ts`) still ahead; `frontier.ts` transform model
+  later.
 - **In-flight / next:** (0) **Controller transport seam — LANDED
   2026-09-13** (red 1b32de04 + green 9f306044; see Decision Log 2026-09-13
   "Transport seam landed"). Remaining transport-workstream tasks, in order
@@ -118,6 +127,72 @@ ingress + a plugin-shipped behavior surface.
 
 
 ## Decision Log
+
+### 2026-09-18 — Transforms execute in-engine via sync jq-wasm; `first()` + errors-as-data
+
+- **jq-wasm** (owenthereal v3, real jq 1.8.2 via Emscripten, no native deps, Bun
+  OK): `const jq = await loadJq()` once at `behavioral.ts` module scope (TLA);
+  all evaluation synchronous. Replaces the two-phase prime/execute trace
+  contract — the TransformTrace demotes from contract-for-external-executor to
+  record-of-what-the-engine-did. Kills: `createTransformLoop`-style consumers,
+  the prime-once pool discipline, every `Bun.sleep` race, the jq-on-PATH
+  portability bug, and the kernel's future chore of implementing the loop.
+- **`jq.first(detail, query)` through a one-place errors-as-data wrapper**
+  (`evaluateTransform`): runs the whole program, returns the whole first output,
+  parsed. Failure paths → traced, never thrown: `JqError` (carries
+  stderr/exitCode/query), empty output (`undefined`), non-object output
+  (`detail` must be JsonObject). New trace kind `transform_error`; target event
+  never fires on failure (errors-as-data like `trigger_error`/`add_thread_error`).
+  `raw()` rejected: never-throws is half-true — it moves the throw to a
+  contentless `JSON.parse` (pretty-print, multi-output). `stream()` rejected
+  (lazy iterator, no final object). Async API rejected: promise-wrapped sync
+  wasm, no timeout protection anyway.
+- **Async engine rejected; "the engine never awaits" is now a named invariant.**
+  The sync chain is what makes reentrancy safe without locks (every trigger
+  runs atomically; concurrent I/O completions queue on the microtask queue),
+  keeps traces totally ordered and reproducible, and preserves
+  trigger-returns-processed. Async lives only at the kernel boundary (chain-end
+  + bridge re-entry). If transforms ever need true async (model-mediated), the
+  home is the bridge, not the scheduler.
+- **Re-entry needs no kick:** `nextStep` evaluates after resume, adds the target
+  once-thread via `useAddThread(space)`; the trailing `step()` in `nextStep`
+  picks it up — request-origin, same chain. Multi-output queries take the first
+  output (v1: one transformer = one target event; multi-output fan-out is a
+  later decision).
+- Pathological queries (`def f: f; f`) hang the sync engine — accepted with a
+  MINIMAL comment: sync calls can't be time-bounded; blast radius is a
+  user-promoted thread hanging their own run (git-authority + promotion gate are
+  the trust boundary). Upgrade path: worker-isolated jq (reintroduces async —
+  accept-for-now).
+- `frontier.ts` is a pure simulation (never drives the engine, zero awaits) that
+  already models transform listeners; to stay truthful for transform-bearing
+  threads it imports the same jq handle — gate determinism preserved by
+  composition.
+
+### 2026-09-18 — `step` is the public super-step primitive; StepTrace is the record
+
+- The engine exports `step()` (the super-step scheduler) as public API; every
+  super-step emits a first-class trace message (`TRACE_MESSAGE_KINDS.step`,
+  `StepTrace`: step number + optional `ingress: true`). Internal continuations
+  emit unmarked StepTraces; `trigger` calls `step(true)` so external ingress is
+  distinguishable in the stream. The exported handle takes no ingress param —
+  callers cannot fake ingress.
+- **bp.step/`run()` abandoned before commit** (the pilot's first cut: synthetic
+  bp.step request-thread + restricted Trigger/listener schemas). A pseudo-event
+  pollutes the event vocabulary — frontier tools would special-case it. The
+  step boundary is a trace message, not an event — the trace union already had
+  the pattern (trigger_error, add_thread_error, interrupt, transform are
+  non-event kinds). Navigator correction on record: the earlier
+  recommendation to reject exported-step ("silent, unenforceable") was wrong
+  on both counts — step injects nothing (only advances registered threads,
+  no-ops when idle) and StepTrace makes every use observable.
+- StepTrace.step aligns 1:1 with the selection traces of the same super-step
+  (pre-increment stepId passed through).
+- `PROGRESSIVE_DISCLOSURE_THREAD` deleted along with its spec (NOT inlined —
+  pilot reversed the earlier inline-fixture plan; the subject lives in agenthub).
+- Macro vocabulary (runTurn/turn.end/TurnResult/`behavioral turn`) still open
+  (Q1) — `run` is not taken after all (reverted), but the word "step" now means
+  the super-step unit, so the macro terminator word still needs settling.
 
 ### 2026-09-17 — Autoresearch extracted to `behavioral-agenthub` (clean break)
 
@@ -1181,6 +1256,13 @@ repo and risks staleness.
 
 ## Open Questions
 
+- **Phase-text fold pending pilot approval (kick removal + PD-thread deletion).**
+  With in-engine transforms using useAddThread + the trailing `step()`, the kick
+  is now needed only for kernel-bridge re-entry (model/tool I/O); if that
+  switches to `step()` too, `KICK_EVENT_TYPE` dies and Phase 1 + 2024-09-03
+  action-channel text needs the fold. Phase 3.5 Slice F ("the behavioral thread
+  is the remaining deferred work") is moot — the PD thread + spec are deleted
+  and the subject lives in agenthub. Fold wording into those phases now?
 - **Phase-text fold pending pilot approval (the ingress refactor has landed).**
   Phase 1 ("results re-trigger respond", stream-adapter handler "triggers each
   as a b-event as-is"), Phase 3.5 Slice F, Phase 5 (permission flow triggers),

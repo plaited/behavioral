@@ -18,6 +18,7 @@ import {
   generateRulesFunctions,
   resumePendingThreadsForSelectedEvent,
   useThread,
+  evaluateTransform
 } from './behavioral.utils.ts'
 
 const createSubject = (): SendTrace => {
@@ -123,8 +124,15 @@ export const behavioral = (options?: { instanceId?: string }) => {
   const sendTrace = createSubject()
   let stepId = 0
 
-  const step = () => {
+  const step = (ingress?: true) => {
     if (running.size) {
+      sendTrace?.({
+        kind: TRACE_MESSAGE_KINDS.step,
+        timestamp: Date.now(),
+        step: stepId,
+        ingress,
+        instanceId,
+      })
       advanceRunningToPending(running, pending)
       selectNextEvent()
     }
@@ -180,6 +188,37 @@ export const behavioral = (options?: { instanceId?: string }) => {
     }
   }
 
+  const useAddThread: UseAddThread = (space) => (args) => {
+    if (validateThread(args)) {
+      const { label, rules, once } = args
+      try {
+        const syncPoints = generateRulesFunctions(rules, space)
+        const thread = useThread(syncPoints, once)
+        running.add({
+          priority: running.size + 1,
+          generator: thread(),
+          label,
+        })
+      } catch (err) {
+        sendTrace({
+          kind: TRACE_MESSAGE_KINDS.add_thread_error,
+          timestamp: Date.now(),
+          instanceId,
+          error: [err instanceof Error ? err.message : String(err)],
+          space,
+        })
+      }
+    } else {
+      sendTrace({
+        kind: TRACE_MESSAGE_KINDS.add_thread_error,
+        timestamp: Date.now(),
+        instanceId,
+        error: validateThread.errors ?? [],
+        space,
+      })
+    }
+  }
+
   /**
    * @internal
    * Processes the selected event, updates thread states, and triggers the next cycle.
@@ -202,7 +241,7 @@ export const behavioral = (options?: { instanceId?: string }) => {
       instanceId,
       step: stepId,
     })
-    transformers.length &&
+    if (transformers.length) {
       sendTrace?.({
         kind: TRACE_MESSAGE_KINDS.transform,
         timestamp: Date.now(),
@@ -210,6 +249,19 @@ export const behavioral = (options?: { instanceId?: string }) => {
         instanceId,
         transformers,
       })
+      for (const {query, target, thread, space} of transformers) {
+        const result = evaluateTransform(query, selectedEvent.detail)
+        if (result.ok) {
+          useAddThread(space)({
+            label: `Transform(${thread} => ${target})`,
+            once: true,
+            rules: [{ request: { type: target, detail: result.value } }],
+          })
+        } else {
+          sendTrace({ kind:TRACE_MESSAGE_KINDS.transform_error, ..., query, thread, target, ...result })
+        }
+      }
+    }
     sendTrace({
       kind: TRACE_MESSAGE_KINDS.selection,
       timestamp: Date.now(),
@@ -272,39 +324,10 @@ export const behavioral = (options?: { instanceId?: string }) => {
      * 4. Moves the thread from 'running' to 'pending' state
      * 5. Proceeds to the event selection phase
      */
-    step()
+    step(true)
   }
 
-  const useAddThread: UseAddThread = (space) => (args) => {
-    if (validateThread(args)) {
-      const { label, rules, once } = args
-      try {
-        const syncPoints = generateRulesFunctions(rules, space)
-        const thread = useThread(syncPoints, once)
-        running.add({
-          priority: running.size + 1,
-          generator: thread(),
-          label,
-        })
-      } catch (err) {
-        sendTrace({
-          kind: TRACE_MESSAGE_KINDS.add_thread_error,
-          timestamp: Date.now(),
-          instanceId,
-          error: [err instanceof Error ? err.message : String(err)],
-          space,
-        })
-      }
-    } else {
-      sendTrace({
-        kind: TRACE_MESSAGE_KINDS.add_thread_error,
-        timestamp: Date.now(),
-        instanceId,
-        error: validateThread.errors ?? [],
-        space,
-      })
-    }
-  }
+
   /**
    * @internal
    * Implementation of the public `useTrace` hook.
@@ -327,5 +350,6 @@ export const behavioral = (options?: { instanceId?: string }) => {
     trigger,
     /** Hook to subscribe to internal state traces for monitoring/debugging. */
     useTrace,
+    step: () => step(),
   })
 }

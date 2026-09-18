@@ -1,91 +1,83 @@
 import { describe, expect, test } from 'bun:test'
-import { $ } from 'bun'
-import { KICK_EVENT_TYPE, TRACE_MESSAGE_KINDS } from '../behavioral.constants.ts'
 import { behavioral } from '../behavioral.ts'
-import type { JsonObject, PendingBidsTrace, SelectionTrace, Trace, TransformTrace } from '../behavioral.types.ts'
+import { TRACE_MESSAGE_KINDS } from '../behavioral.constants.ts'
+import type {
+  PendingBidsTrace,
+  SelectionTrace,
+  Trace,
+  TransformErrorTrace,
+  TransformTrace,
+} from '../behavioral.types.ts'
 
 /**
- * The daemon contract under test — a two-phase external transform loop:
+ * The transform contract — executed in-engine (2026-09-18):
  *
- * Phase 1 (prime): a Transform trace carries `transformers[]` — the pool of
- * `{ query, target, thread }` reshaping contracts for the selected event.
+ * A thread rule may declare `transform: [{ type, query, target }]` — "when the
+ * `type` event is selected, evaluate the jq `query` over its detail and re-enter
+ * with the result as a `target` event." The engine evaluates synchronously via
+ * jq-wasm (`first()` — the whole first output, parsed), adds a `once` re-entry
+ * thread requesting the target, and the super-step chain picks it up:
+ * request-origin, no kick, no external loop, no sleeps.
  *
- * Phase 2 (execute): the immediately following Selection trace carries the
- * payload (`selected.detail`). The loop evaluates each primed `query` over
- * the payload via jq and re-enters the kernel with the transformed result by
- * adding a `once` re-entry thread (`{ label: 'reentry:<target>', request:
- * { type: target, detail } }`) and firing the contentless kick — so the target
- * is a request-origin candidate, never an external trigger.
+ * Failure paths are errors-as-data: jq error, no detail, empty output, and
+ * non-object output each trace `transform_error` with a machine-readable reason
+ * and the target never fires. The engine core never throws.
  */
 
-const jqEval = async (query: string, detail: unknown): Promise<unknown> =>
-  $`echo ${JSON.stringify(detail)} | jq ${query}`.json()
-
-type Transformer = { query: string; target: string; thread: string }
-
-/** Creates a two-phase transform loop that records selections and dispatches via the given strategy. */
-function createTransformLoop(
-  program: ReturnType<typeof behavioral>,
-  dispatch: (target: string, transformed: JsonObject, transformer: Transformer) => void,
-) {
-  const { trigger, useTrace } = program
-  const selections: SelectionTrace[] = []
-  const transformTraces: TransformTrace[] = []
-  let pending: Transformer[] = []
-
-  useTrace((msg: Trace) => {
-    if (msg.kind === TRACE_MESSAGE_KINDS.transform) {
-      const t = msg as TransformTrace
-      transformTraces.push(t)
-      pending = [...t.transformers]
-      return
-    }
-    if (msg.kind === TRACE_MESSAGE_KINDS.selection) {
-      selections.push(msg)
-      if (pending.length === 0) return
-      const toProcess = pending
-      pending = []
-      for (const transformer of toProcess) {
-        void jqEval(transformer.query, msg.selected.detail).then((transformed) => {
-          // jqEval resolves to unknown; the fixtures' queries always select object sub-keys
-          // (or `.` identity over an object detail), so the result is JSON-shaped and object-valued.
-          dispatch(transformer.target, transformed as JsonObject, transformer)
-        })
-      }
-    }
-  })
-
-  return { trigger, selections, transformTraces }
-}
-
-describe('transform idiom — external two-phase loop', () => {
-  test('variant (a): single transform — jq on selection detail, triggers target', async () => {
+describe('transform idiom — in-engine jq execution', () => {
+  test('single transform: whole first output re-enters request-origin', () => {
     const program = behavioral()
-    const { useAddThread } = program
-    const addThread = useAddThread()
-
+    const addThread = program.useAddThread()
     addThread({
       label: 'shaper',
       rules: [{ transform: [{ type: 'order', query: '.order', target: 'ship' }] }],
     })
 
-    const { trigger, selections } = createTransformLoop(program, (target, transformed) => {
-      trigger({ type: target, detail: transformed })
+    const traces: Trace[] = []
+    program.useTrace((msg) => {
+      traces.push(msg)
     })
+    program.trigger({ type: 'order', detail: { order: { id: 'o-1', total: 42 } } })
 
-    trigger({ type: 'order', detail: { order: { id: 'o-1', total: 42 } } })
-    await Bun.sleep(50)
-
+    const selections = traces.filter((t): t is SelectionTrace => t.kind === TRACE_MESSAGE_KINDS.selection)
     const ship = selections.find((s) => s.selected.type === 'ship')
     expect(ship).toBeDefined()
     expect(ship!.selected.detail).toEqual({ id: 'o-1', total: 42 })
+    // In-engine re-entry is request-origin — no ingress mark.
+    expect(ship!.selected.ingress).toBeUndefined()
+
+    const pendingBids = traces.filter((t): t is PendingBidsTrace => t.kind === TRACE_MESSAGE_KINDS.pending_bids)
+    const labels = pendingBids.flatMap((t) => t.threads.map((th) => th.label))
+    expect(labels).toContain('Transform(shaper => ship)')
   })
 
-  test('variant (b): multiple transforms — addThread fans out request threads', async () => {
+  test('space-scoped: the re-entry carries the declaring thread space', () => {
     const program = behavioral()
-    const { useAddThread } = program
-    const addThread = useAddThread()
+    const addThread = program.useAddThread('s1')
+    addThread({
+      label: 'shaper',
+      rules: [{ transform: [{ type: 'order', query: '.order', target: 'ship' }] }],
+    })
 
+    const traces: Trace[] = []
+    program.useTrace((msg) => {
+      traces.push(msg)
+    })
+    program.trigger({ type: 'order', space: 's1', detail: { order: { id: 'o-9' } } })
+
+    const selections = traces.filter((t): t is SelectionTrace => t.kind === TRACE_MESSAGE_KINDS.selection)
+    const ship = selections.find((s) => s.selected.type === 'ship')
+    expect(ship).toBeDefined()
+    expect(ship!.selected.space).toBe('s1')
+
+    const transformTraces = traces.filter((t): t is TransformTrace => t.kind === TRACE_MESSAGE_KINDS.transform)
+    expect(transformTraces).toHaveLength(1)
+    expect(transformTraces[0]!.transformers[0]!.space).toBe('s1')
+  })
+
+  test('fan-out: multiple transform listeners on one event all fire', () => {
+    const program = behavioral()
+    const addThread = program.useAddThread()
     addThread({
       label: 'multi-shaper',
       rules: [
@@ -98,21 +90,16 @@ describe('transform idiom — external two-phase loop', () => {
       ],
     })
 
-    const { trigger, selections } = createTransformLoop(program, (target, transformed) => {
-      addThread({
-        label: `transform:${target}`,
-        once: true,
-        rules: [{ request: { type: target, detail: transformed } }],
-      })
-      trigger({ type: target, detail: transformed })
+    const traces: Trace[] = []
+    program.useTrace((msg) => {
+      traces.push(msg)
     })
-
-    trigger({
+    program.trigger({
       type: 'order',
       detail: { order: { id: 'o-2' }, billing: { account: 'acc-9' } },
     })
-    await Bun.sleep(50)
 
+    const selections = traces.filter((t): t is SelectionTrace => t.kind === TRACE_MESSAGE_KINDS.selection)
     const ship = selections.find((s) => s.selected.type === 'ship')
     const invoice = selections.find((s) => s.selected.type === 'invoice')
     expect(ship).toBeDefined()
@@ -121,88 +108,141 @@ describe('transform idiom — external two-phase loop', () => {
     expect(invoice!.selected.detail).toEqual({ account: 'acc-9' })
   })
 
-  test('variant (c): combined — trigger one target, addThread the other', async () => {
+  test('partial fan-out: a failed transformer does not prevent sibling targets', () => {
     const program = behavioral()
-    const { useAddThread } = program
-    const addThread = useAddThread()
-
+    const addThread = program.useAddThread()
     addThread({
-      label: 'combined-shaper',
+      label: 'shaper',
       rules: [
         {
           transform: [
-            { type: 'order', query: '.ship', target: 'ship' },
-            { type: 'order', query: '.bill', target: 'bill' },
+            { type: 'order', query: '.order', target: 'ship' },
+            // Scalar output — not a JsonObject, so this contract fails.
+            { type: 'order', query: '.total', target: 'total' },
           ],
         },
       ],
     })
 
-    const dispatched: string[] = []
-    const { trigger, selections } = createTransformLoop(program, (target, transformed) => {
-      dispatched.push(target)
-      if (target === 'ship') {
-        trigger({ type: target, detail: transformed })
-      } else {
-        addThread({
-          label: `transform:${target}`,
-          once: true,
-          rules: [{ request: { type: target, detail: transformed } }],
-        })
-        trigger({ type: target, detail: transformed })
-      }
+    const traces: Trace[] = []
+    program.useTrace((msg) => {
+      traces.push(msg)
     })
+    program.trigger({ type: 'order', detail: { order: { id: 'o-3' }, total: 7 } })
 
-    trigger({
-      type: 'order',
-      detail: { ship: { id: 's-1' }, bill: { id: 'b-1' } },
-    })
-    await Bun.sleep(50)
-
+    const selections = traces.filter((t): t is SelectionTrace => t.kind === TRACE_MESSAGE_KINDS.selection)
     const ship = selections.find((s) => s.selected.type === 'ship')
-    const bill = selections.find((s) => s.selected.type === 'bill')
     expect(ship).toBeDefined()
-    expect(bill).toBeDefined()
-    expect(ship!.selected.detail).toEqual({ id: 's-1' })
-    expect(bill!.selected.detail).toEqual({ id: 'b-1' })
-    expect(dispatched).toContain('ship')
-    expect(dispatched).toContain('bill')
+    expect(ship!.selected.detail).toEqual({ id: 'o-3' })
+    expect(selections.some((s) => s.selected.type === 'total')).toBe(false)
+
+    const errors = traces.filter((t): t is TransformErrorTrace => t.kind === TRACE_MESSAGE_KINDS.transform_error)
+    expect(errors).toHaveLength(1)
+    expect(errors[0]!.reason).toBe('non_object_output')
+    expect(errors[0]!.transformer.target).toBe('total')
+    expect(errors[0]!.transformer.thread).toBe('shaper')
   })
 
-  test('prime-once: re-firing transforms do not duplicate dispatches', async () => {
+  test('jq_error: an invalid query traces stderr and never fires the target', () => {
     const program = behavioral()
-    const { useAddThread } = program
-    const addThread = useAddThread()
-
+    const addThread = program.useAddThread()
     addThread({
-      label: 'repeater',
-      rules: [{ transform: [{ type: 'tick', query: '.', target: 'tock' }] }],
+      label: 'shaper',
+      rules: [{ transform: [{ type: 'order', query: '.order.', target: 'ship' }] }],
     })
 
-    let dispatchCount = 0
-    const { trigger, selections } = createTransformLoop(program, (target, transformed) => {
-      dispatchCount += 1
-      trigger({ type: target, detail: transformed })
+    const traces: Trace[] = []
+    program.useTrace((msg) => {
+      traces.push(msg)
     })
+    program.trigger({ type: 'order', detail: { order: { id: 'o-4' } } })
 
-    trigger({ type: 'tick', detail: { n: 1 } })
-    await Bun.sleep(20)
-    trigger({ type: 'tick', detail: { n: 2 } })
-    await Bun.sleep(30)
+    const errors = traces.filter((t): t is TransformErrorTrace => t.kind === TRACE_MESSAGE_KINDS.transform_error)
+    expect(errors).toHaveLength(1)
+    expect(errors[0]!.reason).toBe('jq_error')
+    expect(errors[0]!.stderr).toBeDefined()
+    expect(errors[0]!.exitCode).toBeDefined()
+    expect(errors[0]!.transformer.target).toBe('ship')
 
-    const tocks = selections.filter((s) => s.selected.type === 'tock')
-    expect(tocks).toHaveLength(2)
-    expect(tocks[0]!.selected.detail).toEqual({ n: 1 })
-    expect(tocks[1]!.selected.detail).toEqual({ n: 2 })
-    // Two dispatches (one per order), not four (duplicated by re-priming)
-    expect(dispatchCount).toBe(2)
+    const selections = traces.filter((t): t is SelectionTrace => t.kind === TRACE_MESSAGE_KINDS.selection)
+    expect(selections.some((s) => s.selected.type === 'ship')).toBe(false)
   })
 
-  test('transform trace shape — transformers pool with thread labels for observability', async () => {
+  test('empty_output: a query producing no output traces and never fires the target', () => {
     const program = behavioral()
-    const { useAddThread } = program
-    const addThread = useAddThread()
+    const addThread = program.useAddThread()
+    addThread({
+      label: 'shaper',
+      rules: [{ transform: [{ type: 'order', query: '.missing? // empty', target: 'ship' }] }],
+    })
 
+    const traces: Trace[] = []
+    program.useTrace((msg) => {
+      traces.push(msg)
+    })
+    program.trigger({ type: 'order', detail: { order: { id: 'o-5' } } })
+
+    const errors = traces.filter((t): t is TransformErrorTrace => t.kind === TRACE_MESSAGE_KINDS.transform_error)
+    expect(errors).toHaveLength(1)
+    expect(errors[0]!.reason).toBe('empty_output')
+    expect(errors[0]!.stderr).toBeUndefined()
+
+    const selections = traces.filter((t): t is SelectionTrace => t.kind === TRACE_MESSAGE_KINDS.selection)
+    expect(selections.some((s) => s.selected.type === 'ship')).toBe(false)
+  })
+
+  test('no_detail: a transform listener on a detail-less event traces and never fires the target', () => {
+    const program = behavioral()
+    const addThread = program.useAddThread()
+    addThread({
+      label: 'shaper',
+      rules: [{ transform: [{ type: 'order', query: '.order', target: 'ship' }] }],
+    })
+
+    const traces: Trace[] = []
+    program.useTrace((msg) => {
+      traces.push(msg)
+    })
+    program.trigger({ type: 'order' })
+
+    // The listener matched — the declared reshape is recorded, then the failure.
+    const transformTraces = traces.filter((t): t is TransformTrace => t.kind === TRACE_MESSAGE_KINDS.transform)
+    expect(transformTraces).toHaveLength(1)
+    const errors = traces.filter((t): t is TransformErrorTrace => t.kind === TRACE_MESSAGE_KINDS.transform_error)
+    expect(errors).toHaveLength(1)
+    expect(errors[0]!.reason).toBe('no_detail')
+
+    const selections = traces.filter((t): t is SelectionTrace => t.kind === TRACE_MESSAGE_KINDS.selection)
+    expect(selections.some((s) => s.selected.type === 'ship')).toBe(false)
+  })
+
+  test('daemon semantics: an ingressMatch:false waiter matches the re-entered target', () => {
+    const program = behavioral()
+    const addThread = program.useAddThread()
+    addThread({ label: 'shaper', rules: [{ transform: [{ type: 'order', query: '.order', target: 'ship' }] }] })
+    addThread({
+      label: 'ship-waiter',
+      once: true,
+      rules: [{ waitFor: [{ type: 'ship', ingressMatch: false }] }, { request: { type: 'shipped' } }],
+    })
+
+    const traces: Trace[] = []
+    program.useTrace((msg) => {
+      traces.push(msg)
+    })
+    program.trigger({ type: 'order', detail: { order: { id: 'o-6', total: 7 } } })
+
+    const selections = traces.filter((t): t is SelectionTrace => t.kind === TRACE_MESSAGE_KINDS.selection)
+    const ship = selections.find((s) => s.selected.type === 'ship')
+    expect(ship).toBeDefined()
+    // Internal re-entry is request-origin — an ingressMatch:false waiter matches.
+    expect(ship!.selected.ingress).toBeUndefined()
+    expect(selections.some((s) => s.selected.type === 'shipped')).toBe(true)
+  })
+
+  test('transform trace shape: transformers carry query, target, thread — emitted before the payload selection', () => {
+    const program = behavioral()
+    const addThread = program.useAddThread()
     addThread({
       label: 'observer-test',
       rules: [
@@ -215,16 +255,13 @@ describe('transform idiom — external two-phase loop', () => {
       ],
     })
 
-    const transformTraces: TransformTrace[] = []
-    const { trigger } = createTransformLoop(program, () => {})
-    // Re-collect transform traces (createTransformLoop already subscribes, but we need direct access)
-    program.useTrace((msg: Trace) => {
-      if (msg.kind === TRACE_MESSAGE_KINDS.transform) transformTraces.push(msg as TransformTrace)
+    const traces: Trace[] = []
+    program.useTrace((msg) => {
+      traces.push(msg)
     })
+    program.trigger({ type: 'evt', detail: { a: 1, b: 2 } })
 
-    trigger({ type: 'evt', detail: { a: 1, b: 2 } })
-    await Bun.sleep(20)
-
+    const transformTraces = traces.filter((t): t is TransformTrace => t.kind === TRACE_MESSAGE_KINDS.transform)
     expect(transformTraces).toHaveLength(1)
     const trace = transformTraces[0]!
     expect(trace.transformers).toHaveLength(2)
@@ -232,81 +269,29 @@ describe('transform idiom — external two-phase loop', () => {
     expect(trace.transformers[0]!.query).toBe('.a')
     expect(trace.transformers[0]!.target).toBe('out_a')
     expect(trace.transformers[1]!.target).toBe('out_b')
+
+    // The transform trace is emitted before the selection that carries the payload.
+    const transformIndex = traces.findIndex((t) => t.kind === TRACE_MESSAGE_KINDS.transform)
+    const selectionIndex = traces.findIndex(
+      (t) => t.kind === TRACE_MESSAGE_KINDS.selection && (t as SelectionTrace).selected.type === 'evt',
+    )
+    expect(transformIndex).toBeGreaterThanOrEqual(0)
+    expect(selectionIndex).toBeGreaterThanOrEqual(0)
+    expect(transformIndex).toBeLessThan(selectionIndex)
   })
 
-  test('no transform trace when no transform listeners match', async () => {
+  test('no transform trace when no transform listeners match', () => {
     const program = behavioral()
-    const { useAddThread } = program
-    const addThread = useAddThread()
-
+    const addThread = program.useAddThread()
     addThread({ label: 'waiter', rules: [{ waitFor: [{ type: 'other' }] }] })
 
-    const transformTraces: TransformTrace[] = []
-    const { trigger } = createTransformLoop(program, () => {})
-    program.useTrace((msg: Trace) => {
-      if (msg.kind === TRACE_MESSAGE_KINDS.transform) transformTraces.push(msg as TransformTrace)
+    const traces: Trace[] = []
+    program.useTrace((msg) => {
+      traces.push(msg)
     })
+    program.trigger({ type: 'unrelated', detail: { x: 1 } })
 
-    trigger({ type: 'unrelated', detail: { x: 1 } })
-    await Bun.sleep(20)
-
-    expect(transformTraces).toHaveLength(0)
-  })
-})
-
-describe('transform daemon — internal re-entry via once-thread + kick', () => {
-  test('the transform target arrives request-origin and an ingressMatch:false waiter matches', async () => {
-    const program = behavioral()
-    const { useAddThread, trigger } = program
-    const addThread = useAddThread()
-
-    addThread({ label: 'shaper', rules: [{ transform: [{ type: 'order', query: '.order', target: 'ship' }] }] })
-    addThread({
-      label: 'ship-waiter',
-      once: true,
-      rules: [{ waitFor: [{ type: 'ship', ingressMatch: false }] }, { request: { type: 'shipped' } }],
-    })
-
-    const selections: SelectionTrace[] = []
-    const pendingBids: PendingBidsTrace[] = []
-    let pending: Transformer[] = []
-
-    program.useTrace((msg: Trace) => {
-      if (msg.kind === TRACE_MESSAGE_KINDS.transform) {
-        pending = msg.transformers
-        return
-      }
-      if (msg.kind === TRACE_MESSAGE_KINDS.pending_bids) {
-        pendingBids.push(msg)
-        return
-      }
-      if (msg.kind !== TRACE_MESSAGE_KINDS.selection) return
-      selections.push(msg)
-      if (pending.length === 0) return
-      const toProcess = pending
-      pending = []
-      for (const transformer of toProcess) {
-        void jqEval(transformer.query, msg.selected.detail).then((transformed) => {
-          addThread({
-            label: `reentry:${transformer.target}`,
-            once: true,
-            rules: [{ request: { type: transformer.target, detail: transformed as JsonObject } }],
-          })
-          trigger({ type: KICK_EVENT_TYPE })
-        })
-      }
-    })
-
-    trigger({ type: 'order', detail: { order: { id: 'o-4', total: 7 } } })
-    await Bun.sleep(50)
-
-    const ship = selections.find((s) => s.selected.type === 'ship')
-    expect(ship).toBeDefined()
-    // Internal re-entry is request-origin — an ingressMatch:false waiter matches.
-    expect(ship!.selected.ingress).toBeUndefined()
-    expect(selections.some((s) => s.selected.type === 'shipped')).toBe(true)
-    // The reentry thread label is observable in the pending-bids trace.
-    const labels = pendingBids.flatMap((trace) => trace.threads.map((thread) => thread.label))
-    expect(labels).toContain('reentry:ship')
+    expect(traces.filter((t) => t.kind === TRACE_MESSAGE_KINDS.transform)).toHaveLength(0)
+    expect(traces.filter((t) => t.kind === TRACE_MESSAGE_KINDS.transform_error)).toHaveLength(0)
   })
 })

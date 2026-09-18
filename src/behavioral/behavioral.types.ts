@@ -395,10 +395,46 @@ export type InterruptTrace = TraceBase & {
   step: number
 }
 
+export type Transformer = { query: string; target: string; thread: string, space?: string }
+
 export type TransformTrace = TraceBase & {
   kind: typeof TRACE_MESSAGE_KINDS.transform
   step: number
-  transformers: { query: string; target: string; thread: string }[]
+  transformers: Transformer[]
+}
+
+/**
+ * Machine-readable reasons a transform contract failed to produce its target
+ * event. The engine never throws for these — each becomes a
+ * {@link TransformErrorTrace} and the target never fires.
+ */
+export type TransformFailureReason =
+  /** jq exited non-zero with stderr (`JqError`) — bad query or runtime failure */
+  | 'jq_error'
+  /** the matched event carried no detail to query */
+  | 'no_detail'
+  /** the query produced no output (`first()` returns `undefined`) */
+  | 'empty_output'
+  /** the query output was not an object (scalar, array, or null) */
+  | 'non_object_output'
+
+export type TransformErrorTrace = TraceBase & {
+  kind: typeof TRACE_MESSAGE_KINDS.transform_error
+  step: number
+  /** The failed reshape contract. */
+  transformer: Transformer
+  /** Machine-readable failure reason. */
+  reason: TransformFailureReason
+  /** jq stderr, present when reason is `'jq_error'`. */
+  stderr?: string
+  /** jq exit code, present when reason is `'jq_error'`. */
+  exitCode?: number
+}
+
+export type StepTrace = TraceBase & {
+  kind: typeof TRACE_MESSAGE_KINDS.step
+  step: number
+  ingress?: true
 }
 
 /**
@@ -424,6 +460,8 @@ export type Trace =
   | PendingBidsTrace
   | InterruptTrace
   | TransformTrace
+  | TransformErrorTrace
+  | StepTrace
 
 /**
  * @internal
