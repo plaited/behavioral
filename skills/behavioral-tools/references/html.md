@@ -16,6 +16,9 @@ schemas, CSS values against the generated CSS schema.
 | `html-render` | The document with the fragment inserted/replaced at every `b-target` match |
 | `html-update-attributes` | The document with the attribute map merged into every `b-target` match |
 | `html-scale-check` | The most restrictive effective scale a render beside/into a `b-target` would nest inside |
+| `html-meta-read` | The validated BMeta extracted from the document's `script[b-meta]` block, or isError when there is none / it fails the schema |
+| `html-meta-validate` | `{ ok: true }` or `{ ok: false, message }` for b-meta block content held in-hand (the JSON text, not a document) |
+| `html-meta-stamp` | The document with a verified keep-decision appended to its b-meta block (optional status transition), or the original with isError on failure |
 
 **Stateless threading:** `html` is both the input document and the output's
 resulting document. Thread each output `html` back in as the next call's

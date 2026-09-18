@@ -28,6 +28,9 @@ import {
 import { frontierExplore, frontierReplay, frontierVerify } from '../tools/frontier.ts'
 import { gitContext, gitHistory, gitStatus, gitWorktrees } from '../tools/git.ts'
 import {
+  htmlMetaRead,
+  htmlMetaStamp,
+  htmlMetaValidate,
   htmlRender,
   htmlScaleCheck,
   htmlUpdateAttributes,
@@ -95,6 +98,9 @@ const FLEET: FleetEntry[] = [
   entry(frontierReplay),
   entry(frontierExplore),
   entry(frontierVerify),
+  entry(htmlMetaRead),
+  entry(htmlMetaStamp),
+  entry(htmlMetaValidate),
   entry(htmlValidateAndEscape),
   entry(htmlValidateAttributeValue),
   entry(htmlRender),

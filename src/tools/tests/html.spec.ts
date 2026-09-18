@@ -1,12 +1,20 @@
 import { describe, expect, test } from 'bun:test'
 import { B_SCALE, B_TARGET, SCALE, SWAP_MODES } from '../../controller/controller.constants.ts'
 import {
+  htmlMetaRead,
+  htmlMetaStamp,
+  htmlMetaValidate,
   htmlRender,
   htmlScaleCheck,
   htmlUpdateAttributes,
   htmlValidateAndEscape,
   htmlValidateAttributeValue,
+  parseMeta,
+  stringifyMeta,
 } from '../html.ts'
+import type { Meta } from '../meta.schema.ts'
+import { MetaSchema } from '../meta.schema.ts'
+import { ajv } from '../use-tool.ts'
 
 // ── html-validate-and-escape ──────────────────────────────────────────────
 
@@ -749,5 +757,196 @@ describe('htmlScaleCheck — multiple matches', () => {
       id: '1',
     })
     expect(result).toEqual({ id: '1', target: 't', effectiveScale: SCALE.s2 })
+  })
+})
+
+// ── bmeta — shared OKF-vocabulary schema (meta.schema.ts + html.ts) ─────────
+
+const validateBMeta = ajv.compile(MetaSchema)
+
+const validMeta: Meta = {
+  type: 'thread',
+  title: 'Turn loop governor',
+  description: 'Blocks discovery writes outside the reconcile scan',
+  generated: { by: 'turn-42', at: '2026-09-17T00:00:00Z' },
+  status: 'stable',
+}
+
+describe('bmeta — shared OKF-vocabulary schema', () => {
+  test('a valid BMeta validates against the JSON schema', () => {
+    expect(validateBMeta(validMeta)).toBe(true)
+  })
+
+  test('the thread carrier convention: meta typed as BMeta is a plain object', () => {
+    // `export const meta: BMeta = {...}` — the type is structural; the same
+    // object must validate against the JSON schema the html carrier uses.
+    const meta: Meta = {
+      ...validMeta,
+      tags: ['governor', 'write-policy'],
+      verified: [{ by: 'frontier-verify', at: '2026-09-17T01:00:00Z' }],
+      stale_after: '2026-12-01',
+      sources: ['research/self-improving-agents.md'],
+    }
+    expect(validateBMeta(meta)).toBe(true)
+  })
+
+  test('malformed metas are rejected — missing required, unknown field, bad status enum', () => {
+    const cases: unknown[] = [
+      // missing title/description/generated/status
+      { type: 'thread' },
+      // unknown field
+      { ...validMeta, apiKey: 'sk-secret' },
+      // status outside draft|stable|deprecated
+      { ...validMeta, status: 'published' },
+      // generated missing `at`
+      { ...validMeta, generated: { by: 'turn-42' } },
+    ]
+    for (const meta of cases) {
+      expect(validateBMeta(meta)).toBe(false)
+    }
+  })
+
+  test('parseMeta — valid JSON parses, malformed JSON and schema violations are not ok', () => {
+    const ok = parseMeta(JSON.stringify(validMeta))
+    if (!ok.ok) throw new Error(`expected ok, got: ${ok.message}`)
+    expect(ok.meta.title).toBe('Turn loop governor')
+
+    const badJson = parseMeta('{ nope')
+    expect(badJson.ok).toBe(false)
+    if (!badJson.ok) expect(badJson.message).toContain('JSON')
+
+    const badSchema = parseMeta(JSON.stringify({ type: 'thread' }))
+    expect(badSchema.ok).toBe(false)
+  })
+
+  test('stringifyMeta — round-trips through parseMeta: serialized meta parses and deep-equals', () => {
+    const meta: Meta = {
+      ...validMeta,
+      tags: ['governor', 'write-policy'],
+      verified: [{ by: 'frontier-verify', at: '2026-09-17T02:00:00Z' }],
+      stale_after: '2026-12-01',
+      sources: ['research/self-improving-agents.md'],
+    }
+    const result = parseMeta(stringifyMeta(meta))
+    expect(result.ok).toBe(true)
+    if (!result.ok) throw new Error(`expected ok, got: ${result.message}`)
+    expect(result.meta).toEqual(meta)
+  })
+})
+
+describe('htmlMetaRead — extract the b-meta block from a document', () => {
+  const metaDoc = (metaText: string) =>
+    `<div class="card"><script type="application/json" b-meta>${metaText}</script><p>content</p></div>`
+
+  test('reads and validates the embedded meta', async () => {
+    const result = await htmlMetaRead({ html: metaDoc(JSON.stringify(validMeta)) })
+    expect(result.isError).toBeFalsy()
+    expect(result.meta).toEqual(validMeta)
+  })
+
+  test('a document without a b-meta block errors', async () => {
+    const result = await htmlMetaRead({ html: '<div>no meta here</div>' })
+    expect(result.isError).toBe(true)
+    expect(result.message).toContain('b-meta')
+  })
+
+  test('a malformed block errors with the parseMeta message', async () => {
+    const result = await htmlMetaRead({ html: metaDoc('{ nope') })
+    expect(result.isError).toBe(true)
+    expect(result.message).toContain('JSON')
+  })
+
+  test('a b-meta script without the application/json type is inert (missing block)', async () => {
+    const result = await htmlMetaRead({
+      html: `<div><script b-meta>${JSON.stringify(validMeta)}</script></div>`,
+    })
+    expect(result.isError).toBe(true)
+  })
+})
+
+describe('htmlMetaValidate — validate b-meta block content in-hand', () => {
+  test('valid block content passes', async () => {
+    const result = await htmlMetaValidate({ text: JSON.stringify(validMeta) })
+    expect(result.ok).toBe(true)
+  })
+
+  test('malformed JSON is not ok with the parse message', async () => {
+    const result = await htmlMetaValidate({ text: '{ nope' })
+    expect(result.ok).toBe(false)
+    expect(result.message).toContain('JSON')
+  })
+
+  test('a schema violation is not ok with the schema message', async () => {
+    const result = await htmlMetaValidate({ text: JSON.stringify({ type: 'thread' }) })
+    expect(result.ok).toBe(false)
+    expect(result.message).toContain('meta schema')
+  })
+})
+
+describe('htmlMetaStamp — stamp the b-meta block in place', () => {
+  const metaDoc = (metaText: string) =>
+    `<div class="card"><script type="application/json" b-meta>${metaText}</script><p>content</p></div>`
+  const stamp = { by: 'frontier-verify', at: '2026-09-18T00:00:00Z' }
+
+  test('appends a verified stamp and preserves the rest of the document', async () => {
+    const result = await htmlMetaStamp({ html: metaDoc(JSON.stringify(validMeta)), stamp })
+    expect(result.isError).toBeFalsy()
+    expect(result.html).toContain('<div class="card">')
+    expect(result.html).toContain('<p>content</p>')
+    const read = await htmlMetaRead({ html: result.html! })
+    expect(read.isError).toBeFalsy()
+    expect(read.meta!.verified).toEqual([stamp])
+    expect(read.meta!.title).toBe(validMeta.title)
+  })
+
+  test('appending a second stamp keeps the first', async () => {
+    const once = await htmlMetaStamp({ html: metaDoc(JSON.stringify(validMeta)), stamp })
+    const twice = await htmlMetaStamp({
+      html: once.html!,
+      stamp: { by: 'harbor', at: '2026-09-19T00:00:00Z' },
+    })
+    expect(twice.isError).toBeFalsy()
+    const read = await htmlMetaRead({ html: twice.html! })
+    expect(read.meta!.verified).toEqual([stamp, { by: 'harbor', at: '2026-09-19T00:00:00Z' }])
+  })
+
+  test('a status transition rides along with the stamp', async () => {
+    const draft: Meta = { ...validMeta, status: 'draft' }
+    const result = await htmlMetaStamp({
+      html: metaDoc(JSON.stringify(draft)),
+      stamp,
+      status: 'stable',
+    })
+    expect(result.isError).toBeFalsy()
+    const read = await htmlMetaRead({ html: result.html! })
+    expect(read.meta!.status).toBe('stable')
+    expect(read.meta!.verified).toEqual([stamp])
+  })
+
+  test('a document without a b-meta block errors with the original returned', async () => {
+    const result = await htmlMetaStamp({ html: '<div>no meta</div>', stamp })
+    expect(result.isError).toBe(true)
+    expect(result.html).toBe('<div>no meta</div>')
+  })
+
+  test('a malformed block errors with the original returned', async () => {
+    const doc = metaDoc('{ nope')
+    const result = await htmlMetaStamp({ html: doc, stamp })
+    expect(result.isError).toBe(true)
+    expect(result.html).toBe(doc)
+  })
+
+  test('a title containing </script> cannot break out of the block', async () => {
+    const hostile: Meta = { ...validMeta, title: 'closes the tag </script><b>evil</b>' }
+    // Blocks carrying `</` in strings are authored escaped (the same `\/`
+    // convention the stamp write path applies) — raw `</script>` breaks the
+    // block at write time, before any tool runs.
+    const hostileDoc = metaDoc(JSON.stringify(hostile).replace(/<\//g, '<\\/'))
+    const result = await htmlMetaStamp({ html: hostileDoc, stamp })
+    expect(result.isError).toBeFalsy()
+    const read = await htmlMetaRead({ html: result.html! })
+    expect(read.isError).toBeFalsy()
+    expect(read.meta!.title).toBe(hostile.title)
+    expect(read.meta!.verified).toEqual([stamp])
   })
 })

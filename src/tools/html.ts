@@ -12,10 +12,70 @@ import {
   SWAP_TARGETS,
 } from '../controller/controller.constants.ts'
 import { swapBoundary } from '../controller/swap-boundary.ts'
-import { parseBMeta } from '../kernel/bmeta.ts'
 import { CSSPropertiesSchema, CUSTOM_PROPERTY_REF_PATTERN, validateCSSValue } from './css.schemas.ts'
 import { ElementAttributeListSchema, validateAttribute } from './html.schemas.ts'
-import { useTool } from './use-tool.ts'
+import {
+  type Meta,
+  type MetaParseResult,
+  MetaSchema,
+  type MetaStamp,
+  type MetaStatus,
+  validateMeta,
+} from './meta.schema.ts'
+import { ajv, useTool } from './use-tool.ts'
+
+// ── b-meta block parsing (the html carrier's read + validate) ─────────────
+
+/** Parse + validate a serialized b-meta payload (the html carrier's JSON). */
+export const parseMeta = (text: string): MetaParseResult => {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch (err) {
+    return {
+      ok: false,
+      message: `${B_META} block is not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
+    }
+  }
+  if (!validateMeta(parsed)) {
+    return { ok: false, message: `${B_META} block fails the meta schema: ${ajv.errorsText(validateMeta.errors)}` }
+  }
+  return { ok: true, meta: parsed as Meta }
+}
+
+/**
+ * Serialize a Meta into the b-meta block payload (the html carrier's JSON).
+ * The inverse of `parseMeta` — the round-trip
+ * `parseMeta(stringifyMeta(meta))` is the shared-vocabulary invariant both
+ * carriers rely on (threads embed the same serialization in
+ * `export const meta: BMeta = {...}`).
+ */
+export const stringifyMeta = (meta: Meta): string => JSON.stringify(meta, null, 2)
+
+/**
+ * Extract the first b-meta block's text from a document (the html carrier's
+ * read mechanics). A `script[b-meta]` without `type="application/json"` is
+ * inert — the same contract `html-validate-and-escape` enforces.
+ */
+const extractBMetaBlock = (html: string): string | null => {
+  let inside = false
+  let found: string | null = null
+  new HTMLRewriter()
+    .on(`script[${B_META}]`, {
+      element(el) {
+        if (found !== null || el.getAttribute('type') !== 'application/json') return
+        inside = true
+        el.onEndTag(() => {
+          inside = false
+        })
+      },
+      text(chunk) {
+        if (inside) found = (found ?? '') + chunk.text
+      },
+    })
+    .transform(html)
+  return found
+}
 
 /**
  * Pattern for lowercase custom element tags after template tag normalization.
@@ -222,7 +282,7 @@ const validateAndEscapeHtmlRaw = (html: string): ValidateAndEscapeHtmlResult => 
         el.onEndTag(() => {
           const block = bMetaBlock ?? ''
           bMetaBlock = null
-          const result = parseBMeta(block)
+          const result = parseMeta(block)
           if (!result.ok) {
             htmlViolations.push({ tag: 'script', attribute: B_META, message: result.message })
           }
@@ -917,5 +977,174 @@ export const htmlScaleCheck = useTool(
       scales.filter((s) => s !== SCALE.rel).sort((a, b) => SCALE_RANK[a] - SCALE_RANK[b])[0] ?? SCALE.rel
 
     return { id, target, effectiveScale }
+  },
+)
+
+// ── html-meta-read ─────────────────────────────────────────────────────────
+
+type HtmlMetaReadInput = { html: string }
+type HtmlMetaReadOutput = { meta: Meta | null; isError?: boolean; message?: string }
+
+export const HtmlMetaReadInputSchema = {
+  type: 'object',
+  properties: {
+    html: {
+      type: 'string',
+      description: 'the markup string containing a `<script type="application/json" b-meta>` block',
+    },
+  },
+  required: ['html'],
+  additionalProperties: false,
+} as unknown as JSONSchemaType<HtmlMetaReadInput>
+
+export const HtmlMetaReadOutputSchema = {
+  type: 'object',
+  properties: {
+    meta: { ...MetaSchema, nullable: true, description: 'the validated BMeta — null on failure' },
+    isError: { type: 'boolean', nullable: true, description: 'true when no valid b-meta block exists' },
+    message: { type: 'string', nullable: true, description: 'failure detail when isError is true' },
+  },
+  additionalProperties: false,
+} as unknown as JSONSchemaType<HtmlMetaReadOutput>
+
+export const htmlMetaRead = useTool(
+  {
+    name: 'html-meta-read',
+    description:
+      'Extract and validate the `<script type="application/json" b-meta>` block from an html artifact, returning the structured BMeta. Errors as data when the document has no block or the block fails the meta schema.',
+    inputSchema: HtmlMetaReadInputSchema,
+    outputSchema: HtmlMetaReadOutputSchema,
+  },
+  ({ html }) => {
+    const block = extractBMetaBlock(html)
+    if (block === null) {
+      return { meta: null, isError: true, message: 'no b-meta block found in the document' }
+    }
+    const result = parseMeta(block)
+    if (!result.ok) {
+      return { meta: null, isError: true, message: result.message }
+    }
+    return { meta: result.meta }
+  },
+)
+
+// ── html-meta-validate ─────────────────────────────────────────────────────
+
+type HtmlMetaValidateInput = { text: string }
+type HtmlMetaValidateOutput = { ok: boolean; message?: string }
+
+export const HtmlMetaValidateInputSchema = {
+  type: 'object',
+  properties: {
+    text: {
+      type: 'string',
+      description: 'the b-meta block content in-hand — the JSON text, not the surrounding document',
+    },
+  },
+  required: ['text'],
+  additionalProperties: false,
+} as unknown as JSONSchemaType<HtmlMetaValidateInput>
+
+export const HtmlMetaValidateOutputSchema = {
+  type: 'object',
+  properties: {
+    ok: { type: 'boolean', description: 'true when the text parses and passes the meta schema' },
+    message: { type: 'string', nullable: true, description: 'failure detail when ok is false' },
+  },
+  required: ['ok'],
+  additionalProperties: false,
+} as unknown as JSONSchemaType<HtmlMetaValidateOutput>
+
+export const htmlMetaValidate = useTool(
+  {
+    name: 'html-meta-validate',
+    description:
+      'Validate b-meta block content held in-hand (the JSON text, not a document) against the shared Meta schema. A failed validation is data ({ ok: false, message }), not an error — for whole-document validation including the b-meta block, use html-validate-and-escape.',
+    inputSchema: HtmlMetaValidateInputSchema,
+    outputSchema: HtmlMetaValidateOutputSchema,
+  },
+  ({ text }) => {
+    const result = parseMeta(text)
+    return result.ok ? { ok: true } : { ok: false, message: result.message }
+  },
+)
+
+// ── html-meta-stamp ────────────────────────────────────────────────────────
+
+type HtmlMetaStampInput = { html: string; stamp: MetaStamp; status?: MetaStatus }
+type HtmlMetaStampOutput = { html: string | null; isError?: boolean; message?: string }
+
+export const HtmlMetaStampInputSchema = {
+  type: 'object',
+  properties: {
+    html: { type: 'string', description: 'the markup string containing the b-meta block to stamp' },
+    stamp: {
+      type: 'object',
+      properties: {
+        by: { type: 'string', minLength: 1, description: 'what stamped it — a tool, model, or turn id' },
+        at: { type: 'string', minLength: 1, description: 'ISO timestamp of the stamp' },
+      },
+      required: ['by', 'at'],
+      additionalProperties: false,
+    },
+    status: {
+      type: 'string',
+      enum: ['draft', 'stable', 'deprecated'],
+      nullable: true,
+      description: 'optional lifecycle transition to apply with the stamp',
+    },
+  },
+  required: ['html', 'stamp'],
+  additionalProperties: false,
+} as unknown as JSONSchemaType<HtmlMetaStampInput>
+
+export const HtmlMetaStampOutputSchema = {
+  type: 'object',
+  properties: {
+    html: { type: 'string', nullable: true, description: 'the stamped document — the original on failure' },
+    isError: { type: 'boolean', nullable: true },
+    message: { type: 'string', nullable: true, description: 'failure detail when isError is true' },
+  },
+  additionalProperties: false,
+} as unknown as JSONSchemaType<HtmlMetaStampOutput>
+
+export const htmlMetaStamp = useTool(
+  {
+    name: 'html-meta-stamp',
+    description:
+      'Stamp the b-meta block of an html artifact in place: append a verified keep-decision (the promotion ladder) and optionally transition status. Reads, validates, merges, and surgically replaces the block; returns the updated document, or the original with isError on failure.',
+    inputSchema: HtmlMetaStampInputSchema,
+    outputSchema: HtmlMetaStampOutputSchema,
+  },
+  ({ html, stamp, status }) => {
+    const block = extractBMetaBlock(html)
+    if (block === null) {
+      return { html, isError: true, message: 'no b-meta block found in the document' }
+    }
+    const result = parseMeta(block)
+    if (!result.ok) {
+      return { html, isError: true, message: result.message }
+    }
+    const stamped: Meta = {
+      ...result.meta,
+      verified: [...(result.meta.verified ?? []), stamp],
+      ...(status === undefined ? {} : { status }),
+    }
+    // `</` in the serialized JSON (e.g. a title containing `</script>`) would
+    // close the block early — `\/` is a valid JSON escape the parser unescapes.
+    const serialized = stringifyMeta(stamped).replace(/<\//g, '<\\/')
+    const nextBlock = `<script type="application/json" ${B_META}>\n${serialized}\n</script>`
+    let replaced = false
+    const next = new HTMLRewriter()
+      .on(`script[${B_META}]`, {
+        element(el) {
+          if (replaced || el.getAttribute('type') !== 'application/json') return
+          replaced = true
+          el.before(nextBlock, { html: true })
+          el.remove()
+        },
+      })
+      .transform(html)
+    return { html: next }
   },
 )

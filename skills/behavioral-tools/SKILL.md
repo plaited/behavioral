@@ -72,7 +72,9 @@ Each module's tools, when-to-use guidance, examples, and gotchas:
   commands.
 - [html](references/html.md) — `html-validate-and-escape`,
   `html-validate-attribute-value`, `html-render`, `html-update-attributes`,
-  `html-scale-check`. HTML/CSS validation and render-tree surgery per the
+  `html-scale-check`, `html-meta-read`, `html-meta-validate`,
+  `html-meta-stamp`. HTML/CSS validation and render-tree surgery, plus b-meta
+  block read/validate/stamp per the
   behavioral design-system spec.
 - [mcp-client](references/mcp-client.md) — `mcp-discover`, `mcp-call-tool`,
   `mcp-list-tools`, `mcp-list-prompts`, `mcp-get-prompt`,
