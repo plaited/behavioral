@@ -438,6 +438,48 @@ export type TransformEvaluation =
   | { ok: true; value: JsonObject }
   | { ok: false; reason: TransformFailureReason; stderr?: string; exitCode?: number }
 
+/**
+ * Structural schema for the SAB frame the jq worker ships back — the
+ * trust-boundary validation in the `evaluateTransform` bridge (the
+ * `parseMeta` pattern's second guard: JSON.parse proves syntax, this proves
+ * shape). Hand-written `oneOf` on the `ok` discriminant, cast through
+ * `unknown` per the mcp-client precedent; the `value` branch is the JsonObject
+ * floor, mirroring the worker's own object check. Strict
+ * `additionalProperties: false` at every level; no defaults (the strict-mode
+ * oneOf conflict does not apply).
+ */
+export const TransformEvaluationSchema = {
+  type: 'object',
+  oneOf: [
+    {
+      type: 'object',
+      properties: {
+        ok: { type: 'boolean', enum: [true] },
+        value: { type: 'object', required: [], additionalProperties: true },
+      },
+      required: ['ok', 'value'],
+      additionalProperties: false,
+    },
+    {
+      type: 'object',
+      properties: {
+        ok: { type: 'boolean', enum: [false] },
+        reason: {
+          type: 'string',
+          enum: ['jq_error', 'no_detail', 'empty_output', 'non_object_output', 'jq_timeout', 'output_too_large'],
+        },
+        stderr: { type: 'string', nullable: true },
+        exitCode: { type: 'integer', nullable: true },
+      },
+      required: ['ok', 'reason'],
+      additionalProperties: false,
+    },
+  ],
+} as unknown as JSONSchemaType<TransformEvaluation>
+
+/** @internal Compiled once — the jq-worker frame guard. */
+export const validateTransformEvaluation = ajv.compile(TransformEvaluationSchema)
+
 export type TransformErrorTrace = TraceBase & {
   kind: typeof TRACE_MESSAGE_KINDS.transform_error
   step: number

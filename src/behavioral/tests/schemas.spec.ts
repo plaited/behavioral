@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { ajv, validateBPEvent, validateThread } from '../behavioral.types.ts'
+import { ajv, validateBPEvent, validateThread, validateTransformEvaluation } from '../behavioral.types.ts'
 
 const compileTraceValidator = (kind: string) =>
   ajv.compile({
@@ -30,6 +30,26 @@ describe('behavioral schemas', () => {
   test('Transform listener validator requires query and target', () => {
     expect(validateTransformListenerSafe({ type: 'x', query: '.', target: 'y' })).toBe(true)
     expect(validateTransformListenerSafe({ type: 'x', query: '.' })).toBe(false)
+  })
+
+  test('TransformEvaluation validator accepts well-formed frames from the jq worker', () => {
+    expect(validateTransformEvaluation({ ok: true, value: { id: 'o-1' } })).toBe(true)
+    expect(validateTransformEvaluation({ ok: false, reason: 'jq_error', stderr: 'syntax error', exitCode: 3 })).toBe(
+      true,
+    )
+    expect(validateTransformEvaluation({ ok: false, reason: 'jq_timeout' })).toBe(true)
+    expect(validateTransformEvaluation({ ok: false, reason: 'output_too_large' })).toBe(true)
+    expect(validateTransformEvaluation({ ok: false, reason: 'no_detail' })).toBe(true)
+  })
+
+  test('TransformEvaluation validator rejects off-shape frames', () => {
+    expect(validateTransformEvaluation({ ok: 'yes' })).toBe(false)
+    expect(validateTransformEvaluation({ ok: true })).toBe(false)
+    expect(validateTransformEvaluation({ ok: false })).toBe(false)
+    expect(validateTransformEvaluation({ ok: false, reason: 'bogus' })).toBe(false)
+    expect(validateTransformEvaluation({ ok: true, value: { id: 1 }, extra: true })).toBe(false)
+    expect(validateTransformEvaluation({ ok: false, reason: 'jq_error', value: {} })).toBe(false)
+    expect(validateTransformEvaluation('ok')).toBe(false)
   })
 
   test('Thread validator requires non-empty label and rules', () => {
