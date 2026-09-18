@@ -4,6 +4,7 @@ import type {
   CandidateBid,
   Frontier,
   Idioms,
+  JsonObject,
   PendingBid,
   RegisteredBPListener,
   RegisteredIdioms,
@@ -11,6 +12,7 @@ import type {
   RulesFunction,
   RunningBid,
   SendTrace,
+  TransformEvaluation,
   Transformer,
   UseThread,
 } from './behavioral.types.ts'
@@ -237,3 +239,39 @@ export const useThread: UseThread = (rules: RulesFunction[], once?: true) =>
           }
         }
       }
+
+const JQ_EVAL_TIMEOUT_MS = 1000
+const JQ_RESULT_CAP = 64 * 1024
+const jqResultDecoder = new TextDecoder()
+
+/**
+ * The jq eval bridge — spawns the `jq.ts` worker per evaluation and blocks the
+ * calling thread on `Atomics.wait` (a synchronous syscall, not an async yield —
+ * the engine-never-awaits invariant holds). The result travels through the
+ * shared buffer, never postMessage: a caller parked in `Atomics.wait` has a
+ * frozen event loop and could not receive a message. A never-terminating query
+ * is killed by `terminate()` at the timeout — the only interrupt primitive
+ * that exists for a spinning wasm program — and becomes `jq_timeout`
+ * errors-as-data, like every other transform failure.
+ *
+ * MINIMAL: spawn-per-eval — every transform pays worker startup + jq.wasm
+ * compile. Upgrade path: a pre-warmed pool of one, replaced on timeout.
+ */
+export const evaluateTransform = (query: string, detail: JsonObject | undefined): TransformEvaluation => {
+  if (detail === undefined || detail === null) return { ok: false, reason: 'no_detail' }
+  const sab = new SharedArrayBuffer(8 + JQ_RESULT_CAP)
+  const header = new Int32Array(sab, 0, 2)
+  const worker = new Worker(new URL('./jq.ts', import.meta.url))
+  worker.postMessage({ sab, query, detail })
+  const woke = Atomics.wait(header, 0, 0, JQ_EVAL_TIMEOUT_MS)
+  if (woke === 'timed-out') {
+    worker.terminate()
+    return { ok: false, reason: 'jq_timeout' }
+  }
+  const bytes = new Uint8Array(sab, 8, Atomics.load(header, 1))
+  try {
+    return JSON.parse(jqResultDecoder.decode(bytes)) as TransformEvaluation
+  } catch (err) {
+    return { ok: false, reason: 'jq_error', stderr: err instanceof Error ? err.message : String(err) }
+  }
+}

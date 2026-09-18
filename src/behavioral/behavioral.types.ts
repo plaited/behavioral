@@ -424,6 +424,19 @@ export type TransformFailureReason =
   | 'empty_output'
   /** the query output was not an object (scalar, array, or null) */
   | 'non_object_output'
+  /** the eval worker was killed at the timeout — a never-terminating query */
+  | 'jq_timeout'
+  /** the evaluated value exceeded the shared-buffer result cap */
+  | 'output_too_large'
+
+/**
+ * The result of a transform evaluation — the whole first output, parsed, or
+ * a machine-readable failure reason. Never thrown; serialized over the
+ * worker bridge between `jq.ts` and `evaluateTransform`.
+ */
+export type TransformEvaluation =
+  | { ok: true; value: JsonObject }
+  | { ok: false; reason: TransformFailureReason; stderr?: string; exitCode?: number }
 
 export type TransformErrorTrace = TraceBase & {
   kind: typeof TRACE_MESSAGE_KINDS.transform_error

@@ -217,6 +217,53 @@ describe('transform idiom — in-engine jq execution', () => {
     expect(selections.some((s) => s.selected.type === 'ship')).toBe(false)
   })
 
+  test('jq_timeout: a never-terminating query is killed at the timeout and never fires the target', () => {
+    const program = behavioral()
+    const { addThread } = program
+    addThread({
+      label: 'shaper',
+      rules: [{ transform: [{ type: 'order', query: 'while(true; .)', target: 'ship' }] }],
+    })
+
+    const traces: Trace[] = []
+    program.useTrace((msg) => {
+      traces.push(msg)
+    })
+    program.trigger({ type: 'order', detail: { order: { id: 'o-7' } } })
+
+    const errors = traces.filter((t): t is TransformErrorTrace => t.kind === TRACE_MESSAGE_KINDS.transform_error)
+    expect(errors).toHaveLength(1)
+    expect(errors[0]!.reason).toBe('jq_timeout')
+    expect(errors[0]!.stderr).toBeUndefined()
+    expect(errors[0]!.transformer.target).toBe('ship')
+
+    const selections = traces.filter((t): t is SelectionTrace => t.kind === TRACE_MESSAGE_KINDS.selection)
+    expect(selections.some((s) => s.selected.type === 'ship')).toBe(false)
+  })
+
+  test('output_too_large: a result beyond the shared-buffer cap traces and never fires the target', () => {
+    const program = behavioral()
+    const { addThread } = program
+    addThread({
+      label: 'shaper',
+      rules: [{ transform: [{ type: 'order', query: '{ big: [range(50000)] }', target: 'ship' }] }],
+    })
+
+    const traces: Trace[] = []
+    program.useTrace((msg) => {
+      traces.push(msg)
+    })
+    program.trigger({ type: 'order', detail: { order: { id: 'o-8' } } })
+
+    const errors = traces.filter((t): t is TransformErrorTrace => t.kind === TRACE_MESSAGE_KINDS.transform_error)
+    expect(errors).toHaveLength(1)
+    expect(errors[0]!.reason).toBe('output_too_large')
+    expect(errors[0]!.transformer.target).toBe('ship')
+
+    const selections = traces.filter((t): t is SelectionTrace => t.kind === TRACE_MESSAGE_KINDS.selection)
+    expect(selections.some((s) => s.selected.type === 'ship')).toBe(false)
+  })
+
   test('daemon semantics: an ingressMatch:false waiter matches the re-entered target', () => {
     const program = behavioral()
     const { addThread } = program

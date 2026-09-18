@@ -15,11 +15,11 @@ import {
 import {
   advanceRunningToPending,
   computeFrontier,
+  evaluateTransform,
   generateRulesFunctions,
   resumePendingThreadsForSelectedEvent,
   useThread,
 } from './behavioral.utils.ts'
-import { evaluateTransform } from './jq.ts'
 
 const createSubject = (): SendTrace => {
   const listeners = new Set<(value: Trace) => void | Promise<void>>()

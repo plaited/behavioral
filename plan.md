@@ -95,6 +95,16 @@ ingress + a plugin-shipped behavior surface.
   **`src/workers/use-behavioral.ts` is an empty stub — the client slice is
   next.** **src/kernel is decided for RECODE (see Decision Log) — its red tsc
   and stale API usage are reference, not work items. Do not patch it.**
+- **Landed (2026-09-18): the jq worker bridge.** `jq.ts` IS the eval worker
+  (spawned by URL, never imported); `evaluateTransform` in `behavioral.utils`
+  spawns it per eval, blocks on `Atomics.wait` (sync syscall — the
+  engine-never-awaits invariant holds), and `terminate()`s at timeout.
+  Never-terminating queries are now `jq_timeout` errors-as-data — the last
+  silent-forever failure mode in the engine is dead. `output_too_large`
+  guards the 64KB shared-buffer cap. 143/143 behavioral tests (12 transform
+  tests, TDD red→green). MINIMAL: spawn-per-eval — upgrade path is a
+  pre-warmed pool of one. Works Bun main-thread and inside the engine
+  worker (webview) with the same SAB protocol.
 - **In-flight / next:** (0) **Controller transport seam — LANDED
   2026-09-13** (red 1b32de04 + green 9f306044; see Decision Log 2026-09-13
   "Transport seam landed"). Remaining transport-workstream tasks, in order
