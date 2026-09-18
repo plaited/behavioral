@@ -93,9 +93,8 @@ ingress + a plugin-shipped behavior surface.
   (postMessage traces, onmessage {trigger|addThreads|step}). All 10 spec
   files migrated (135 usages).
   **`src/workers/use-behavioral.ts` is an empty stub — the client slice is
-  next.** **KICK_EVENT_TYPE removed from the behavioral surface — deliberate.
-  src/kernel still imports it and uses `useAddThread` and is RED until the
-  kernel refactor swaps re-entry to `step()`.**
+  next.** **src/kernel is decided for RECODE (see Decision Log) — its red tsc
+  and stale API usage are reference, not work items. Do not patch it.**
 - **In-flight / next:** (0) **Controller transport seam — LANDED
   2026-09-13** (red 1b32de04 + green 9f306044; see Decision Log 2026-09-13
   "Transport seam landed"). Remaining transport-workstream tasks, in order
