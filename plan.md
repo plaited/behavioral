@@ -149,6 +149,16 @@ ingress + a plugin-shipped behavior surface.
 
 ## Decision Log
 
+### 2026-09-19 — `src/kernel/threads.ts` deleted; the kernel directory is no more
+
+- **Pilot deleted the last kernel file** — resolving the fold-vs-move question
+  as neither: the turn-loop thread is **authored raw** against the new worker
+  event wire, not ported. The old material (createReentryThread,
+  `TURN_LOOP_THREAD` speaking `user.prompt`/`model.respond`/`turn.end`) lives
+  in git history if authoring needs a reference. The proof is now entirely
+  greenfield: thread-authoring surface decisions + `TURN_LOOP_THREAD` on the
+  tools/responses/store wire.
+
 ### 2026-09-19 — `src/tools/discovery.ts` deleted; the catalog becomes store-tenant authoring
 
 - **Q: re-cut discovery onto the store now? A: no — delete it.** The fleet tool
@@ -1428,9 +1438,6 @@ repo and risks staleness.
   thin factories in `src/threads/`; id-minting convention (`ueid`, prefix);
   where model input comes from. Settle by writing the re-cut raw and extracting
   what repeats (the frontier-grammar lesson: build, then derive the rule).
-- **`src/kernel/threads.ts` → `src/threads/` move.** The one surviving kernel
-  file; `TURN_LOOP_THREAD` speaks dead vocabulary and is the proof artifact's
-  material. Fold with the turn-loop re-cut, or move now and re-cut in place?
 - **Store: sqlite schema evolution policy.** Worker-internal by design; the
   open question is only the forward-compat gate when a future binary bumps
   `schema_version` (v1 assumes forward-compat).
