@@ -19,7 +19,6 @@
 
 import type { JSONSchemaType, ValidateFunction } from 'ajv'
 import { ajv } from '../tools/define-tool.ts'
-import { gitContext, gitHistory, gitStatus, gitWorktrees } from '../tools/git.ts'
 import {
   htmlMetaRead,
   htmlMetaStamp,
@@ -47,7 +46,6 @@ import {
   skillRead,
   skillValidateLinks,
 } from '../tools/skill-client.ts'
-import { typescriptLspDiscover, typescriptLspExecute } from '../tools/typescript.ts'
 import { makeCli } from './cli.ts'
 
 // ---------------------------------------------------------------------------
@@ -103,12 +101,6 @@ const FLEET: FleetEntry[] = [
   entry(skillListResources),
   entry(skillExtractLinks),
   entry(skillValidateLinks),
-  entry(gitStatus),
-  entry(gitHistory),
-  entry(gitWorktrees),
-  entry(gitContext),
-  entry(typescriptLspExecute),
-  entry(typescriptLspDiscover),
 ]
 
 const registry = new Map(FLEET.map((tool) => [tool.name, tool]))

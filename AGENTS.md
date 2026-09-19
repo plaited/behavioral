@@ -83,9 +83,9 @@ selections verbatim and re-enters worker results as once-threads), and the satel
 (reachability analysis), `store` (durable space-scoped persistence). Spawn-by-URL entries end in
 `.worker.ts`; each family owns its event types + input boundary; results echo the request
 `space`.
-**`src/tools/`** — the tool fleet (29 tools): stateless `defineTool` units (`src/tools/define-tool.ts`), each
+**`src/tools/`** — the tool fleet (21 tools): stateless `defineTool` units (`src/tools/define-tool.ts`), each
 with AJV `JSONSchemaType` input/output schemas (`html`, `mcp-client`,
-`plugin-client`, `skill-client`, `git`, `typescript`). Dispatched from the CLI via `behavioral tools`;
+`plugin-client`, `skill-client`). Dispatched from the CLI via `behavioral tools`;
 agent-facing usage docs live in `skills/behavioral-tools/`.
 **`src/behavioral/`** — the pure language layer: types, constants, utils, the interpreter core
 (`behavioral.ts`), and its internal jq subprocess (`jq.worker.ts` — engine-internal, wire-external;

@@ -1,6 +1,6 @@
 ---
 name: behavioral-tools
-description: Invoke the behavioral agent tool fleet via the `behavioral tools` CLI dispatcher — git (git-status, git-history, git-worktrees, git-context), TypeScript LSP (typescript-execute, typescript-discover), MCP client (mcp-discover, mcp-call-tool, mcp-list-tools, mcp-get-prompt, mcp-list-resources, mcp-read-resource), HTML validation/rendering (html-render, html-validate-and-escape, html-scale-check), skill client (skill-discover, skill-read, skill-list-resources, skill-extract-links, skill-validate-links), and plugin loading (plugin-client). JSON in / JSON out over stdio, one subprocess call per invocation. Use when an agent needs structured git context, semantic TypeScript queries, remote MCP operations, HTML/CSS validation, or skill/plugin inspection instead of raw shell commands.
+description: Invoke the behavioral agent tool fleet via the `behavioral tools` CLI dispatcher — MCP client (mcp-discover, mcp-call-tool, mcp-list-tools, mcp-get-prompt, mcp-list-resources, mcp-read-resource), HTML validation/rendering (html-render, html-validate-and-escape, html-scale-check), skill client (skill-discover, skill-read, skill-list-resources, skill-extract-links, skill-validate-links), and plugin loading (plugin-client). JSON in / JSON out over stdio, one subprocess call per invocation. Use when an agent needs remote MCP operations, HTML/CSS validation, or skill/plugin inspection instead of raw shell commands. Git and raw shell belong to the shell worker; TypeScript LSP is a future satellite family (TS 7.1 stable API).
 license: ISC
 compatibility: Requires bun and the behavioral CLI
 allowed-tools: Bash
@@ -25,11 +25,11 @@ object). Dispatch validates `input` against the named tool's input schema and
 the result against its output schema, then prints the result JSON.
 
 ```bash
-# Full context in one round-trip
-behavioral tools '{"tool":"git-context","input":{"cwd":".","base":"main"}}'
+# Invoke by name
+behavioral tools '{"tool":"skill-discover","input":{"cwd":"."}}'
 
 # Stream from stdin
-echo '{"tool":"typescript-discover","input":{}}' | behavioral tools
+echo '{"tool":"html-validate-and-escape","input":{"html":"<p>hi</p>"}}' | behavioral tools
 ```
 
 ## Discovery loop
@@ -59,9 +59,6 @@ Never guess a tool's input shape — the contract is exposed by flags:
 
 Each module's tools, when-to-use guidance, examples, and gotchas:
 
-- [git](references/git.md) — `git-status`, `git-history`, `git-worktrees`,
-  `git-context`. Structured repo context; replaces chaining 8+ raw git
-  commands.
 - [html](references/html.md) — `html-validate-and-escape`,
   `html-validate-attribute-value`, `html-render`, `html-update-attributes`,
   `html-scale-check`, `html-meta-read`, `html-meta-validate`,
@@ -78,16 +75,11 @@ Each module's tools, when-to-use guidance, examples, and gotchas:
   `skill-read`, `skill-list-resources`, `skill-extract-links`,
   `skill-validate-links`. Local skill progressive disclosure plus markdown
   link extraction/validation.
-- [typescript](references/typescript.md) — `typescript-execute`,
-  `typescript-discover`. LSP-style queries (documentSymbol, hover,
-  completion, definition) over the TypeScript 7 native API.
 
 ## Routing quick-start
 
 | Need | Module |
 |------|--------|
-| Repo state before editing/reviewing | [git](references/git.md) |
-| Type info, symbols, definitions, completions | [typescript](references/typescript.md) |
 | Call/list tools on a remote MCP server | [mcp-client](references/mcp-client.md) |
 | Validate or render behavioral HTML | [html](references/html.md) |
 | Read a local skill or its bundled files | [skill-client](references/skill-client.md) |

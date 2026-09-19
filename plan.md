@@ -149,6 +149,27 @@ ingress + a plugin-shipped behavior surface.
 
 ## Decision Log
 
+### 2026-09-19 — git + typescript fleet tools deleted; the fleet is 21
+
+- **Pilot's ruling, on the analysis + TS7 research.** git.ts (4 tools):
+  structure-over-stable-porcelain that modern models compose directly
+  through the tools shell worker (one `tool_call` script replaces
+  git-context; fleet tools are reached THROUGH the shell anyway). 
+  typescript.ts (2 tools): rode `typescript/unstable/*` — a surface
+  Microsoft replaces with a new API in 7.1 (Nov 24, 2026); nothing depends
+  on it before then, and a TS LSP satellite (long-lived `tsc --lsp --stdio`
+  session, standard LSP, own event family) is the right rebuild shape when
+  a consumer exists. Users needing either get there via skills or threads
+  instructing shell/LSP usage — not compiled fleet tools.
+- **CLI spec re-homed:** the git/typescript-backed tests (schema
+  addressing, invocation, dry-run, reject-path) moved onto surviving
+  tools (skill-read, skill-discover, html-validate-and-escape). One test
+  died without a subject: input-defaults-at-dispatch (no surviving tool
+  declares an input default) — returns when one does.
+- **AGENTS.md corrected:** fleet count was stale (said 29; live was 27
+  before this cut, 21 after).
+
+
 ### 2026-09-19 — process layer moves to src/workers/; useBehavioral → useWorkers
 
 - **Pilot's call, verified against the import graph and executed.** The wire's
@@ -1456,6 +1477,27 @@ repo and risks staleness.
 
 ## Open Questions
 
+- **Resolved 2026-09-19 (pilot): both families deleted.** git: superseded by
+  capable models composing porcelain through the shell worker. typescript:
+  scheduled to expire with 7.1's new-and-different API anyway, nothing is
+  prod-ready before November, and a TS LSP satellite can be rebuilt later
+  against the stable API or `tsc --lsp --stdio` when a consumer exists —
+  agents reach either via skills/threads instructing usage, not fleet tools.
+  Fleet 27 -> 21.
+
+  **TS7 research (2026-09-19, cited):** the repo pins typescript 7.0.2, so
+  typescript.ts already rides the 7.0 `typescript/unstable/*` surface —
+  which Microsoft publicly replaces with "a new (and different) API" in
+  7.1 (official iteration plan: Beta Oct 6, RC Nov 10, Stable Nov 24,
+  2026). The API-tax is therefore a scheduled break, not a risk. Mitigating
+  fact: TS7 ships a first-party LSP server (`tsc --lsp --stdio`,
+  hover/definition/references/completion/rename; tsserver.js is gone and
+  typescript-language-server is superseded). Clean replacement shape: a
+  stateful LSP satellite family (long-lived session, standard LSP, async
+  → cancel) rather than the one-shot fleet tool. Updated recommendation:
+  hold typescript.ts until 7.1, then either port the 4 handlers to the
+  stable API or re-cut as the LSP satellite — decided by whether a
+  consumer exists by then.
 - **Thread-authoring surface (gates the turn-loop proof).** Raw events vs
   thin factories in `src/threads/`; id-minting convention (`ueid`, prefix);
   where model input comes from. Settle by writing the re-cut raw and extracting

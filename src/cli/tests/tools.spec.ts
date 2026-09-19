@@ -24,12 +24,8 @@ describe('behavioral tools', () => {
 
     expect(code).toBe(0)
     expect(stderr).toContain('Usage: tools')
-    expect(stderr).toContain('git-status')
-    expect(stderr).toContain('git-history')
-    expect(stderr).toContain('git-worktrees')
-    expect(stderr).toContain('git-context')
-    expect(stderr).toContain('typescript-execute')
-    expect(stderr).toContain('typescript-discover')
+    expect(stderr).toContain('html-render')
+    expect(stderr).toContain('mcp-discover')
     expect(stderr).toContain('plugin-client')
     expect(stderr).toContain('skill-extract-links')
     expect(stderr).toContain('skill-validate-links')
@@ -42,28 +38,29 @@ describe('behavioral tools', () => {
     const output = JSON.parse(stdout)
     expect(output.command).toBe('tools')
     expect(Array.isArray(output.tools)).toBe(true)
-    expect(output.tools.length).toBeGreaterThanOrEqual(32)
-    const gitHistory = output.tools.find((t: { name: string }) => t.name === 'git-history')
-    expect(gitHistory?.description).toBeString()
+    expect(output.tools.length).toBeGreaterThanOrEqual(20)
+    const skillDiscover = output.tools.find((t: { name: string }) => t.name === 'skill-discover')
+    expect(skillDiscover?.description).toBeString()
     const names = output.tools.map((t: { name: string }) => t.name)
     expect(new Set(names).size).toBe(names.length)
   })
 
-  test('--schema input --tool git-history resolves the tool input schema', async () => {
-    const { code, stdout } = await runTools(['--schema', 'input', '--tool', 'git-history'])
+  test('--schema input --tool skill-read resolves the tool input schema', async () => {
+    const { code, stdout } = await runTools(['--schema', 'input', '--tool', 'skill-read'])
 
     expect(code).toBe(0)
     const schema = JSON.parse(stdout)
-    expect(schema.properties).toHaveProperty('base')
-    expect(schema.properties).toHaveProperty('paths')
+    expect(schema.properties).toHaveProperty('cwd')
+    expect(schema.properties).toHaveProperty('location')
   })
 
-  test('--schema output --tool typescript-lsp-discover resolves the tool output schema', async () => {
-    const { code, stdout } = await runTools(['--schema', 'output', '--tool', 'typescript-discover'])
+  test('--schema output --tool skill-discover resolves the tool output schema', async () => {
+    const { code, stdout } = await runTools(['--schema', 'output', '--tool', 'skill-discover'])
 
     expect(code).toBe(0)
     const schema = JSON.parse(stdout)
-    expect(schema.properties).toHaveProperty('capabilities')
+    expect(schema.properties).toHaveProperty('skills')
+    expect(schema.properties).toHaveProperty('warnings')
   })
 
   test('--schema input without --tool prints the dispatch envelope schema', async () => {
@@ -83,23 +80,18 @@ describe('behavioral tools', () => {
   })
 
   test('invokes a tool by name and prints its validated output', async () => {
-    const { code, stdout } = await runTools([JSON.stringify({ tool: 'typescript-discover', input: {} })])
-
-    expect(code).toBe(0)
-    const output = JSON.parse(stdout)
-    expect(output.capabilities.length).toBeGreaterThan(0)
-  })
-
-  test('applies declared input defaults at dispatch (git-history)', async () => {
     const { code, stdout } = await runTools([
-      JSON.stringify({ tool: 'git-history', input: { cwd: repoRoot, base: 'dev' } }),
+      JSON.stringify({ tool: 'html-validate-and-escape', input: { html: '<p>hello</p>' } }),
     ])
 
     expect(code).toBe(0)
     const output = JSON.parse(stdout)
-    expect(output.paths).toEqual([])
-    expect(output.summary.commitCountSinceBase).toBeGreaterThanOrEqual(0)
+    expect(output.html).toContain('<p>hello</p>')
+    expect(output.isError ?? false).toBe(false)
   })
+
+  // NOTE: the input-defaults-at-dispatch test died with the git tools — no
+  // surviving fleet tool declares an input default. It returns when one does.
 
   test('rejects an unknown tool name with exit 2', async () => {
     const { code } = await runTools([JSON.stringify({ tool: 'nope', input: {} })])
@@ -108,20 +100,23 @@ describe('behavioral tools', () => {
   })
 
   test('rejects input that fails the named tool input schema with exit 2', async () => {
-    const { code, stderr } = await runTools([JSON.stringify({ tool: 'git-history', input: { cwd: repoRoot } })])
+    const { code, stderr } = await runTools([JSON.stringify({ tool: 'skill-read', input: { cwd: repoRoot } })])
 
     expect(code).toBe(2)
     expect(stderr).toContain('required')
   })
 
   test('--dry-run prints the dispatch envelope without executing', async () => {
-    const { code, stdout } = await runTools([JSON.stringify({ tool: 'typescript-discover', input: {} }), '--dry-run'])
+    const { code, stdout } = await runTools([
+      JSON.stringify({ tool: 'html-validate-and-escape', input: { html: '<p>hi</p>' } }),
+      '--dry-run',
+    ])
 
     expect(code).toBe(0)
     const output = JSON.parse(stdout)
     expect(output).toEqual({
       command: 'tools',
-      input: { tool: 'typescript-discover', input: {} },
+      input: { tool: 'html-validate-and-escape', input: { html: '<p>hi</p>' } },
       dryRun: true,
     })
   })
