@@ -64,6 +64,22 @@ export type WorkerErrorEvent = {
   space?: string
 }
 
+/** Frontier operations — its own worker family, like the responses client. */
+export type FrontierOp = 'replay' | 'explore' | 'verify'
+
+export type FrontierRequestEvent = {
+  type: typeof WORKER_MESSAGE_KINDS.frontier_request
+  /** `op` selects the analysis; the worker shares no event types with the tools family. */
+  detail: { id: string; op: FrontierOp; input: JsonObject }
+  space?: string
+}
+
+export type FrontierRequestResultEvent = {
+  type: typeof WORKER_MESSAGE_KINDS.frontier_request_result
+  detail: { id: string; result: JsonObject }
+  space?: string
+}
+
 /** Union of every event the router can move between ports. @public */
 export type WorkerEvent =
   | ResponseRequestEvent
@@ -72,6 +88,8 @@ export type WorkerEvent =
   | ToolCallEvent
   | ToolCallResultEvent
   | ToolCancelEvent
+  | FrontierRequestEvent
+  | FrontierRequestResultEvent
   | WorkerErrorEvent
 
 const jsonObjectSchema = { type: 'object', required: [], additionalProperties: true } as const
@@ -194,4 +212,44 @@ export const validateResponseCancelEvent = ajv.compile(ResponseCancelEventSchema
 export const validateToolCallEvent = ajv.compile(ToolCallEventSchema)
 export const validateToolCallResultEvent = ajv.compile(ToolCallResultEventSchema)
 export const validateToolCancelEvent = ajv.compile(ToolCancelEventSchema)
+// No frontier cancel event: analyses are synchronous — nothing is in flight
+// to abort (the async families keep their cancels).
+export const FrontierRequestEventSchema: JSONSchemaType<FrontierRequestEvent> = {
+  type: 'object',
+  properties: {
+    type: { type: 'string', const: WORKER_MESSAGE_KINDS.frontier_request },
+    detail: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', minLength: 1 },
+        op: { type: 'string', enum: ['replay', 'explore', 'verify'] },
+        input: jsonObjectSchema,
+      },
+      required: ['id', 'op', 'input'],
+      additionalProperties: false,
+    },
+    space: { type: 'string', nullable: true },
+  },
+  required: ['type', 'detail'],
+  additionalProperties: false,
+}
+
+export const FrontierRequestResultEventSchema: JSONSchemaType<FrontierRequestResultEvent> = {
+  type: 'object',
+  properties: {
+    type: { type: 'string', const: WORKER_MESSAGE_KINDS.frontier_request_result },
+    detail: {
+      type: 'object',
+      properties: { id: { type: 'string', minLength: 1 }, result: jsonObjectSchema },
+      required: ['id', 'result'],
+      additionalProperties: false,
+    },
+    space: { type: 'string', nullable: true },
+  },
+  required: ['type', 'detail'],
+  additionalProperties: false,
+}
+
 export const validateWorkerErrorEvent = ajv.compile(WorkerErrorEventSchema)
+export const validateFrontierRequestEvent = ajv.compile(FrontierRequestEventSchema)
+export const validateFrontierRequestResultEvent = ajv.compile(FrontierRequestResultEventSchema)

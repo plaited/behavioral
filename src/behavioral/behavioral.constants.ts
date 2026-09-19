@@ -59,5 +59,7 @@ export const WORKER_MESSAGE_KINDS = keyMirror(
   'tool_call',
   'tool_call_result',
   'tool_cancel',
+  'frontier_request',
+  'frontier_request_result',
   'worker_error',
 )

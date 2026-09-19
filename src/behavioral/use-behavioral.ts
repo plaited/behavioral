@@ -1,6 +1,8 @@
 import { TRACE_MESSAGE_KINDS, WORKER_MESSAGE_KINDS } from './behavioral.constants.ts'
 import type { BPEvent, JsonObject, Thread, Trace, TraceListener, Trigger } from './behavioral.types.ts'
 import {
+  validateFrontierRequestEvent,
+  validateFrontierRequestResultEvent,
   validateResponseCancelEvent,
   validateResponseRequestEvent,
   validateResponseRequestResultEvent,
@@ -56,19 +58,16 @@ export const useBehavioral = ({
     behavioralWorker.postMessage({ kind: WORKER_MESSAGE_KINDS.add_threads, threads: newThreads })
 
   // The router's only family knowledge: which port an event type routes to.
-  // Tool-calling is two-level: every tool shares the `tool_call` event type, so
-  // satellite tools (frontier) are discriminated by `detail.tool` and fall
-  // back to the tools worker. Cancels carry only an id — they cannot be
-  // attributed to a satellite tool and land on the tools port, where an
-  // unknown id is a no-op (frontier analyses are synchronous and cannot be
-  // canceled mid-run anyway).
+  // Each worker family owns its event types (response_*, tool_*, frontier_*),
+  // so routing is one lookup on the type. Cancels exist only for the async
+  // families (model calls, shell runs); frontier analyses are synchronous and
+  // have no cancel.
   const routes: Record<string, Worker> = {
     [WORKER_MESSAGE_KINDS.response_request]: responsesClientWorker,
     [WORKER_MESSAGE_KINDS.response_cancel]: responsesClientWorker,
     [WORKER_MESSAGE_KINDS.tool_call]: toolsClientWorker,
     [WORKER_MESSAGE_KINDS.tool_cancel]: toolsClientWorker,
   }
-  const toolRoutes: Record<string, Worker> = {}
 
   const reenter = (message: { type: string; detail: JsonObject & { id: string }; space?: string }): void => {
     addThreads([
@@ -81,9 +80,13 @@ export const useBehavioral = ({
     ])
   }
 
-  // Both tool-speaking satellites post tool_call_result events.
+  // Satellites post their family's result event; each re-enters as a thread.
   const onToolCallResult = ({ data }: MessageEvent): void => {
     if (!validateToolCallResultEvent(data)) return
+    reenter(data)
+  }
+  const onFrontierResult = ({ data }: MessageEvent): void => {
+    if (!validateFrontierRequestResultEvent(data)) return
     reenter(data)
   }
 
@@ -95,14 +98,14 @@ export const useBehavioral = ({
     // worker processes: only schema-valid events route.
     const candidate = data.selected
     const event = { type: candidate.type, detail: candidate.detail, space: candidate.space }
-    const tool = event.type === WORKER_MESSAGE_KINDS.tool_call ? (event.detail as { tool?: string }).tool : undefined
-    const port = (tool === undefined ? undefined : toolRoutes[tool]) ?? routes[event.type]
+    const port = routes[event.type]
     if (port === undefined) return
     if (
       !validateResponseRequestEvent(event) &&
       !validateToolCallEvent(event) &&
       !validateResponseCancelEvent(event) &&
-      !validateToolCancelEvent(event)
+      !validateToolCancelEvent(event) &&
+      !validateFrontierRequestEvent(event)
     ) {
       return
     }
@@ -141,13 +144,12 @@ export const useBehavioral = ({
   toolsClientWorker.onerror = onCrash('tools-client')
 
   // The frontier satellite is optional: hosts without one simply have no
-  // frontier tool routes, and a frontier tool_call falls back to the tools
-  // worker (which reports `invalid input` for an unknown tool name).
+  // frontier route, and a frontier_request stays unrouted (the requesting
+  // thread waits — a program should not request frontier events it did not
+  // wire a worker for, same as any unknown event type).
   if (frontierWorker !== undefined) {
-    for (const tool of ['frontier-replay', 'frontier-explore', 'frontier-verify']) {
-      toolRoutes[tool] = frontierWorker
-    }
-    frontierWorker.onmessage = onToolCallResult
+    routes[WORKER_MESSAGE_KINDS.frontier_request] = frontierWorker
+    frontierWorker.onmessage = onFrontierResult
     frontierWorker.onerror = onCrash('frontier')
   }
 

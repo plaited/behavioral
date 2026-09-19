@@ -209,7 +209,7 @@ describe('useBehavioral router', () => {
     responsesClientWorker.terminate()
   })
 
-  test('routes frontier tool_calls to the frontier worker port', async () => {
+  test('routes frontier_requests to the frontier worker port', async () => {
     const traces: Trace[] = []
     // A mis-route to the tools port would crash it — the crash fixture makes
     // wrong routing fail loudly instead of silently succeeding.
@@ -224,11 +224,11 @@ describe('useBehavioral router', () => {
           rules: [
             {
               request: {
-                type: WORKER_MESSAGE_KINDS.tool_call,
-                detail: { id: 'f1', tool: 'frontier-explore', input: { threads: [], maxDepth: 1 } },
+                type: WORKER_MESSAGE_KINDS.frontier_request,
+                detail: { id: 'f1', op: 'explore', input: { threads: [], maxDepth: 1 } },
               },
             },
-            { waitFor: [{ type: WORKER_MESSAGE_KINDS.tool_call_result, detailSchema: idSchema('f1') }] },
+            { waitFor: [{ type: WORKER_MESSAGE_KINDS.frontier_request_result, detailSchema: idSchema('f1') }] },
           ],
         },
       ],
@@ -240,8 +240,8 @@ describe('useBehavioral router', () => {
       frontierWorker,
       useTrigger: () => {},
     })
-    await waitForTraces(traces, (s) => s.some((t) => t.selected.type === WORKER_MESSAGE_KINDS.tool_call_result))
-    const result = selectionsOf(traces).find((t) => t.selected.type === WORKER_MESSAGE_KINDS.tool_call_result)
+    await waitForTraces(traces, (s) => s.some((t) => t.selected.type === WORKER_MESSAGE_KINDS.frontier_request_result))
+    const result = selectionsOf(traces).find((t) => t.selected.type === WORKER_MESSAGE_KINDS.frontier_request_result)
     expect((result?.selected.detail as { id?: string } | undefined)?.id).toBe('f1')
     engineWorker.terminate()
     toolsClientWorker.terminate()

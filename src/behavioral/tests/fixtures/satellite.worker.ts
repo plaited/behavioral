@@ -1,15 +1,16 @@
 /*
- * Test fixture: stub satellite speaking the behavioral event wire for both
- * worker families. Echoes a deterministic result for tool_call and
- * response_request (with the request's space echoed back), and reports cancel
- * receipt through the result channel with a `cancel-` prefixed id so specs
- * can observe cancel routing without real in-flight state.
+ * Test fixture: stub satellite speaking the behavioral event wire for all
+ * three worker families. Echoes a deterministic result for tool_call,
+ * response_request, and frontier_request (with the request's space echoed
+ * back), and reports cancel receipt through the result channel with a
+ * `cancel-` prefixed id so specs can observe cancel routing without real
+ * in-flight state.
  */
 import { WORKER_MESSAGE_KINDS } from '../../behavioral.constants.ts'
 
 type InboundEvent = {
   type: string
-  detail: { id: string; input?: { script?: unknown } }
+  detail: { id: string; op?: string; input?: { script?: unknown } }
   space?: string
 }
 
@@ -25,6 +26,12 @@ self.onmessage = ({ data }: MessageEvent<InboundEvent>): void => {
     self.postMessage({
       type: WORKER_MESSAGE_KINDS.response_request_result,
       detail: { id: data.detail.id, result: { items: [], status: 'completed' } },
+      ...space,
+    })
+  } else if (data.type === WORKER_MESSAGE_KINDS.frontier_request) {
+    self.postMessage({
+      type: WORKER_MESSAGE_KINDS.frontier_request_result,
+      detail: { id: data.detail.id, result: { analysis: data.detail.op } },
       ...space,
     })
   } else if (data.type === WORKER_MESSAGE_KINDS.tool_cancel) {

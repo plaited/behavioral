@@ -4,10 +4,13 @@
  *
  * @remarks
  * Spawned by URL (never imported) and speaks the behavioral event wire:
- * `tool_call` events in (dispatched by `detail.tool`: frontier-replay /
- * frontier-explore / frontier-verify), one `tool_call_result` out with the
- * request `space` echoed. The analysis engine below is the former fleet tool
- * implementation, moved wholesale; only the boundary changed.
+ * `frontier_request` events in (dispatched by `detail.op`: replay / explore /
+ * verify), one `frontier_request_result` out with the request `space`
+ * echoed. Frontier is its own worker family, like the responses client — it
+ * shares no event types with the tools family, and needs no cancel event:
+ * analyses are synchronous, nothing is in flight to abort. The analysis
+ * engine below is the former fleet tool implementation, moved wholesale;
+ * only the boundary changed.
  *
  * Self-analysis is safe by construction: the trace a caller passes is a frozen
  * postMessage payload, this worker's simulation state is private, and its own
@@ -45,7 +48,7 @@ import {
   resumePendingThreadsForSelectedEvent,
   useThread,
 } from '../behavioral/behavioral.utils.ts'
-import { type ToolCallEvent, validateToolCallEvent } from '../behavioral/use-behavioral.types.ts'
+import { type FrontierRequestEvent, validateFrontierRequestEvent } from '../behavioral/use-behavioral.types.ts'
 import { ueid } from '../utils.ts'
 
 // ---------------------------------------------------------------------------
@@ -913,8 +916,8 @@ const verifyFrontiersRaw = ({ progress, ...args }: VerifyFrontiersArgs): VerifyF
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// Input boundary — the three tools' input schemas (moved from the fleet
-// wrapper; the worker compiles them and validates `detail.input` here)
+// Input boundary — the three operations' input schemas (moved from the
+// fleet wrapper; the worker compiles them and validates `detail.input` here)
 // ---------------------------------------------------------------------------
 // threads — structural (label + rules); idiom internals permissive so a
 // caller's detailSchema (JSON Schema) reaches the runtime validator verbatim
@@ -1182,7 +1185,7 @@ export const FrontierVerifyInputSchema = {
 
 const postResult = ({ id, result, space }: { id: string; result: unknown; space?: string }): void => {
   self.postMessage({
-    type: WORKER_MESSAGE_KINDS.tool_call_result,
+    type: WORKER_MESSAGE_KINDS.frontier_request_result,
     detail: { id, result },
     ...(space === undefined ? {} : { space }),
   })
@@ -1198,8 +1201,8 @@ type ToolRunner = {
   run: (input: never) => unknown
 }
 
-const TOOL_RUNNERS: Record<string, ToolRunner> = {
-  'frontier-replay': {
+const OP_RUNNERS: Record<string, ToolRunner> = {
+  replay: {
     validate: validateReplayInput,
     errors: () => ajv.errorsText(validateReplayInput.errors),
     run: ({ threads, messages, space, instanceId }: FrontierReplayInput): FrontierReplayOutput => {
@@ -1217,7 +1220,7 @@ const TOOL_RUNNERS: Record<string, ToolRunner> = {
       }
     },
   },
-  'frontier-explore': {
+  explore: {
     validate: validateExploreInput,
     errors: () => ajv.errorsText(validateExploreInput.errors),
     run: ({
@@ -1261,7 +1264,7 @@ const TOOL_RUNNERS: Record<string, ToolRunner> = {
       }
     },
   },
-  'frontier-verify': {
+  verify: {
     validate: validateVerifyInput,
     errors: () => ajv.errorsText(validateVerifyInput.errors),
     run: ({
@@ -1314,12 +1317,12 @@ const TOOL_RUNNERS: Record<string, ToolRunner> = {
 // raw analysis functions throw; every throw is caught and posted as
 // { isError, message } data, so a throw never crosses the process boundary.
 const handleInbound = (message: unknown): void => {
-  if (!validateToolCallEvent(message)) return
-  const event = message as ToolCallEvent
-  const { id, tool, input } = event.detail
-  const runner = TOOL_RUNNERS[tool]
+  if (!validateFrontierRequestEvent(message)) return
+  const event = message as FrontierRequestEvent
+  const { id, op, input } = event.detail
+  const runner = OP_RUNNERS[op]
   if (runner === undefined) {
-    postResult({ id, result: { isError: true, message: `unknown frontier tool: ${tool}` }, space: event.space })
+    postResult({ id, result: { isError: true, message: `unknown frontier operation: ${op}` }, space: event.space })
     return
   }
   if (!runner.validate(input)) {

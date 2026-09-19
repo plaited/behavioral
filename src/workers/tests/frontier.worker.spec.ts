@@ -24,14 +24,14 @@ const spawnFrontierWorker = () => {
   const results: WireResult[] = []
   worker.onmessage = ({ data }: MessageEvent): void => {
     const message = data as { type?: string; detail?: { id: string; result: unknown }; space?: string }
-    if (message?.type === WORKER_MESSAGE_KINDS.tool_call_result && message.detail !== undefined) {
+    if (message?.type === WORKER_MESSAGE_KINDS.frontier_request_result && message.detail !== undefined) {
       results.push({ id: message.detail.id, result: message.detail.result, space: message.space })
     }
   }
-  const call = (id: string, tool: string, input: unknown, space?: string): void => {
+  const call = (id: string, op: string, input: unknown, space?: string): void => {
     worker.postMessage({
-      type: WORKER_MESSAGE_KINDS.tool_call,
-      detail: { id, tool, input },
+      type: WORKER_MESSAGE_KINDS.frontier_request,
+      detail: { id, op, input },
       ...(space === undefined ? {} : { space }),
     })
   }
@@ -78,10 +78,10 @@ const threads: Thread[] = [
 ]
 
 describe('frontier worker — event wire', () => {
-  test('a tool_call returns one tool_call_result carrying the id', async () => {
+  test('a frontier_request returns one frontier_request_result carrying the id', async () => {
     const frontier = spawnFrontierWorker()
     try {
-      frontier.call('r0', 'frontier-replay', { threads })
+      frontier.call('r0', 'replay', { threads })
       const { id, result } = await frontier.resultFor('r0')
       expect(id).toBe('r0')
       expect((result as ReplayResult).isError).toBeFalsy()
@@ -93,7 +93,7 @@ describe('frontier worker — event wire', () => {
   test('a request space is echoed on the result event', async () => {
     const frontier = spawnFrontierWorker()
     try {
-      frontier.call('r0', 'frontier-replay', { threads }, 's1')
+      frontier.call('r0', 'replay', { threads }, 's1')
       const { space } = await frontier.resultFor('r0')
       expect(space).toBe('s1')
     } finally {
@@ -104,7 +104,7 @@ describe('frontier worker — event wire', () => {
   test('input failing the boundary schema is error data', async () => {
     const frontier = spawnFrontierWorker()
     try {
-      frontier.call('r0', 'frontier-replay', { messages: [] }) // threads required
+      frontier.call('r0', 'replay', { messages: [] }) // threads required
       const { result } = await frontier.resultFor('r0')
       expect((result as { isError?: boolean }).isError).toBe(true)
       expect((result as { message?: string }).message).toContain('invalid input')
@@ -113,20 +113,22 @@ describe('frontier worker — event wire', () => {
     }
   })
 
-  test('an unknown tool name is error data', async () => {
+  test('an operation outside the schema enum is dropped at the trust boundary — no result', async () => {
     const frontier = spawnFrontierWorker()
     try {
-      frontier.call('r0', 'frontier-nonsense', { threads })
-      const { result } = await frontier.resultFor('r0')
-      expect((result as { isError?: boolean }).isError).toBe(true)
-      expect((result as { message?: string }).message).toContain('unknown frontier tool')
+      // 'bogus' fails the event schema (op is enum-constrained), so the worker
+      // drops it before the runner lookup: nothing to correlate a result to.
+      frontier.call('r0', 'bogus', { threads })
+      frontier.call('r1', 'replay', { threads })
+      const { id } = await frontier.resultFor('r1')
+      expect(id).toBe('r1')
     } finally {
       frontier.terminate()
     }
   })
 })
 
-describe('frontier-replay', () => {
+describe('replay', () => {
   test('replays a known selection trace, returning frontier + stateKey + pendingCount', async () => {
     const frontier = spawnFrontierWorker()
     try {
@@ -139,7 +141,7 @@ describe('frontier-replay', () => {
           selected: { priority: 0, type: 'tick' },
         },
       ]
-      frontier.call('r1', 'frontier-replay', { threads, messages })
+      frontier.call('r1', 'replay', { threads, messages })
       const { result } = await frontier.resultFor('r1')
       const replay = result as ReplayResult
 
@@ -164,7 +166,7 @@ describe('frontier-replay', () => {
     const frontier = spawnFrontierWorker()
     try {
       const idleThreads: Thread[] = [{ label: 'quiet', rules: [{ waitFor: [{ type: 'never' }] }], once: true }]
-      frontier.call('r1', 'frontier-replay', { threads: idleThreads })
+      frontier.call('r1', 'replay', { threads: idleThreads })
       const { result } = await frontier.resultFor('r1')
       const replay = result as ReplayResult
       expect(replay.frontier!.status).toBe('idle')
@@ -182,7 +184,7 @@ describe('frontier-replay', () => {
         { label: 'requester', rules: [{ request: { type: 'a' } }] },
         { label: 'blocker', rules: [{ block: [{ type: 'a' }] }] },
       ]
-      frontier.call('r1', 'frontier-replay', { threads: blockedThreads })
+      frontier.call('r1', 'replay', { threads: blockedThreads })
       const { result } = await frontier.resultFor('r1')
       const replay = result as ReplayResult
       expect(replay.frontier!.status).toBe('deadlock')
@@ -195,7 +197,7 @@ describe('frontier-replay', () => {
   test('handles empty trace messages', async () => {
     const frontier = spawnFrontierWorker()
     try {
-      frontier.call('r1', 'frontier-replay', { threads })
+      frontier.call('r1', 'replay', { threads })
       const { result } = await frontier.resultFor('r1')
       const replay = result as ReplayResult
       expect(replay.frontier!.status).toBe('ready')
@@ -219,7 +221,7 @@ describe('frontier-replay', () => {
           selected: { priority: 0, type: 'nope' },
         },
       ]
-      frontier.call('r1', 'frontier-replay', { threads, messages })
+      frontier.call('r1', 'replay', { threads, messages })
       const { result } = await frontier.resultFor('r1')
       const replay = result as ReplayResult
       expect(replay.isError).toBe(true)
@@ -233,14 +235,14 @@ describe('frontier-replay', () => {
   })
 })
 
-describe('frontier-explore', () => {
+describe('explore', () => {
   test('wakes transform-parked threads via matching triggers', async () => {
     const frontier = spawnFrontierWorker()
     try {
       const transformThreads: Thread[] = [
         { label: 'shaper', rules: [{ transform: [{ type: 'raw', query: '.', target: 'shaped' }] }] },
       ]
-      frontier.call('e1', 'frontier-explore', { threads: transformThreads, triggers: [{ type: 'raw' }], maxDepth: 50 })
+      frontier.call('e1', 'explore', { threads: transformThreads, triggers: [{ type: 'raw' }], maxDepth: 50 })
       const { result } = await frontier.resultFor('e1')
       const explore = result as ExploreResult
       // JSON boundary: stateGraph is a plain object keyed by stateKey (not a Map);
@@ -261,7 +263,7 @@ describe('frontier-explore', () => {
       const transformThreads: Thread[] = [
         { label: 'shaper', rules: [{ transform: [{ type: 'raw', query: '.', target: 'shaped' }] }] },
       ]
-      frontier.call('e1', 'frontier-explore', {
+      frontier.call('e1', 'explore', {
         threads: transformThreads,
         triggers: [{ type: 'unrelated' }],
         maxDepth: 50,
@@ -277,7 +279,7 @@ describe('frontier-explore', () => {
   test('bfs explores reachable histories', async () => {
     const frontier = spawnFrontierWorker()
     try {
-      frontier.call('e1', 'frontier-explore', { threads, strategy: 'bfs', maxDepth: 3 })
+      frontier.call('e1', 'explore', { threads, strategy: 'bfs', maxDepth: 3 })
       const { result } = await frontier.resultFor('e1')
       const explore = result as ExploreResult
       expect(explore.report.visitedCount).toBeGreaterThan(0)
@@ -296,7 +298,7 @@ describe('frontier-explore', () => {
   test('dfs explores reachable histories', async () => {
     const frontier = spawnFrontierWorker()
     try {
-      frontier.call('e1', 'frontier-explore', { threads, strategy: 'dfs', maxDepth: 3 })
+      frontier.call('e1', 'explore', { threads, strategy: 'dfs', maxDepth: 3 })
       const { result } = await frontier.resultFor('e1')
       expect((result as ExploreResult).report.visitedCount).toBeGreaterThan(0)
     } finally {
@@ -311,7 +313,7 @@ describe('frontier-explore', () => {
         { label: 'requester', rules: [{ request: { type: 'a' } }] },
         { label: 'blocker', rules: [{ block: [{ type: 'a' }] }] },
       ]
-      frontier.call('e1', 'frontier-explore', { threads: deadlockThreads, maxDepth: 50 })
+      frontier.call('e1', 'explore', { threads: deadlockThreads, maxDepth: 50 })
       const { result } = await frontier.resultFor('e1')
       const explore = result as ExploreResult
       expect(explore.findings.length).toBeGreaterThan(0)
@@ -328,7 +330,7 @@ describe('frontier-explore', () => {
       // maxDepth is required (≥1 per the schema); a depth of 1 cuts off the
       // two-successor root of the ticker+worker program, so exploration is
       // truncated.
-      frontier.call('e1', 'frontier-explore', { threads, strategy: 'bfs', maxDepth: 1 })
+      frontier.call('e1', 'explore', { threads, strategy: 'bfs', maxDepth: 1 })
       const { result } = await frontier.resultFor('e1')
       const explore = result as ExploreResult
       expect(explore.report.truncated).toBe(true)
@@ -341,14 +343,14 @@ describe('frontier-explore', () => {
   test('selectionPolicy: scheduler limits to one enabled candidate per step', async () => {
     const frontier = spawnFrontierWorker()
     try {
-      frontier.call('e1', 'frontier-explore', {
+      frontier.call('e1', 'explore', {
         threads,
         strategy: 'bfs',
         selectionPolicy: 'scheduler',
         maxDepth: 3,
       })
       const scheduler = (await frontier.resultFor('e1')).result as ExploreResult
-      frontier.call('e2', 'frontier-explore', {
+      frontier.call('e2', 'explore', {
         threads,
         strategy: 'bfs',
         selectionPolicy: 'all-enabled',
@@ -369,7 +371,7 @@ describe('frontier-explore', () => {
       const waitingThreads: Thread[] = [
         { label: 'waiter', rules: [{ waitFor: [{ type: 'ping' }] }, { request: { type: 'ack' } }], once: true },
       ]
-      frontier.call('e1', 'frontier-explore', {
+      frontier.call('e1', 'explore', {
         threads: waitingThreads,
         triggers: [{ type: 'ping' }],
         strategy: 'bfs',
@@ -392,7 +394,7 @@ describe('frontier-explore', () => {
     const frontier = spawnFrontierWorker()
     try {
       const blockingThreads: Thread[] = [{ label: 'blocker', rules: [{ block: [{ type: 'signal' }] }], once: true }]
-      frontier.call('e1', 'frontier-explore', {
+      frontier.call('e1', 'explore', {
         threads: blockingThreads,
         triggers: [{ type: 'signal' }],
         strategy: 'bfs',
@@ -406,11 +408,11 @@ describe('frontier-explore', () => {
   })
 })
 
-describe('frontier-verify', () => {
+describe('verify', () => {
   test('returns verified for deadlock-free threads', async () => {
     const frontier = spawnFrontierWorker()
     try {
-      frontier.call('v1', 'frontier-verify', { threads, strategy: 'bfs', maxDepth: 3 })
+      frontier.call('v1', 'verify', { threads, strategy: 'bfs', maxDepth: 3 })
       const { result } = await frontier.resultFor('v1')
       const verify = result as VerifyResult
       expect(verify.isError === undefined || verify.isError === null).toBe(true)
@@ -429,7 +431,7 @@ describe('frontier-verify', () => {
         { label: 'requester', rules: [{ request: { type: 'a' } }] },
         { label: 'blocker', rules: [{ block: [{ type: 'a' }] }] },
       ]
-      frontier.call('v1', 'frontier-verify', { threads: deadlockThreads, maxDepth: 50 })
+      frontier.call('v1', 'verify', { threads: deadlockThreads, maxDepth: 50 })
       const { result } = await frontier.resultFor('v1')
       const verify = result as VerifyResult
       expect(verify.status).toBe('failed')
@@ -443,7 +445,7 @@ describe('frontier-verify', () => {
     const frontier = spawnFrontierWorker()
     try {
       // maxDepth ≥1 per the schema; depth 1 truncates the two-successor root.
-      frontier.call('v1', 'frontier-verify', { threads, strategy: 'bfs', maxDepth: 1 })
+      frontier.call('v1', 'verify', { threads, strategy: 'bfs', maxDepth: 1 })
       const { result } = await frontier.resultFor('v1')
       expect((result as VerifyResult).status).toBe('truncated')
     } finally {
@@ -457,7 +459,7 @@ describe('frontier-verify', () => {
       // A ticker requesting `tick` forever. progress=['succeeded'] — the cycle
       // never selects `succeeded` → livelock → failed.
       const looping: Thread[] = [{ label: 'ticker', rules: [{ request: { type: 'tick' } }] }]
-      frontier.call('v1', 'frontier-verify', { threads: looping, progress: ['succeeded'], maxDepth: 50 })
+      frontier.call('v1', 'verify', { threads: looping, progress: ['succeeded'], maxDepth: 50 })
       const { result } = await frontier.resultFor('v1')
       const verify = result as VerifyResult
       expect(verify.status).toBe('failed')
@@ -475,7 +477,7 @@ describe('frontier-verify', () => {
       // A ticker requesting `done` forever. progress=['done'] → the cycle DOES
       // select a progress event → not a livelock → verified.
       const looping: Thread[] = [{ label: 'ticker', rules: [{ request: { type: 'done' } }] }]
-      frontier.call('v1', 'frontier-verify', { threads: looping, progress: ['done'], maxDepth: 50 })
+      frontier.call('v1', 'verify', { threads: looping, progress: ['done'], maxDepth: 50 })
       const { result } = await frontier.resultFor('v1')
       const verify = result as VerifyResult
       expect(verify.status).toBe('verified')
@@ -491,7 +493,7 @@ describe('frontier-verify', () => {
       // Same looping ticker, no progress spec. No deadlock, not truncated →
       // verified, livelocks empty (not checked).
       const looping: Thread[] = [{ label: 'ticker', rules: [{ request: { type: 'tick' } }] }]
-      frontier.call('v1', 'frontier-verify', { threads: looping, maxDepth: 50 })
+      frontier.call('v1', 'verify', { threads: looping, maxDepth: 50 })
       const { result } = await frontier.resultFor('v1')
       const verify = result as VerifyResult
       expect(verify.status).toBe('verified')
@@ -506,7 +508,7 @@ describe('frontier-verify', () => {
     try {
       // progress=[] → nothing counts as progress → any cycle is a livelock.
       const looping: Thread[] = [{ label: 'ticker', rules: [{ request: { type: 'done' } }] }]
-      frontier.call('v1', 'frontier-verify', { threads: looping, progress: [], maxDepth: 50 })
+      frontier.call('v1', 'verify', { threads: looping, progress: [], maxDepth: 50 })
       const { result } = await frontier.resultFor('v1')
       const verify = result as VerifyResult
       expect(verify.status).toBe('failed')
@@ -533,7 +535,7 @@ describe('frontier-explore state-keyed dedup (real programs)', () => {
       // state and exploration stops well before maxDepth — proving
       // termination via dedup, not a depth cutoff.
       const looping: Thread[] = [{ label: 'ticker', rules: [{ request: { type: 'tick' } }] }]
-      frontier.call('l1', 'frontier-explore', { threads: looping, strategy: 'bfs', maxDepth: 100 })
+      frontier.call('l1', 'explore', { threads: looping, strategy: 'bfs', maxDepth: 100 })
       const result = (await frontier.resultFor('l1')).result as ExploreResult
       expect(result.report.truncated).toBe(false)
       // One distinct state: the single pending bid requesting `tick`.
@@ -551,7 +553,7 @@ describe('frontier-explore state-keyed dedup (real programs)', () => {
       // Toggle: requests `on`, then `off`, then loops. Two distinct states
       // ({request on}, {request off}); the cycle closes back to the first.
       const toggle: Thread[] = [{ label: 'toggle', rules: [{ request: { type: 'on' } }, { request: { type: 'off' } }] }]
-      frontier.call('l1', 'frontier-explore', { threads: toggle, strategy: 'bfs', maxDepth: 100 })
+      frontier.call('l1', 'explore', { threads: toggle, strategy: 'bfs', maxDepth: 100 })
       const result = (await frontier.resultFor('l1')).result as ExploreResult
       expect(result.report.truncated).toBe(false)
       expect(result.report.visitedCount).toBe(2)
@@ -570,7 +572,7 @@ describe('frontier-explore state-keyed dedup (real programs)', () => {
         { label: 'requester', rules: [{ request: { type: 'a' } }] },
         { label: 'blocker', rules: [{ block: [{ type: 'a' }] }] },
       ]
-      frontier.call('l1', 'frontier-explore', { threads: blocked, strategy: 'bfs', maxDepth: 50 })
+      frontier.call('l1', 'explore', { threads: blocked, strategy: 'bfs', maxDepth: 50 })
       const result = (await frontier.resultFor('l1')).result as ExploreResult
       expect(result.findings.length).toBeGreaterThan(0)
       expect(result.findings[0]!.code).toBe('deadlock')
@@ -587,7 +589,7 @@ describe('frontier-explore state-keyed dedup (real programs)', () => {
         { label: 'ticker', rules: [{ request: { type: 'tick' } }], once: true },
         { label: 'worker', once: true, rules: [{ request: { type: 'start', detail: { id: 'job-1' } } }] },
       ]
-      frontier.call('l1', 'frontier-explore', { threads: finite, strategy: 'bfs', maxDepth: 3 })
+      frontier.call('l1', 'explore', { threads: finite, strategy: 'bfs', maxDepth: 3 })
       const result = (await frontier.resultFor('l1')).result as ExploreResult
       expect(result.report.visitedCount).toBeGreaterThan(0)
       expect(result.traces.length).toBe(result.report.visitedCount)
@@ -611,9 +613,9 @@ describe('frontier-explore state-keyed dedup (real programs)', () => {
       const program: Thread[] = [
         { label: 'toggle', rules: [{ request: { type: 'on' } }, { request: { type: 'off' } }] },
       ]
-      frontier.call('l1', 'frontier-explore', { threads: program, strategy: 'bfs', maxDepth: 50 })
+      frontier.call('l1', 'explore', { threads: program, strategy: 'bfs', maxDepth: 50 })
       const a = (await frontier.resultFor('l1')).result as ExploreResult
-      frontier.call('l2', 'frontier-explore', {
+      frontier.call('l2', 'explore', {
         threads: [{ label: 'other-label', rules: [{ request: { type: 'on' } }, { request: { type: 'off' } }] }],
         strategy: 'bfs',
         maxDepth: 50,
@@ -639,7 +641,7 @@ describe('frontier-explore state-keyed dedup (real programs)', () => {
       // handle this; a recursive impl would blow the stack.
       const rules = Array.from({ length: 60 }, (_, i) => ({ request: { type: `n${i}` } }))
       const ring: Thread[] = [{ label: 'ring', rules }]
-      frontier.call('l1', 'frontier-explore', { threads: ring, strategy: 'bfs', maxDepth: 500 })
+      frontier.call('l1', 'explore', { threads: ring, strategy: 'bfs', maxDepth: 500 })
       const result = (await frontier.resultFor('l1')).result as ExploreResult
       expect(result.report.truncated).toBe(false)
       expect(result.report.visitedCount).toBe(60)
@@ -654,7 +656,7 @@ describe('frontier-verify livelock integration (real programs)', () => {
     const frontier = spawnFrontierWorker()
     try {
       const looping: Thread[] = [{ label: 'ticker', rules: [{ request: { type: 'tick' } }] }]
-      frontier.call('l1', 'frontier-verify', { threads: looping, progress: ['succeeded'], maxDepth: 50 })
+      frontier.call('l1', 'verify', { threads: looping, progress: ['succeeded'], maxDepth: 50 })
       const result = (await frontier.resultFor('l1')).result as VerifyResult
       expect(result.status).toBe('failed')
       expect(result.livelocks).toHaveLength(1)
@@ -671,7 +673,7 @@ describe('frontier-verify livelock integration (real programs)', () => {
     const frontier = spawnFrontierWorker()
     try {
       const looping: Thread[] = [{ label: 'ticker', rules: [{ request: { type: 'done' } }] }]
-      frontier.call('l1', 'frontier-verify', { threads: looping, progress: ['done'], maxDepth: 50 })
+      frontier.call('l1', 'verify', { threads: looping, progress: ['done'], maxDepth: 50 })
       const result = (await frontier.resultFor('l1')).result as VerifyResult
       expect(result.status).toBe('verified')
       expect(result.livelocks).toHaveLength(0)
@@ -684,7 +686,7 @@ describe('frontier-verify livelock integration (real programs)', () => {
     const frontier = spawnFrontierWorker()
     try {
       const looping: Thread[] = [{ label: 'ticker', rules: [{ request: { type: 'tick' } }] }]
-      frontier.call('l1', 'frontier-verify', { threads: looping, maxDepth: 50 })
+      frontier.call('l1', 'verify', { threads: looping, maxDepth: 50 })
       const result = (await frontier.resultFor('l1')).result as VerifyResult
       expect(result.status).toBe('verified')
       expect(result.livelocks).toHaveLength(0)
@@ -697,7 +699,7 @@ describe('frontier-verify livelock integration (real programs)', () => {
     const frontier = spawnFrontierWorker()
     try {
       const looping: Thread[] = [{ label: 'ticker', rules: [{ request: { type: 'done' } }] }]
-      frontier.call('l1', 'frontier-verify', { threads: looping, progress: [], maxDepth: 50 })
+      frontier.call('l1', 'verify', { threads: looping, progress: [], maxDepth: 50 })
       const result = (await frontier.resultFor('l1')).result as VerifyResult
       expect(result.status).toBe('failed')
       expect(result.livelocks).toHaveLength(1)
@@ -713,7 +715,7 @@ describe('frontier-verify livelock integration (real programs)', () => {
         { label: 'requester', rules: [{ request: { type: 'a' } }] },
         { label: 'blocker', rules: [{ block: [{ type: 'a' }] }] },
       ]
-      frontier.call('l1', 'frontier-verify', { threads: blocked, progress: ['x'], maxDepth: 50 })
+      frontier.call('l1', 'verify', { threads: blocked, progress: ['x'], maxDepth: 50 })
       const result = (await frontier.resultFor('l1')).result as VerifyResult
       expect(result.status).toBe('failed')
       expect(result.findings.length).toBeGreaterThan(0)
@@ -735,7 +737,7 @@ describe('frontier-verify livelock integration (real programs)', () => {
         },
         { label: 'sink', once: true, rules: [{ waitFor: [{ type: 'done' }] }] },
       ]
-      frontier.call('l1', 'frontier-verify', { threads, progress: ['done'], maxDepth: 50 })
+      frontier.call('l1', 'verify', { threads, progress: ['done'], maxDepth: 50 })
       const result = (await frontier.resultFor('l1')).result as VerifyResult
       expect(result.status).toBe('failed')
       expect(result.livelocks.length).toBeGreaterThanOrEqual(1)
@@ -754,7 +756,7 @@ describe('frontier-verify livelock integration (real programs)', () => {
       const threads: Thread[] = [
         { label: 'toggle', rules: [{ request: { type: 'done' } }, { request: { type: 'tick' } }] },
       ]
-      frontier.call('l1', 'frontier-verify', { threads, progress: ['done'], maxDepth: 50 })
+      frontier.call('l1', 'verify', { threads, progress: ['done'], maxDepth: 50 })
       const result = (await frontier.resultFor('l1')).result as VerifyResult
       expect(result.status).toBe('verified')
       expect(result.livelocks).toHaveLength(0)
@@ -769,7 +771,7 @@ describe('frontier-verify livelock integration (real programs)', () => {
       const threads: Thread[] = [
         { label: 'toggle', rules: [{ request: { type: 'on' } }, { request: { type: 'off' } }] },
       ]
-      frontier.call('l1', 'frontier-explore', { threads, strategy: 'bfs', maxDepth: 50 })
+      frontier.call('l1', 'explore', { threads, strategy: 'bfs', maxDepth: 50 })
       const result = (await frontier.resultFor('l1')).result as ExploreResult
       expect(result.stateGraph).toBeDefined()
       expect(Object.keys(result.stateGraph).length).toBe(2)
