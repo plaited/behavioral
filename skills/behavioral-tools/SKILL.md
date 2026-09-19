@@ -1,6 +1,6 @@
 ---
 name: behavioral-tools
-description: Invoke the behavioral agent tool fleet via the `behavioral tools` CLI dispatcher — git (git-status, git-history, git-worktrees, git-context), TypeScript LSP (typescript-execute, typescript-discover), MCP client (mcp-discover, mcp-call-tool, mcp-list-tools, mcp-get-prompt, mcp-list-resources, mcp-read-resource), HTML validation/rendering (html-render, html-validate-and-escape, html-scale-check), discovery catalog CRUD (discovery-create/read/update/delete/search), skill client (skill-discover, skill-read, skill-list-resources, skill-extract-links, skill-validate-links), and plugin loading (plugin-client). JSON in / JSON out over stdio, one subprocess call per invocation. Use when an agent needs structured git context, semantic TypeScript queries, remote MCP operations, HTML/CSS validation, or skill/plugin inspection instead of raw shell commands.
+description: Invoke the behavioral agent tool fleet via the `behavioral tools` CLI dispatcher — git (git-status, git-history, git-worktrees, git-context), TypeScript LSP (typescript-execute, typescript-discover), MCP client (mcp-discover, mcp-call-tool, mcp-list-tools, mcp-get-prompt, mcp-list-resources, mcp-read-resource), HTML validation/rendering (html-render, html-validate-and-escape, html-scale-check), skill client (skill-discover, skill-read, skill-list-resources, skill-extract-links, skill-validate-links), and plugin loading (plugin-client). JSON in / JSON out over stdio, one subprocess call per invocation. Use when an agent needs structured git context, semantic TypeScript queries, remote MCP operations, HTML/CSS validation, or skill/plugin inspection instead of raw shell commands.
 license: ISC
 compatibility: Requires bun and the behavioral CLI
 allowed-tools: Bash
@@ -59,10 +59,6 @@ Never guess a tool's input shape — the contract is exposed by flags:
 
 Each module's tools, when-to-use guidance, examples, and gotchas:
 
-- [discovery](references/discovery.md) — `discovery-create`,
-  `discovery-read`, `discovery-update`, `discovery-delete`,
-  `discovery-search`. Unified catalog CRUD for remote MCP tools and local
-  skills.
 - [git](references/git.md) — `git-status`, `git-history`, `git-worktrees`,
   `git-context`. Structured repo context; replaces chaining 8+ raw git
   commands.
@@ -94,6 +90,5 @@ Each module's tools, when-to-use guidance, examples, and gotchas:
 | Type info, symbols, definitions, completions | [typescript](references/typescript.md) |
 | Call/list tools on a remote MCP server | [mcp-client](references/mcp-client.md) |
 | Validate or render behavioral HTML | [html](references/html.md) |
-| Catalog CRUD for MCP tools / skills | [discovery](references/discovery.md) |
 | Read a local skill or its bundled files | [skill-client](references/skill-client.md) |
 | Load a plugin package | [plugin-client](references/plugin-client.md) |

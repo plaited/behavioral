@@ -19,13 +19,6 @@
 
 import type { JSONSchemaType, ValidateFunction } from 'ajv'
 import { ajv } from '../tools/define-tool.ts'
-import {
-  discoveryCreate,
-  discoveryDelete,
-  discoveryRead,
-  discoverySearch,
-  discoveryUpdate,
-} from '../tools/discovery.ts'
 import { gitContext, gitHistory, gitStatus, gitWorktrees } from '../tools/git.ts'
 import {
   htmlMetaRead,
@@ -89,11 +82,6 @@ const entry = <TInput, TOutput>(tool: ToolProduct<TInput, TOutput>): FleetEntry 
 })
 
 const FLEET: FleetEntry[] = [
-  entry(discoveryCreate),
-  entry(discoveryRead),
-  entry(discoveryUpdate),
-  entry(discoveryDelete),
-  entry(discoverySearch),
   entry(htmlMetaRead),
   entry(htmlMetaStamp),
   entry(htmlMetaValidate),
