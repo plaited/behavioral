@@ -4,7 +4,7 @@
  * returns a single terminal `RESULT`.
  *
  * @remarks
- * Spawned by URL from `use-responses-client.ts` (`new Worker(new URL('./responses-client.ts', ...))`)
+ * Spawned by URL from `use-responses-client.ts` (`new Worker(new URL('./responses-client.worker.ts', ...))`)
  * and imported by nobody, so it needs no main-vs-worker detection.
  *
  * Endpoint config (URL + resolved API key + extra headers) is delivered via

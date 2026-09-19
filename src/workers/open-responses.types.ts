@@ -1,9 +1,9 @@
 /**
- * Wire and option types shared by the model worker (`responses-client.ts`)
+ * Wire and option types shared by the model worker (`responses-client.worker.ts`)
  * and its host consumer (`use-responses-client.ts`).
  *
  * @remarks
- * `responses-client.ts` mounts `self.onmessage` at top level, so the host
+ * `responses-client.worker.ts` mounts `self.onmessage` at top level, so the host
  * must never import it; both sides import here instead. Types plus one
  * side-effect-free key constant — the key is the only runtime value, so both
  * sides agree on the `setEnvironmentData` / `getEnvironmentData` key without

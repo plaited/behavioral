@@ -245,7 +245,7 @@ const JQ_RESULT_CAP = 64 * 1024
 const jqResultDecoder = new TextDecoder()
 
 /**
- * The jq eval bridge — spawns the `jq.ts` worker per evaluation and blocks the
+ * The jq eval bridge — spawns the `jq.worker.ts` worker per evaluation and blocks the
  * calling thread on `Atomics.wait` (a synchronous syscall, not an async yield —
  * the engine-never-awaits invariant holds). The result travels through the
  * shared buffer, never postMessage: a caller parked in `Atomics.wait` has a
@@ -261,7 +261,7 @@ export const evaluateTransform = (query: string, detail: JsonObject | undefined)
   if (detail === undefined || detail === null) return { ok: false, reason: 'no_detail' }
   const sab = new SharedArrayBuffer(8 + JQ_RESULT_CAP)
   const header = new Int32Array(sab, 0, 2)
-  const worker = new Worker(new URL('./jq.ts', import.meta.url))
+  const worker = new Worker(new URL('./jq.worker.ts', import.meta.url))
   worker.postMessage({ sab, query, detail })
   const woke = Atomics.wait(header, 0, 0, JQ_EVAL_TIMEOUT_MS)
   if (woke === 'timed-out') {

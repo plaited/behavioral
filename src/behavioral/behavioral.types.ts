@@ -445,7 +445,7 @@ export type TransformFailureReason =
 /**
  * The result of a transform evaluation — the whole first output, parsed, or
  * a machine-readable failure reason. Never thrown; serialized over the
- * worker bridge between `jq.ts` and `evaluateTransform`.
+ * worker bridge between `jq.worker.ts` and `evaluateTransform`.
  */
 export type TransformEvaluation =
   | { ok: true; value: JsonObject }

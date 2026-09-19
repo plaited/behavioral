@@ -129,7 +129,7 @@ export type ToolsExecutor = {
  * @param config Default `cwd` and an optional worker entry override.
  */
 export const createToolsExecutor = (config: ToolsExecutorConfig = {}): ToolsExecutor => {
-  const worker = new Worker(config.workerUrl ?? new URL('./tools.ts', import.meta.url))
+  const worker = new Worker(config.workerUrl ?? new URL('./tools.worker.ts', import.meta.url))
   const ceilings: ToolsCeilings = { ...DEFAULT_CEILINGS, ...config.ceilings }
   const pending = new Map<string, { settle: (result: ToolsResult) => void; clamped?: string[] }>()
   let destroying = false

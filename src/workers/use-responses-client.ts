@@ -171,7 +171,7 @@ const abortedResult = (message: string): { isError: true; message: string } => (
  */
 export const createModelExecutor = (config: ModelExecutorConfig): ModelExecutor => {
   setEnvironmentData(MODEL_ENDPOINTS_KEY, config.endpoints)
-  const worker = new Worker(config.workerUrl ?? new URL('./responses-client.ts', import.meta.url))
+  const worker = new Worker(config.workerUrl ?? new URL('./responses-client.worker.ts', import.meta.url))
   const pending = new Map<string, (result: ModelRespondOutput) => void>()
   let destroying = false
   let destroyWatchdog: ReturnType<typeof setTimeout> | undefined

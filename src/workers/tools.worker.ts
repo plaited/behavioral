@@ -4,7 +4,7 @@
  * returns a single bounded terminal result.
  *
  * @remarks
- * Spawned by URL from `use-tools.ts` (`new Worker(new URL('./tools.ts', ...))`)
+ * Spawned by URL from `use-tools.ts` (`new Worker(new URL('./tools.worker.ts', ...))`)
  * and imported by nobody, so it needs no main-vs-worker detection: Bun exposes
  * `self` and `self.postMessage` on the main thread too, and `self.importScripts`
  * is undefined in both, so every ambient discriminator lies.
