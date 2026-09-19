@@ -2,8 +2,8 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { ajv } from '../define-tool.ts'
 import { gitContext, gitHistory, gitStatus, gitWorktrees } from '../git.ts'
-import { ajv } from '../use-tool.ts'
 
 const tempDirs: string[] = []
 

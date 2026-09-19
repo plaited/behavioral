@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import type { FetchLike } from '@modelcontextprotocol/client'
+import { ajv } from '../define-tool.ts'
 import {
   McpCallToolInputSchema,
   McpCallToolOutputSchema,
@@ -23,7 +24,6 @@ import {
   mcpListTools,
   mcpReadResource,
 } from '../mcp-client.ts'
-import { ajv } from '../use-tool.ts'
 import { startMcpServer } from './mcp-server-fixture.ts'
 
 const validateCallToolInput = ajv.compile(McpCallToolInputSchema)

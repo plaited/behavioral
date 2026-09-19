@@ -4,7 +4,7 @@
  * discovers threads/ as a plain ungated component dir.
  *
  * @remarks
- * A stateless `useTool` unit: input `{ path, cwd }` (plugin.json path
+ * A stateless `defineTool` unit: input `{ path, cwd }` (plugin.json path
  * resolved against the provisioned cwd), output the normalized manifest
  * `{ name, version, mcps, skills, threads, warnings }`. Loading is
  * read-only — no writes, no provisioning.
@@ -31,7 +31,7 @@
 
 import * as path from 'node:path'
 import type { JSONSchemaType } from 'ajv'
-import { ajv, useTool } from './use-tool.ts'
+import { ajv, defineTool } from './define-tool.ts'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -524,7 +524,7 @@ const run = async (input: PluginClientInput): Promise<PluginClientOutput> => {
 }
 
 // ---------------------------------------------------------------------------
-// useTool registration
+// defineTool registration
 // ---------------------------------------------------------------------------
 
 /**
@@ -536,7 +536,7 @@ const run = async (input: PluginClientInput): Promise<PluginClientOutput> => {
  * normalized manifest `{ name, version, mcps, skills, threads, warnings }`,
  * or `{ isError, message }` on failure.
  */
-export const pluginClient = useTool(
+export const pluginClient = defineTool(
   {
     name: PLUGIN_CLIENT_TOOL_NAME,
     description:

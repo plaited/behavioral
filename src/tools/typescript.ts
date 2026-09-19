@@ -5,7 +5,7 @@
  * Replaces the old typescript-language-server (which needed tsserver.js,
  * removed in TS 5.8+) with TypeScript 7's native async API.
  *
- * Two `useTool` units:
+ * Two `defineTool` units:
  *   - `typescript-lsp-execute`: open file, run method handlers, return results
  *   - `typescript-lsp-discover`: return supported method→capability mappings
  *
@@ -31,7 +31,7 @@ import {
 } from 'typescript/unstable/ast/is'
 import type { Project, Snapshot } from 'typescript/unstable/async'
 import { API } from 'typescript/unstable/async'
-import { useTool } from './use-tool.ts'
+import { defineTool } from './define-tool.ts'
 
 // ============================================================================
 // Constants
@@ -517,7 +517,7 @@ const discoverCapabilities = (): LspDiscoverOutput['capabilities'] =>
 // ============================================================================
 
 /** Open a file and run LSP method requests in a single TypeScript 7 server session. */
-export const typescriptLspExecute = useTool(
+export const typescriptLspExecute = defineTool(
   {
     name: TYPESCRIPT_EXECUTE_TOOL_NAME,
     description:
@@ -529,7 +529,7 @@ export const typescriptLspExecute = useTool(
 )
 
 /** List the supported LSP methods from TypeScript 7's native API. */
-export const typescriptLspDiscover = useTool(
+export const typescriptLspDiscover = defineTool(
   {
     name: TYPESCRIPT_DISCOVER_TOOL_NAME,
     description:

@@ -1,6 +1,7 @@
 import { Database } from 'bun:sqlite'
 import { afterEach, describe, expect, test } from 'bun:test'
 import * as path from 'node:path'
+import { ajv } from '../define-tool.ts'
 import {
   DISCOVERY_PLUGIN_SOURCE,
   DiscoveryCreateInputSchema,
@@ -21,7 +22,6 @@ import {
   discoveryUpdate,
   provisionDiscoverySpace,
 } from '../discovery.ts'
-import { ajv } from '../use-tool.ts'
 
 const validateCreateInput = ajv.compile(DiscoveryCreateInputSchema)
 const validateCreateOutput = ajv.compile(DiscoveryCreateOutputSchema)

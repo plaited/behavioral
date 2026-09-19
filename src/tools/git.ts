@@ -2,7 +2,7 @@
  * Structured git context tools.
  *
  * @remarks
- * Four `useTool` units — git-status, git-history, git-worktrees, and the
+ * Four `defineTool` units — git-status, git-history, git-worktrees, and the
  * combined git-context — returning structured JSON instead of raw git
  * output so agents can consume results directly without parsing.
  *
@@ -16,7 +16,7 @@
 import { stat } from 'node:fs/promises'
 import { isAbsolute, relative, resolve } from 'node:path'
 import type { JSONSchemaType } from 'ajv'
-import { useTool } from './use-tool.ts'
+import { defineTool } from './define-tool.ts'
 
 // ============================================================================
 // Constants
@@ -1220,7 +1220,7 @@ const collectContext = async (input: GitContextInput): Promise<GitContextOutput>
 const resolveCwd = (cwd?: string): string => resolve(cwd ?? process.cwd())
 
 /** git status — branch, HEAD, upstream, and dirty file lists as structured JSON. */
-export const gitStatus = useTool(
+export const gitStatus = defineTool(
   {
     name: GIT_STATUS_TOOL_NAME,
     description:
@@ -1232,7 +1232,7 @@ export const gitStatus = useTool(
 )
 
 /** git history — merge-base, commits, changed files, and per-path history against a base ref. */
-export const gitHistory = useTool(
+export const gitHistory = defineTool(
   {
     name: GIT_HISTORY_TOOL_NAME,
     description:
@@ -1250,7 +1250,7 @@ export const gitHistory = useTool(
 )
 
 /** git worktrees — parsed worktree list with lock/prune metadata. */
-export const gitWorktrees = useTool(
+export const gitWorktrees = defineTool(
   {
     name: GIT_WORKTREES_TOOL_NAME,
     description:
@@ -1262,7 +1262,7 @@ export const gitWorktrees = useTool(
 )
 
 /** git context — combined status + history against a base ref in one call. */
-export const gitContext = useTool(
+export const gitContext = defineTool(
   {
     name: GIT_CONTEXT_TOOL_NAME,
     description:

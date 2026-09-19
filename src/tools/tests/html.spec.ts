@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { B_SCALE, B_TARGET, SCALE, SWAP_MODES } from '../../controller/controller.constants.ts'
+import { ajv } from '../define-tool.ts'
 import {
   htmlMetaRead,
   htmlMetaStamp,
@@ -14,7 +15,6 @@ import {
 } from '../html.ts'
 import type { Meta } from '../meta.schema.ts'
 import { MetaSchema } from '../meta.schema.ts'
-import { ajv } from '../use-tool.ts'
 
 // ── html-validate-and-escape ──────────────────────────────────────────────
 

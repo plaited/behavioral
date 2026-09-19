@@ -3,7 +3,7 @@ import Ajv2020 from 'ajv/dist/2020'
 
 export const ajv = new Ajv2020({ strict: true, validateSchema: true, strictRequired: false })
 
-export type UseTool = <TInput, TOutput>(
+export type DefineTool = <TInput, TOutput>(
   args: {
     name: string
     description: string
@@ -25,7 +25,7 @@ export type UseTool = <TInput, TOutput>(
   outputSchema: JSONSchemaType<TOutput>
 }
 
-export const useTool: UseTool = ({ name, description, inputSchema, outputSchema }, cb) => {
+export const defineTool: DefineTool = ({ name, description, inputSchema, outputSchema }, cb) => {
   const validate = {
     input: ajv.compile(inputSchema),
     output: ajv.compile(outputSchema),

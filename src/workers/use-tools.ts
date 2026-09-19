@@ -15,7 +15,7 @@
  */
 
 import type { JSONSchemaType } from 'ajv'
-import { useTool } from '../tools/use-tool.ts'
+import { defineTool } from '../tools/define-tool.ts'
 import type {
   ToolsCancel,
   ToolsFormat,
@@ -293,7 +293,7 @@ export const TOOLS_TOOL_NAME = 'execute_shell'
  * `onLine` seam until kernel ingress for event detail exists.
  */
 export const getToolsWorker = (executor: ToolsExecutor) =>
-  useTool(
+  defineTool(
     {
       name: TOOLS_TOOL_NAME,
       description:

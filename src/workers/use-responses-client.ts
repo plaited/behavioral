@@ -1,7 +1,7 @@
 /**
  * Host consumer for the model worker — owns the worker lifecycle, correlates
  * request ids, and exposes the `respond` surface the kernel consumes, plus the
- * `useTool` binding and the in-process scripted (test/dev) executor. No
+ * `defineTool` binding and the in-process scripted (test/dev) executor. No
  * compaction: context management is client-side (RLM-style thread recursion +
  * distillation via the ordinary respond call — see plan.md Decision Log).
  *
@@ -20,7 +20,7 @@
 
 import { setEnvironmentData } from 'node:worker_threads'
 import type { JSONSchemaType } from 'ajv'
-import { useTool } from '../tools/use-tool.ts'
+import { defineTool } from '../tools/define-tool.ts'
 import {
   ErrorSchema,
   FunctionToolSchema,
@@ -125,7 +125,7 @@ export const ModelRespondOutputSchema = {
 
 export const MODEL_RESPOND_TOOL_NAME = 'model-respond'
 
-export type ModelRespondTool = ReturnType<typeof useTool<ModelRespondInput, ModelRespondOutput>>
+export type ModelRespondTool = ReturnType<typeof defineTool<ModelRespondInput, ModelRespondOutput>>
 
 // ---------------------------------------------------------------------------
 // Executor — one worker, id-correlated requests
@@ -258,7 +258,7 @@ const invalidInputMessage = (errors: { instancePath: string; message?: string }[
  * input.
  */
 export const createModelTools = (executor: ModelExecutor): { modelRespond: ModelRespondTool } => {
-  const modelRespond = useTool(
+  const modelRespond = defineTool(
     {
       name: MODEL_RESPOND_TOOL_NAME,
       description:
@@ -298,7 +298,7 @@ export const createScriptedModelTools = ({ script }: { script: Script }): { mode
     if (Array.isArray(script)) return script[Math.min(idx, script.length - 1)]!
     return script
   }
-  const modelRespond = useTool(
+  const modelRespond = defineTool(
     {
       name: MODEL_RESPOND_TOOL_NAME,
       description:

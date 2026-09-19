@@ -10,7 +10,7 @@
  */
 
 import { describe, expect, test } from 'bun:test'
-import { ajv } from '../../tools/use-tool.ts'
+import { ajv } from '../../tools/define-tool.ts'
 import { createToolsExecutor, getToolsWorker, ToolsToolInputSchema, ToolsToolOutputSchema } from '../use-tools.ts'
 
 const validateInput = ajv.compile(ToolsToolInputSchema)

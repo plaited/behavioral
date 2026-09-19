@@ -18,6 +18,7 @@
  */
 
 import type { JSONSchemaType, ValidateFunction } from 'ajv'
+import { ajv } from '../tools/define-tool.ts'
 import {
   discoveryCreate,
   discoveryDelete,
@@ -55,14 +56,13 @@ import {
   skillValidateLinks,
 } from '../tools/skill-client.ts'
 import { typescriptLspDiscover, typescriptLspExecute } from '../tools/typescript.ts'
-import { ajv } from '../tools/use-tool.ts'
 import { makeCli } from './cli.ts'
 
 // ---------------------------------------------------------------------------
 // Fleet registry
 // ---------------------------------------------------------------------------
 
-/** A `useTool` product — heterogeneous across the fleet, so typed per-entry. */
+/** A `defineTool` product — heterogeneous across the fleet, so typed per-entry. */
 type ToolProduct<TInput, TOutput> = {
   (input: TInput): Promise<TOutput> | TOutput
   name: string

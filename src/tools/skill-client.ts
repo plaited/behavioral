@@ -32,7 +32,7 @@ import { readdir, stat } from 'node:fs/promises'
 import * as path from 'node:path'
 import type { JSONSchemaType } from 'ajv'
 import { YAML } from 'bun'
-import { useTool } from './use-tool.ts'
+import { defineTool } from './define-tool.ts'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -737,7 +737,7 @@ const validateMarkdownLocalLinks = async ({
 }
 
 // ---------------------------------------------------------------------------
-// useTool registration — one tool per mode
+// defineTool registration — one tool per mode
 // ---------------------------------------------------------------------------
 
 /**
@@ -745,7 +745,7 @@ const validateMarkdownLocalLinks = async ({
  * + user level, parse SKILL.md frontmatter, and return metadata records plus
  * warnings for skills that were skipped. Returns data only — never writes.
  */
-export const skillDiscover = useTool(
+export const skillDiscover = defineTool(
   {
     name: 'skill-discover',
     description:
@@ -760,7 +760,7 @@ export const skillDiscover = useTool(
  * Load a SKILL.md body (tier 2 full instructions) with frontmatter stripped.
  * A missing file or unparseable frontmatter returns `{ isError, message }`.
  */
-export const skillRead = useTool(
+export const skillRead = defineTool(
   {
     name: 'skill-read',
     description:
@@ -775,7 +775,7 @@ export const skillRead = useTool(
  * Enumerate bundled files (tier 3) in a skill directory without reading them.
  * SKILL.md itself is excluded (it is the tier-2 instruction file).
  */
-export const skillListResources = useTool(
+export const skillListResources = defineTool(
   {
     name: 'skill-list-resources',
     description:
@@ -790,7 +790,7 @@ export const skillListResources = useTool(
  * Extract sorted, de-duplicated local file links from markdown text — both
  * markdown links and inline HTML, dropping external and fragment-only targets.
  */
-export const skillExtractLinks = useTool(
+export const skillExtractLinks = defineTool(
   {
     name: 'skill-extract-links',
     description:
@@ -806,7 +806,7 @@ export const skillExtractLinks = useTool(
  * `rootRelative` selects whether leading-`/` links resolve against cwd
  * (project/bundle root) or the filesystem root (legacy default).
  */
-export const skillValidateLinks = useTool(
+export const skillValidateLinks = defineTool(
   {
     name: 'skill-validate-links',
     description:

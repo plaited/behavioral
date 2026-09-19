@@ -19,7 +19,7 @@
  */
 
 import type { JSONSchemaType } from 'ajv'
-import { ajv } from './use-tool.ts'
+import { ajv } from './define-tool.ts'
 
 // ---------------------------------------------------------------------------
 // Types

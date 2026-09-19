@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import * as path from 'node:path'
+import { ajv } from '../define-tool.ts'
 import {
   PluginClientInputSchema,
   type PluginClientOutput,
@@ -7,7 +8,6 @@ import {
   type PluginManifest,
   pluginClient,
 } from '../plugin-client.ts'
-import { ajv } from '../use-tool.ts'
 
 const validateInput = ajv.compile(PluginClientInputSchema)
 const validateOutput = ajv.compile(PluginClientOutputSchema)

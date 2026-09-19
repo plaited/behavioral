@@ -56,7 +56,7 @@ import {
   useThread,
 } from '../behavioral/behavioral.utils.ts'
 import { ueid } from '../utils.ts'
-import { useTool } from './use-tool.ts'
+import { defineTool } from './define-tool.ts'
 
 // ---------------------------------------------------------------------------
 // Private helpers
@@ -921,7 +921,7 @@ const verifyFrontiersRaw = ({ progress, ...args }: VerifyFrontiersArgs): VerifyF
 }
 
 // ---------------------------------------------------------------------------
-// useTool wrappers — the public interface
+// defineTool wrappers — the public interface
 // ---------------------------------------------------------------------------
 //
 // The interface IS the tool. The raw algorithm functions above
@@ -1033,7 +1033,7 @@ export const FrontierReplayOutputSchema = {
  * throws — the tool catches it and returns `{ isError: true, message }` so the
  * throw never crosses the model channel.
  */
-export const frontierReplay = useTool(
+export const frontierReplay = defineTool(
   {
     name: 'frontier-replay',
     description:
@@ -1200,7 +1200,7 @@ export const FrontierExploreOutputSchema = {
  * unsupported strategy slipping past the enum, etc.) is caught into
  * `{ isError, message }` with empty structural defaults.
  */
-export const frontierExplore = useTool(
+export const frontierExplore = defineTool(
   {
     name: 'frontier-explore',
     description:
@@ -1372,7 +1372,7 @@ export const FrontierVerifyOutputSchema = {
  * `{ isError, message }` with a `failed` status (never throw into the model
  * channel).
  */
-export const frontierVerify = useTool(
+export const frontierVerify = defineTool(
   {
     name: 'frontier-verify',
     description:

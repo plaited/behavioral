@@ -7,7 +7,7 @@ runs: *can it deadlock?* and *can it spin forever without making progress?*
 
 ## Public surface
 
-Frontier analysis is three `useTool` units that live in-repo at
+Frontier analysis is three `defineTool` units that live in-repo at
 `src/tools/frontier.ts`. The public surface is **CLI-only** — the fleet
 dispatcher (`behavioral tools '{"tool":"frontier-…","input":{…}}'`) wraps
 every tool, and `behavioral tools --schema input|output --tool <name>`

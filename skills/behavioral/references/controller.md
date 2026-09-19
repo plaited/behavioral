@@ -68,7 +68,7 @@ the page shows; the Controller is the DOM applier.
 ## Stateless html tools (SSR)
 
 There is **no `Renderer` class** — SSR is stateless html-in / html-out tools:
-five `useTool` units in `src/tools/html.ts` (`html-render`,
+five `defineTool` units in `src/tools/html.ts` (`html-render`,
 `html-update-attributes`, `html-scale-check`, `html-validate-and-escape`,
 `html-validate-attribute-value`) applying the same `render`/`attrs`
 vocabulary to an HTML **string** in a Bun process. Their per-tool I/O

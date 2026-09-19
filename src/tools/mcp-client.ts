@@ -2,7 +2,7 @@
  * Agent-facing MCP client for calling remote MCP servers.
  *
  * @remarks
- * Seven flat, standalone `useTool` units ({@link useTool}) — one per MCP
+ * Seven flat, standalone `defineTool` units ({@link defineTool}) — one per MCP
  * client operation: `call-tool`, `list-tools`, `list-prompts`, `get-prompt`,
  * `list-resources`, `read-resource`, and `discover`. Each tool opens its own
  * connection for the call using the input's `auth` config (OAuth via the
@@ -18,7 +18,7 @@ import { Client, type OAuthClientProvider, StreamableHTTPClientTransport } from 
 import type { JSONSchemaType } from 'ajv'
 import type { Keychain } from '../oauth/keychain.ts'
 import { BunKeychainOAuthProvider, type KeychainOAuthProviderOptions } from '../oauth/keychain-oauth-provider.ts'
-import { ajv, useTool } from './use-tool.ts'
+import { ajv, defineTool } from './define-tool.ts'
 
 // ---------------------------------------------------------------------------
 // Internal MCP types
@@ -659,7 +659,7 @@ const withSession = async <T>(input: McpClientSharedInput, operation: (client: C
 }
 
 // ---------------------------------------------------------------------------
-// useTool registration — flat, standalone tools (one per operation)
+// defineTool registration — flat, standalone tools (one per operation)
 // ---------------------------------------------------------------------------
 
 /**
@@ -667,7 +667,7 @@ const withSession = async <T>(input: McpClientSharedInput, operation: (client: C
  * input's auth config and closes it before returning. Returns the remote MCP
  * tool result only — never writes a store.
  */
-export const mcpCallTool = useTool(
+export const mcpCallTool = defineTool(
   {
     name: 'mcp-call-tool',
     description: 'Call a tool on a remote MCP server. Returns the remote MCP tool result only — never writes a store.',
@@ -688,7 +688,7 @@ export const mcpCallTool = useTool(
  * List the tools a remote MCP server exposes. Returns remote MCP data only —
  * never writes a store.
  */
-export const mcpListTools = useTool(
+export const mcpListTools = defineTool(
   {
     name: 'mcp-list-tools',
     description: 'List the tools a remote MCP server exposes. Returns remote MCP data only — never writes a store.',
@@ -705,7 +705,7 @@ export const mcpListTools = useTool(
  * List the prompts a remote MCP server exposes. Returns remote MCP data only —
  * never writes a store.
  */
-export const mcpListPrompts = useTool(
+export const mcpListPrompts = defineTool(
   {
     name: 'mcp-list-prompts',
     description: 'List the prompts a remote MCP server exposes. Returns remote MCP data only — never writes a store.',
@@ -722,7 +722,7 @@ export const mcpListPrompts = useTool(
  * Fetch a rendered prompt from a remote MCP server. Returns remote MCP data
  * only — never writes a store.
  */
-export const mcpGetPrompt = useTool(
+export const mcpGetPrompt = defineTool(
   {
     name: 'mcp-get-prompt',
     description:
@@ -743,7 +743,7 @@ export const mcpGetPrompt = useTool(
  * List the resources a remote MCP server exposes. Returns remote MCP data only
  * — never writes a store.
  */
-export const mcpListResources = useTool(
+export const mcpListResources = defineTool(
   {
     name: 'mcp-list-resources',
     description: 'List the resources a remote MCP server exposes. Returns remote MCP data only — never writes a store.',
@@ -763,7 +763,7 @@ export const mcpListResources = useTool(
  * Read a resource from a remote MCP server. Returns remote MCP data only —
  * never writes a store.
  */
-export const mcpReadResource = useTool(
+export const mcpReadResource = defineTool(
   {
     name: 'mcp-read-resource',
     description: 'Read a resource from a remote MCP server. Returns remote MCP data only — never writes a store.',
@@ -784,7 +784,7 @@ export const mcpReadResource = useTool(
  * Missing capabilities resolve to empty arrays. Returns remote MCP data only —
  * never writes a store.
  */
-export const mcpDiscover = useTool(
+export const mcpDiscover = defineTool(
   {
     name: 'mcp-discover',
     description:

@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import * as path from 'node:path'
+import { ajv } from '../define-tool.ts'
 import {
   SkillDiscoverInputSchema,
   SkillDiscoverOutputSchema,
@@ -15,7 +16,6 @@ import {
   skillRead,
   skillValidateLinks,
 } from '../skill-client.ts'
-import { ajv } from '../use-tool.ts'
 
 const validateDiscoverInput = ajv.compile(SkillDiscoverInputSchema)
 const validateDiscoverOutput = ajv.compile(SkillDiscoverOutputSchema)

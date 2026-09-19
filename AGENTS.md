@@ -77,7 +77,7 @@ and the impact is broad or unclear, expand coverage until the affected surface i
 **`src/kernel/`** — the irreducible coordination floor: `behavioral()`, threads, the dispatch
 bridge, OAuth. Not removable; without it there is no turn cycle, no spec-event streaming, no tool
 dispatch.
-**`src/tools/`** — the tool fleet (35 tools): stateless `useTool` units (`src/tools/use-tool.ts`), each
+**`src/tools/`** — the tool fleet (35 tools): stateless `defineTool` units (`src/tools/define-tool.ts`), each
 with AJV `JSONSchemaType` input/output schemas (`discovery`, `frontier`, `html`, `mcp-client`,
 `plugin-client`, `skill-client`, `git`, `typescript`). Dispatched from the CLI via `behavioral tools`;
 agent-facing usage docs live in `skills/behavioral-tools/`.
@@ -163,10 +163,10 @@ Expand test coverage when the impact is broad, shared, or uncertain.
 **Type over interface** — `type User = {` not `interface User {`
 **No any** — use `unknown` with type guards. At external boundaries (file/network/IPC/event-detail
 payloads), validate with AJV: define a `JSONSchemaType<T>` and compile with `ajv.compile` (see
-`useTool` in `src/tools/use-tool.ts`). Trust the validated value downstream.
+`defineTool` in `src/tools/define-tool.ts`). Trust the validated value downstream.
 **PascalCase types** — schemas get `Schema` suffix.
 **Schemas are AJV, not Zod, on the tools surface.** Define tool input/output as `JSONSchemaType<T>`
-and let `useTool` compile both with the shared `ajv` instance (`src/tools/use-tool.ts`). Prefer
+and let `defineTool` compile both with the shared `ajv` instance (`src/tools/define-tool.ts`). Prefer
 structural schemas (`oneOf` branches, strict `additionalProperties: false` at every level) so
 constraints are explicit and JSON-schema replay contracts stay aligned. Do not hand-maintain a
 parallel Zod shape alongside an AJV one.

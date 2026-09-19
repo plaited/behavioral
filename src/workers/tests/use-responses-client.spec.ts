@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { ajv } from '../../tools/use-tool.ts'
+import { ajv } from '../../tools/define-tool.ts'
 import {
   createModelExecutor,
   createModelTools,

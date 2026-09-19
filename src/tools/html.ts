@@ -13,6 +13,7 @@ import {
 } from '../controller/controller.constants.ts'
 import { swapBoundary } from '../controller/swap-boundary.ts'
 import { CSSPropertiesSchema, CUSTOM_PROPERTY_REF_PATTERN, validateCSSValue } from './css.schemas.ts'
+import { ajv, defineTool } from './define-tool.ts'
 import { ElementAttributeListSchema, validateAttribute } from './html.schemas.ts'
 import {
   type Meta,
@@ -22,7 +23,6 @@ import {
   type MetaStatus,
   validateMeta,
 } from './meta.schema.ts'
-import { ajv, useTool } from './use-tool.ts'
 
 // ── b-meta block parsing (the html carrier's read + validate) ─────────────
 
@@ -167,7 +167,7 @@ type AttrValue = string | number | boolean | null
 // ── Module-private primitives ─────────────────────────────────────────────
 //
 // The raw validators run the existing HTMLRewriter / schema passes unchanged
-// but return violations as data instead of throwing. The useTool wrappers
+// but return violations as data instead of throwing. The defineTool wrappers
 // below call these, never the tools, and map the result union to the tool
 // output shape. No try/catch is needed for validation flow — a failure is a
 // plain `{ ok: false, ... }` value.
@@ -512,7 +512,7 @@ export const HtmlValidateAndEscapeOutputSchema = {
  * the output is `{ html: null, isError: true, message, htmlViolations,
  * cssViolations }`; on success `{ html }`.
  */
-export const htmlValidateAndEscape = useTool(
+export const htmlValidateAndEscape = defineTool(
   {
     name: 'html-validate-and-escape',
     description:
@@ -593,7 +593,7 @@ export const HtmlValidateAttributeValueOutputSchema = {
  * output is `{ valid: null, isError: true, message, htmlViolations }`; on
  * success `{ valid: true }`.
  */
-export const htmlValidateAttributeValue = useTool(
+export const htmlValidateAttributeValue = defineTool(
   {
     name: 'html-validate-attribute-value',
     description:
@@ -707,7 +707,7 @@ export const HtmlRenderOutputSchema = {
  * resulting document. Thread each output `html` back in as the next call's
  * `html` input.
  */
-export const htmlRender = useTool(
+export const htmlRender = defineTool(
   {
     name: 'html-render',
     description:
@@ -824,7 +824,7 @@ export const HtmlUpdateAttributesOutputSchema = {
  * Stateless: `html` is both the input document and the output's resulting
  * document. Thread each output `html` back in as the next call's `html` input.
  */
-export const htmlUpdateAttributes = useTool(
+export const htmlUpdateAttributes = defineTool(
   {
     name: 'html-update-attributes',
     description:
@@ -930,7 +930,7 @@ export const HtmlScaleCheckOutputSchema = {
  * Zero matches or no `b-scale` found anywhere → `rel` (scale-less,
  * permissive). Advisory only — does not enforce nesting.
  */
-export const htmlScaleCheck = useTool(
+export const htmlScaleCheck = defineTool(
   {
     name: 'html-scale-check',
     description:
@@ -1007,7 +1007,7 @@ export const HtmlMetaReadOutputSchema = {
   additionalProperties: false,
 } as unknown as JSONSchemaType<HtmlMetaReadOutput>
 
-export const htmlMetaRead = useTool(
+export const htmlMetaRead = defineTool(
   {
     name: 'html-meta-read',
     description:
@@ -1055,7 +1055,7 @@ export const HtmlMetaValidateOutputSchema = {
   additionalProperties: false,
 } as unknown as JSONSchemaType<HtmlMetaValidateOutput>
 
-export const htmlMetaValidate = useTool(
+export const htmlMetaValidate = defineTool(
   {
     name: 'html-meta-validate',
     description:
@@ -1108,7 +1108,7 @@ export const HtmlMetaStampOutputSchema = {
   additionalProperties: false,
 } as unknown as JSONSchemaType<HtmlMetaStampOutput>
 
-export const htmlMetaStamp = useTool(
+export const htmlMetaStamp = defineTool(
   {
     name: 'html-meta-stamp',
     description:

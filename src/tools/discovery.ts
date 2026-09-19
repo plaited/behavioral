@@ -3,7 +3,7 @@
  * MCP tools, skills, learned threads, and html artifacts.
  *
  * @remarks
- * Flat, standalone `useTool` units — one per operation: `discovery-create`,
+ * Flat, standalone `defineTool` units — one per operation: `discovery-create`,
  * `discovery-read`, `discovery-update`, `discovery-delete`, and
  * `discovery-search`. Import a tool and call it; no provisioning layer, no
  * shared connection. Each call opens the SQLite store, ensures the schema,
@@ -45,7 +45,7 @@ import { Database } from 'bun:sqlite'
 import * as path from 'node:path'
 import type { JSONSchemaType } from 'ajv'
 import { behavioralHomeRoot, DB_FILE, ROOT_SPACE } from '../kernel/behavioral-home.ts'
-import { useTool } from './use-tool.ts'
+import { defineTool } from './define-tool.ts'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -353,7 +353,7 @@ const scopeCondition = (): { clause: string; params: string[] } =>
       { clause: " AND (space = ? OR space = 'root')", params: [provisionedSpace] }
 
 // ---------------------------------------------------------------------------
-// useTool registration — flat, standalone tools (one per operation)
+// defineTool registration — flat, standalone tools (one per operation)
 // ---------------------------------------------------------------------------
 
 /**
@@ -363,7 +363,7 @@ const scopeCondition = (): { clause: string; params: string[] } =>
  * (skill), or BMeta-derived fields (thread/html). The row is stamped with the
  * provisioned space.
  */
-export const discoveryCreate = useTool(
+export const discoveryCreate = defineTool(
   {
     name: 'discovery-create',
     description:
@@ -388,7 +388,7 @@ export const discoveryCreate = useTool(
  * Read one discovery row by id, scoped to the provisioned space. Returns row
  * null when no such row exists in scope.
  */
-export const discoveryRead = useTool(
+export const discoveryRead = defineTool(
   {
     name: 'discovery-read',
     description:
@@ -408,7 +408,7 @@ export const discoveryRead = useTool(
  * Update one discovery row by id; omitted fields are left unchanged. Returns
  * row null with isError when no such row exists in scope.
  */
-export const discoveryUpdate = useTool(
+export const discoveryUpdate = defineTool(
   {
     name: 'discovery-update',
     description:
@@ -444,7 +444,7 @@ export const discoveryUpdate = useTool(
  * Delete one discovery row by id, scoped to the provisioned space. Returns
  * deleted false when no such row exists in scope.
  */
-export const discoveryDelete = useTool(
+export const discoveryDelete = defineTool(
   {
     name: 'discovery-delete',
     description:
@@ -466,7 +466,7 @@ export const discoveryDelete = useTool(
  * and limit (default 100). The model searches to find candidates, then loads
  * full content via skill-client / plugin-client / the artifact file itself.
  */
-export const discoverySearch = useTool(
+export const discoverySearch = defineTool(
   {
     name: 'discovery-search',
     description:
