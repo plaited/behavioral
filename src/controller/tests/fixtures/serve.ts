@@ -86,6 +86,8 @@ const TEST_PAGE_CONTENT: Record<string, string> = {
   'render-prefix': `<span b-target="user-name">name</span><span b-target="user-email">email</span><span b-target="other">untouched</span>`,
   'dispatch-test': `<div b-target="main"><p>dispatch target</p></div>`,
   'action-test': `<div b-target="main"><p>waiting for action</p></div>`,
+  'trigger-pairs': `<div b-target="main"><p>waiting for pairs</p></div>`,
+  'floors-test': `<div b-target="main"><p>waiting for floors</p></div>`,
   'form-test': `<div b-target="main"><p>waiting for form</p></div>`,
   'retry-test': `<div b-target="main"><p>connecting</p></div>`,
   'lifecycle-test': `<div b-target="main"><p>lifecycle</p></div>`,
@@ -192,6 +194,40 @@ const sendDispatchMessages = (ws: ServerWebSocket<{ source: string }>) => {
       detail: { id: 'd1', target: 'main', event: { type: 'app:ping', detail: { ok: true } } },
     }),
   )
+}
+
+const sendTriggerPairsRender = (ws: ServerWebSocket<{ source: string }>) => {
+  ws.send(
+    JSON.stringify(
+      renderMsg({
+        id: 'tp',
+        target: 'main',
+        html: '<button id="pair-btn" b-trigger="click:pair_click;focus:pair_focus">Two pairs</button>',
+      }),
+    ),
+  )
+}
+
+const sendFloorsMessages = (ws: ServerWebSocket<{ source: string }>) => {
+  ws.send(
+    JSON.stringify(
+      renderMsg({
+        id: 'ft1',
+        target: 'main',
+        html: '<button id="bad-trigger-btn" b-trigger="click">no colon pair</button>',
+      }),
+    ),
+  )
+  ws.send(
+    JSON.stringify(
+      renderMsg({
+        id: 'ft2',
+        target: 'main',
+        html: '<button id="on-attr-btn" onclick="alert(1)">bad</button>',
+      }),
+    ),
+  )
+  ws.send(JSON.stringify(attrsMsg({ id: 'ft3', target: 'main', attr: { 'b-trigger': 'focus' } })))
 }
 
 const sendActionInitialRender = (ws: ServerWebSocket<{ source: string }>) => {
@@ -311,6 +347,12 @@ export const startServer = (port = 0): FixtureServer => {
             break
           case 'action-test':
             sendActionInitialRender(ws)
+            break
+          case 'trigger-pairs':
+            sendTriggerPairsRender(ws)
+            break
+          case 'floors-test':
+            sendFloorsMessages(ws)
             break
           case 'form-test':
             sendFormInitialRender(ws)

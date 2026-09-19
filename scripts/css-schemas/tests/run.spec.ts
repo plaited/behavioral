@@ -35,6 +35,18 @@ describe('css-schemas run script', () => {
     expect(stderr).toContain('generate')
   })
 
+  test('diff mode is byte-stable against the committed schema (the drift contract)', async () => {
+    const proc = Bun.spawn(['bun', scriptPath, 'diff'], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+      cwd: repoRoot,
+    })
+    expect(await proc.exited).toBe(0)
+    const output = JSON.parse(await new Response(proc.stdout).text())
+    expect(output.changed).toBe(false)
+    expect(output.diff).toBeUndefined()
+  }, 60000)
+
   test('generate --dry-run outputs JSON with dryRun', async () => {
     const proc = Bun.spawn(['bun', scriptPath, 'generate', '--dry-run'], {
       stdout: 'pipe',
@@ -47,6 +59,6 @@ describe('css-schemas run script', () => {
     expect(typeof output.propertyCount).toBe('number')
     expect(output.propertyCount).toBeGreaterThan(0)
     expect(typeof output.keywordEnumCount).toBe('number')
-    expect(output.path).toBe('src/tools/css.schemas.ts')
+    expect(output.path).toBe('src/controller/css.schemas.ts')
   })
 })

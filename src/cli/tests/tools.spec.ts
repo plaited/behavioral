@@ -24,7 +24,7 @@ describe('behavioral tools', () => {
 
     expect(code).toBe(0)
     expect(stderr).toContain('Usage: tools')
-    expect(stderr).toContain('html-render')
+    expect(stderr).toContain('skill-discover')
     expect(stderr).toContain('mcp-discover')
     expect(stderr).toContain('plugin-client')
     expect(stderr).toContain('skill-extract-links')
@@ -38,7 +38,7 @@ describe('behavioral tools', () => {
     const output = JSON.parse(stdout)
     expect(output.command).toBe('tools')
     expect(Array.isArray(output.tools)).toBe(true)
-    expect(output.tools.length).toBeGreaterThanOrEqual(20)
+    expect(output.tools.length).toBeGreaterThanOrEqual(13)
     const skillDiscover = output.tools.find((t: { name: string }) => t.name === 'skill-discover')
     expect(skillDiscover?.description).toBeString()
     const names = output.tools.map((t: { name: string }) => t.name)
@@ -80,14 +80,11 @@ describe('behavioral tools', () => {
   })
 
   test('invokes a tool by name and prints its validated output', async () => {
-    const { code, stdout } = await runTools([
-      JSON.stringify({ tool: 'html-validate-and-escape', input: { html: '<p>hello</p>' } }),
-    ])
+    const { code, stdout } = await runTools([JSON.stringify({ tool: 'skill-discover', input: { cwd: repoRoot } })])
 
     expect(code).toBe(0)
     const output = JSON.parse(stdout)
-    expect(output.html).toContain('<p>hello</p>')
-    expect(output.isError ?? false).toBe(false)
+    expect(Array.isArray(output.skills)).toBe(true)
   })
 
   // NOTE: the input-defaults-at-dispatch test died with the git tools — no
@@ -108,7 +105,7 @@ describe('behavioral tools', () => {
 
   test('--dry-run prints the dispatch envelope without executing', async () => {
     const { code, stdout } = await runTools([
-      JSON.stringify({ tool: 'html-validate-and-escape', input: { html: '<p>hi</p>' } }),
+      JSON.stringify({ tool: 'skill-discover', input: { cwd: repoRoot } }),
       '--dry-run',
     ])
 
@@ -116,7 +113,7 @@ describe('behavioral tools', () => {
     const output = JSON.parse(stdout)
     expect(output).toEqual({
       command: 'tools',
-      input: { tool: 'html-validate-and-escape', input: { html: '<p>hi</p>' } },
+      input: { tool: 'skill-discover', input: { cwd: repoRoot } },
       dryRun: true,
     })
   })

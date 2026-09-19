@@ -20,16 +20,6 @@
 import type { JSONSchemaType, ValidateFunction } from 'ajv'
 import { ajv } from '../tools/define-tool.ts'
 import {
-  htmlMetaRead,
-  htmlMetaStamp,
-  htmlMetaValidate,
-  htmlRender,
-  htmlScaleCheck,
-  htmlUpdateAttributes,
-  htmlValidateAndEscape,
-  htmlValidateAttributeValue,
-} from '../tools/html.ts'
-import {
   mcpCallTool,
   mcpDiscover,
   mcpGetPrompt,
@@ -80,14 +70,6 @@ const entry = <TInput, TOutput>(tool: ToolProduct<TInput, TOutput>): FleetEntry 
 })
 
 const FLEET: FleetEntry[] = [
-  entry(htmlMetaRead),
-  entry(htmlMetaStamp),
-  entry(htmlMetaValidate),
-  entry(htmlValidateAndEscape),
-  entry(htmlValidateAttributeValue),
-  entry(htmlRender),
-  entry(htmlUpdateAttributes),
-  entry(htmlScaleCheck),
   entry(mcpCallTool),
   entry(mcpListTools),
   entry(mcpListPrompts),

@@ -272,7 +272,7 @@ export const evaluateTransform = (query: string, detail: JsonObject | undefined)
   const bytes = new Uint8Array(sab, 8, Atomics.load(header, 1))
   try {
     // JSON.parse proves syntax; validateTransformEvaluation proves shape —
-    // the parseMeta pattern's two guards at the worker trust boundary.
+    // the two-guards pattern at the worker trust boundary.
     const evaluation: unknown = JSON.parse(jqResultDecoder.decode(bytes))
     if (!validateTransformEvaluation(evaluation)) {
       return { ok: false, reason: 'jq_error', stderr: 'invalid evaluation frame from jq worker' }

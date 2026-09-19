@@ -83,15 +83,18 @@ selections verbatim and re-enters worker results as once-threads), and the satel
 (reachability analysis), `store` (durable space-scoped persistence). Spawn-by-URL entries end in
 `.worker.ts`; each family owns its event types + input boundary; results echo the request
 `space`.
-**`src/tools/`** — the tool fleet (21 tools): stateless `defineTool` units (`src/tools/define-tool.ts`), each
-with AJV `JSONSchemaType` input/output schemas (`html`, `mcp-client`,
+**`src/tools/`** — the tool fleet (13 tools): stateless `defineTool` units (`src/tools/define-tool.ts`), each
+with AJV `JSONSchemaType` input/output schemas (`mcp-client`,
 `plugin-client`, `skill-client`). Dispatched from the CLI via `behavioral tools`;
 agent-facing usage docs live in `skills/behavioral-tools/`.
 **`src/behavioral/`** — the pure language layer: types, constants, utils, the interpreter core
 (`behavioral.ts`), and its internal jq subprocess (`jq.worker.ts` — engine-internal, wire-external;
 nothing outside behavioral/ speaks its wire). Zero process entries that speak the worker wire —
 dependency arrow is one-way: `src/workers/` → `src/behavioral/`.
-**`src/controller/`** — the browser Controller, delegated listener, swap boundary.
+**`src/controller/`** — the browser Controller: a validation-free dumb relay over an injectable
+Transport, plus `controller.utils.ts` (DelegatedListener, swapBoundary, the deterministic floors
+`isInvalidTrigger`/`detectXssVectors`) and render-time scale error-back. The controller owns no
+AJV; its floors are hardcoded invariants (on*, malformed b-trigger, scale mismatch).
 **`src/cli/`** — the `behavioral` CLI framework (`makeCliRouter`/`parseCli`) and its commands,
 registered in `bin/behavioral.ts`. `tools.ts` is the fleet dispatcher: `behavioral tools
 '{"tool":"<name>","input":{...}}'` invokes any fleet tool by name; bare `--schema` prints the

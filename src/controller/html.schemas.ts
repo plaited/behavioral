@@ -1,75 +1,4 @@
-import type { ValidateFunction } from 'ajv'
-import Ajv2020 from 'ajv/dist/2020'
-import { B_FORM, B_META, B_SCALE, B_TARGET, B_TRIGGER, SCALE } from '../controller/controller.constants.ts'
-import { CSSPropertiesSchema, CUSTOM_PROPERTY_REF_PATTERN, validateCSSValue } from './css.schemas.ts'
-
-export const CLASS = 'class'
-export const STYLE = 'style'
-/**
- * Shared Ajv instance (draft 2020-12) for HTML/SVG attribute validation.
- * Mirrors the `css.schemas.ts` ajv instance configuration.
- * @public
- */
-export const ajv = new Ajv2020({ strict: false, validateSchema: true })
-
-// ── Imperative refines: b-trigger and style ───────────────────────────────
-//
-// These validation rules can't be expressed in JSON Schema. They are
-// implemented as AJV custom keywords (`pTriggerFormat`, `pStyleFormat`) so
-// a single `ajv.validate(schema, data)` call covers structure + format.
-// The underlying functions are also exported for explicit pre-checks.
-
-/**
- * Validates `b-trigger` strings: semicolon-separated `event:action` pairs
- * with no duplicate keys. Empty/whitespace strings are valid (no triggers).
- * @public
- */
-export const validatePTrigger = (_schema: unknown, data: unknown): boolean => {
-  if (typeof data !== 'string') return true
-  if (data.trim() === '') return true
-  const seen = new Set<string>()
-  const declarations = data.split(';').filter(Boolean)
-  for (const decl of declarations) {
-    const colonIndex = decl.indexOf(':')
-    if (colonIndex === -1) return false
-    const key = decl.slice(0, colonIndex).trim()
-    const value = decl.slice(colonIndex + 1).trim()
-    if (!key || !value) return false
-    if (seen.has(key)) return false
-    seen.add(key)
-  }
-  return true
-}
-
-/**
- * Validates `style` strings: semicolon-separated `property:value` CSS
- * declarations. Known CSS properties are validated via `validateCSSValue`;
- * `var(--*)` refs are allowed. Custom properties (`--*`) always pass.
- * @public
- */
-export const validatePStyle = (_schema: unknown, data: unknown): boolean => {
-  if (typeof data !== 'string') return true
-  if (data.trim() === '') return true
-  const declarations = data.split(';').filter(Boolean)
-  for (const decl of declarations) {
-    const colonIndex = decl.indexOf(':')
-    if (colonIndex === -1) return false
-    const propertyName = decl.slice(0, colonIndex).trim()
-    const value = decl.slice(colonIndex + 1).trim()
-    if (!propertyName || !value) return false
-    if (propertyName.startsWith('--')) continue
-    if (propertyName in (CSSPropertiesSchema.properties as Record<string, unknown>)) {
-      if (!validateCSSValue(propertyName, value)) {
-        if (CUSTOM_PROPERTY_REF_PATTERN.test(value)) continue
-        return false
-      }
-    }
-  }
-  return true
-}
-
-ajv.addKeyword({ keyword: 'pTriggerFormat', validate: validatePTrigger })
-ajv.addKeyword({ keyword: 'pStyleFormat', validate: validatePStyle })
+import { B_FORM, B_SCALE, B_TARGET, B_TRIGGER, SCALE } from './controller.constants.ts'
 
 // ── Internal helper schemas (not exported) ────────────────────────────────
 
@@ -311,12 +240,11 @@ const AriaRoleSchema = {
 export const BehavioralAttributesSchema = {
   type: 'object',
   properties: {
-    [CLASS]: { type: 'string' },
+    class: { type: 'string' },
     [B_SCALE]: { type: 'string', enum: Object.values(SCALE) },
     [B_TARGET]: { anyOf: [{ type: 'string' }, { type: 'number' }] },
     [B_TRIGGER]: { type: 'string', pTriggerFormat: true },
-    [B_META]: { type: 'string' },
-    [STYLE]: { type: 'string', pStyleFormat: true },
+    style: { type: 'string', pStyleFormat: true },
   },
 }
 
@@ -1359,17 +1287,4 @@ export const ElementAttributeListSchema = {
   },
   // catchall(DetailedHTMLAttributesSchema)
   additionalProperties: DetailedHTMLAttributesSchema,
-}
-
-// Lazy compile: the attribute matrix is a ~4s AJV compile. Deferring it to
-// first use keeps `behavioral tools` startup fast for non-html dispatches.
-let attributeListValidator: ValidateFunction | undefined
-
-/**
- * Validates one CSS property value against its generated schema.
- * Custom properties ('--*') pass as string/number.
- */
-export const validateAttribute = (property: string, value: unknown): boolean => {
-  attributeListValidator ??= ajv.compile(ElementAttributeListSchema)
-  return attributeListValidator({ [property]: value })
 }

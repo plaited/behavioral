@@ -1,6 +1,6 @@
 ---
 name: behavioral-tools
-description: Invoke the behavioral agent tool fleet via the `behavioral tools` CLI dispatcher — MCP client (mcp-discover, mcp-call-tool, mcp-list-tools, mcp-get-prompt, mcp-list-resources, mcp-read-resource), HTML validation/rendering (html-render, html-validate-and-escape, html-scale-check), skill client (skill-discover, skill-read, skill-list-resources, skill-extract-links, skill-validate-links), and plugin loading (plugin-client). JSON in / JSON out over stdio, one subprocess call per invocation. Use when an agent needs remote MCP operations, HTML/CSS validation, or skill/plugin inspection instead of raw shell commands. Git and raw shell belong to the shell worker; TypeScript LSP is a future satellite family (TS 7.1 stable API).
+description: Invoke the behavioral agent tool fleet via the `behavioral tools` CLI dispatcher — MCP client (mcp-discover, mcp-call-tool, mcp-list-tools, mcp-get-prompt, mcp-list-resources, mcp-read-resource), skill client (skill-discover, skill-read, skill-list-resources, skill-extract-links, skill-validate-links), and plugin loading (plugin-client). JSON in / JSON out over stdio, one subprocess call per invocation. Use when an agent needs remote MCP operations or skill/plugin inspection instead of raw shell commands. Git and raw shell belong to the shell worker; HTML validation belongs to the controller floors + the classifier story (prompts/html-classifier-gate.md); TypeScript LSP is a future satellite family (TS 7.1 stable API).
 license: ISC
 compatibility: Requires bun and the behavioral CLI
 allowed-tools: Bash
@@ -29,7 +29,7 @@ the result against its output schema, then prints the result JSON.
 behavioral tools '{"tool":"skill-discover","input":{"cwd":"."}}'
 
 # Stream from stdin
-echo '{"tool":"html-validate-and-escape","input":{"html":"<p>hi</p>"}}' | behavioral tools
+echo '{"tool":"skill-discover","input":{"cwd":"."}}' | behavioral tools
 ```
 
 ## Discovery loop
@@ -59,12 +59,6 @@ Never guess a tool's input shape — the contract is exposed by flags:
 
 Each module's tools, when-to-use guidance, examples, and gotchas:
 
-- [html](references/html.md) — `html-validate-and-escape`,
-  `html-validate-attribute-value`, `html-render`, `html-update-attributes`,
-  `html-scale-check`, `html-meta-read`, `html-meta-validate`,
-  `html-meta-stamp`. HTML/CSS validation and render-tree surgery, plus b-meta
-  block read/validate/stamp per the
-  behavioral design-system spec.
 - [mcp-client](references/mcp-client.md) — `mcp-discover`, `mcp-call-tool`,
   `mcp-list-tools`, `mcp-list-prompts`, `mcp-get-prompt`,
   `mcp-list-resources`, `mcp-read-resource`. Remote MCP server operations.
@@ -81,6 +75,5 @@ Each module's tools, when-to-use guidance, examples, and gotchas:
 | Need | Module |
 |------|--------|
 | Call/list tools on a remote MCP server | [mcp-client](references/mcp-client.md) |
-| Validate or render behavioral HTML | [html](references/html.md) |
 | Read a local skill or its bundled files | [skill-client](references/skill-client.md) |
 | Load a plugin package | [plugin-client](references/plugin-client.md) |

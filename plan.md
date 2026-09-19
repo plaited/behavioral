@@ -149,6 +149,166 @@ ingress + a plugin-shipped behavior surface.
 
 ## Decision Log
 
+### 2026-09-19 — html-tool consolidation committed: schemas as data in the controller; the fleet is 13
+
+- **The pilot's consolidation, completed and committed:** html.schemas.ts
+  + css.schemas.ts moved to src/controller/ as PURE SCHEMA DATA (no ajv,
+  no validation functions — validatePTrigger/validateAttribute/
+  validateCSSValue deleted with the move); the html fleet tools deleted
+  entirely (they rode HTMLRewriter, a Bun-only global — dead code in both
+  target hosts); fleet 18 -> 13 (mcp-client 7, plugin-client 1,
+  skill-client 5). cli/tools.ts registrations removed; tools.spec
+  re-homed onto skill-*; AGENTS.md synced.
+- **The generator follows the new shape:** scripts/css-schemas/generate.ts
+  emits schema-only output (one exported CSSPropertiesSchema object, no
+  imports); run.ts points at src/controller/css.schemas.ts; the diff-mode
+  acceptance test pins byte-stability (changed:false, exit 0) — the CI
+  drift workflow enforces it. 757 properties, 141 keyword enums.
+- **The going-forward pattern (in prompts/html-classifier-gate.md, the
+  bun-tools skill now points there instead of html tools):** (1) schemas
+  as data in the controller — floors vocabulary + classifier context,
+  regenerated never hand-edited; (2) deterministic hardcoded floors —
+  isInvalidTrigger, detectXssVectors, id-correlated errors; (3) the
+  System One classifier above them reading the schema context, judging
+  runtime-generated html. No gate threads, no fleet html tools.
+- **Standing gap (Phase 0 decision item):** attrs-path on*/scheme checks
+  have no deterministic guard since the thread gate deletion —
+  #attrs validates b-trigger only. Recommendation on record: mirror the
+  lean rules into #attrs.
+
+### 2026-09-19 — src/threads/html.ts DELETED — threads were scaffolding; the classifier is the validator
+
+- **The pilot's reveal — the point of the whole work:** consumers of
+  useWorkers (local PWA, Tauri mobile) run everything in one context and
+  GENERATE html at runtime. The attrs-gate threads were not the
+  destination. html.ts + its spec deleted (9/9-green scaffolding — the
+  gate pattern, complementary detailSchemas, the transform mechanics
+  stay as reference in git history if thread gates ever return).
+- **The design:** a System One classifier (Jev-class) receives the
+  SCHEMA DATA as context — css.schemas.ts + html.schemas.ts minus the
+  validation functions (validatePTrigger/validateAttribute/
+  validateCSSValue are code, not context) — and classifies whether the
+  generated html is valid, before it reaches the controller. The
+  controller floors just landed (isInvalidTrigger, detectXssVectors)
+  are the deterministic backstop. Floor/ceiling doctrine unchanged:
+  the classifier never owns a security invariant.
+- **GAP OPENED BY THE DELETION (flagged, awaiting pilot):** the attrs
+  path lost its deterministic on*/scheme/style guard — the thread gate
+  was the only block on attrs-carried onclick / javascript: href /
+  expression() in style. Controller #attrs checks b-trigger only;
+  detectXssVectors runs render-path only. Recommended: mirror the lean
+  rules into #attrs as hardcoded floors (the prompt's Phase 0 decision
+  item). UNTIL RULED: attrs-carried inline handlers pass unopposed.
+- prompts/html-classifier-gate.md REWRITTEN around the new center:
+  schemas-as-classifier-context assembly (derived from source schemas,
+  versioned, functions never cross the boundary), the classification
+  call (response_request with structured noul/choice/score questions),
+  correction loop via type-2 rewriter, store admission as the second
+  call site, offline story for iOS/PWA. AGENTS src/threads/ bullet
+  removed (dir back to empty stakes).
+
+### 2026-09-19 — pilot reverts the render-time scale error-back; scale_check preflight is the pattern
+
+- The pilot reverted ScaleMismatchError, the ERROR_TYPES entry, the
+  RenderMessage `scale?` field, and the #render check (4 files). Ruling:
+  `scale_check` already exists as a preflight — threads compose the
+  check before rendering and pick the variant; nothing render-time.
+  Navigator cleaned the residue: the scale error-back browser tests +
+  fixture removed; the html thread relay's `scale` passthrough field
+  removed (consumer-less — the relay schema is structure + correlation
+  only; scale handling is thread-side preflight).
+- **isInvalidTrigger vs validatePTrigger — one divergence surfaced for
+  the pilot's ruling:** everything matches (split ';', colon required,
+  non-empty key/value, duplicate keys rejected), EXCEPT empty/whitespace
+  b-trigger: validatePTrigger (the fleet tool's AJV keyword, documented
+  "Empty/whitespace strings are valid (no triggers)") says VALID;
+  isInvalidTrigger (the controller floor, unit-tested deliberately as
+  invalid) says INVALID — a fragment with b-trigger="" passes
+  html-validate-and-escape but is refused at the browser floor: the two
+  validation homes disagree. Also #bindTriggers treats empty as a no-op
+  skip (harmless). Recommendation: empty = valid everywhere (one
+  rulebook, matches runtime no-op semantics); pilot to rule.
+
+  **RULED (same turn): empty b-trigger = INVALID, everywhere.** The
+  controller floor's strictness was the intent; the rulebook flipped to
+  match — validatePTrigger now rejects empty/whitespace strings (docstring
+  updated; one-line change, TDD: the 'accepts empty string' test flipped
+  to reject-first RED, then green). A fragment carrying b-trigger="" now
+  fails html-validate-and-escape AND is refused at the controller render
+  floor — the two homes agree. Absent attribute (undefined) remains valid;
+  #bindTriggers at initial page load still no-op-skips empty (the floor
+  guards pushed renders only).
+
+### 2026-09-19 — html/controller slice landed (TDD, worktree, uncommitted)
+
+- **Cycle 0 — b-meta removed completely:** parseMeta/stringifyMeta/
+  extractBMetaBlock + the script[b-meta] rewriter handler + the three
+  meta tools gone (html.ts 1150 -> 894 lines); meta.schema.ts deleted;
+  html.schemas [B_META] gone; fleet 21 -> 18 (verified live); skill docs
+  + AGENTS synced; the behavioral "parseMeta pattern" comments reworded
+  to "the two-guards pattern". html-validate-and-escape is deliberately
+  looser: script[type=application/json] is no longer specially validated
+  (the OKF data-okf-* vocabulary replaces it later).
+- **Cycles 1-2 — pilot's implementations confirmed end-to-end:** the
+  pilot's WIP commit already carried the semicolon split (#bindTriggers),
+  isInvalidTrigger (render floor + attrs-path rejection), detectXssVectors,
+  and three error classes (render_invalid_trigger,
+  update_trigger_attribute, xss_vectors_detected). Browser-path
+  confirmation tests added: two-pair semicolon b-trigger binds both
+  pairs; malformed b-trigger render rejected + never swapped in; on*
+  fragment rejected + never swapped in; malformed attrs b-trigger
+  rejected + element unchanged. All green against the real-browser
+  harness with id correlation.
+- **Cycles 3-4 — scale error-back (implemented, TDD):** RenderMessage
+  detail gains optional `scale`; #render computes the target's effective
+  scale (the #scaleCheck closest rule, strictest non-rel) and rejects
+  mismatched renders with `scale_mismatch` (new ERROR_TYPES entry +
+  ScaleMismatchError) carrying requested + effective; no swap. Matched
+  renders swap normally. Lessons: getElementById returns null not
+  undefined for absent elements (a test-assertion bug cost three debug
+  cycles); fixture double-render invalidated a residual-text assertion
+  (assert absence of the rejected fragment, not leftover text).
+- **Classifier prompt delivered:** prompts/html-classifier-gate.md —
+  the auto-research prompt for the probabilistic ceiling: floor/ceiling
+  invariant (Phase 0 pins it with an offline test), provider research
+  for iOS/PWA (System One/Jev-class vs local models; graceful
+  degradation), the admission thread composing store put with a
+  classification (draft -> stable, errors-as-data, classifier outage =
+  pending not pass), the type-2 correction loop, model routing. Open
+  decisions flagged: classification result embedded (data-okf-*) vs
+  ledger; stable-promotion vs git export.
+- **AGENTS.md:** src/controller/ bullet updated (validation-free relay +
+  hardcoded floors); src/threads/ bullet added (gate threads + the host
+  route-table law).
+
+### 2026-09-19 — controller slice rulings (pilot) + the OKF-HTML north star
+
+- **Rulings on the consensus points:** (1) b-trigger separator is
+  SEMICOLON — controller's #bindTriggers moves from space-split to ';',
+  unifying with validatePTrigger (no rulebook fork, no leaf extraction —
+  validation stays a controller private method, #validateTriggers, pilot's
+  stub). (2) b-meta is REMOVED completely this pass (pilot deleted the
+  constant; the removal sweeps html.schemas [B_META], meta.schema.ts,
+  parseMeta/stringifyMeta/extractBMetaBlock in html.ts, the three meta
+  fleet tools + specs + skill docs; fleet 21 -> 18). (3) #validateTriggers
+  also serves the attrs-path b-trigger updates. (4) Two new ERROR_TYPES:
+  scale_mismatch + fragment_invariant (on* and malformed b-trigger share
+  the remediation class; message text distinguishes). Implementation-review
+  flags on the pilot's draft, fixed during the cycles: the on* scan must
+  scope to template.content (not document — a whole-page scan would block
+  all renders forever); #performSwap needs the message id threaded through
+  for error correlation.
+- **OKF-HTML north star (NOT this pass):** one semantic HTML fragment =
+  knowledge representation + LLM context + UI (zero translation tax);
+  data-okf-* attributes + rel/href microdata for semantics; SQLite (the
+  store worker) as storage + FTS5 index for canonical OKF-HTML fragments;
+  git-authored okf/ folder synced into the store (matches the 2026-09-17
+  growth-model law: git authority, db as regenerable index); agent
+  self-edits fragments back into the store. Adaptation notes: the store
+  needs FTS as a store op (deferred-ops lane); html-templates collection
+  becomes okf_fragments; BMeta's draft/stable lifecycle is superseded by
+  data-okf-status attributes — the b-meta removal above is its first step.
+
 ### 2026-09-19 — git + typescript fleet tools deleted; the fleet is 21
 
 - **Pilot's ruling, on the analysis + TS7 research.** git.ts (4 tools):
@@ -1477,6 +1637,65 @@ repo and risks staleness.
 
 ## Open Questions
 
+- **SUPERSEDED 2026-09-19 (pilot's pushback): validation moves out of the
+  controller entirely — no AJV/schemas in the webview or PWA.** The
+  controller is a validation-free dumb relay; all validation lives in
+  threads (the runtime already ships AJV via detailSchema matching, so
+  marginal cost is zero on iOS/PWA). One validation home — no controller/
+  engine disagreement fork. Yesterday's DOMParser-in-controller idea dies.
+  Mechanics (navigator-recommended shape, awaiting pilot's authoring):
+  (a) attrs gate thread = complementary detailSchemas — Rule A (accept):
+  propertyNames '^(?!on)' + scheme patterns on URL attrs + style-value
+  patterns (expression(/url(javascript:/@import) — the LEAN security subset
+  restructured out of ElementAttributeListSchema, not the per-tag monster;
+  re-emits the transport-routed type (attrs_render); Rule B (reject):
+  allOf[base, not goodAttrs] — matches exactly what A rejects, posts
+  attrs_rejected with reason; producers waitFor either outcome.
+  (b) HOST ROUTE TABLE LAW: hosts route ONLY gate-emitted event types;
+  intent types (attrs_update) are unrouted by construction — bypass is
+  structurally impossible. Same mechanism as the workers map.
+  (c) Classifier (Jev/System One pattern) at ADMISSION, not render:
+  put-time classification of templates/pages/stylesheets feeding the BMeta
+  lifecycle (draft = lean-rules-only; stable = classifier-passed); one
+  classification amortized across all future renders. Type-2 reasoner =
+  the correction loop (classifier rejects with reasons → reasoner rewrites
+  → re-admit), not the gate. Model-routing bonus: classification result as
+  thread-bidding input to choose the reasoner tier for the next
+  response_request — same worker, same wire, no new family.
+  WARNINGS: probabilistic gates never own security invariants
+  (deterministic floor + probabilistic ceiling division — make explicit,
+  prevent future 'simplification'); classifier execution path needed in
+  iOS/PWA (remote API vs local small model; offline = drafts can't
+  promote, lean rules hold — decide before the store-template flow is
+  built).
+
+- **iOS (Tauri/WKWebView) host validation split (pilot's proposal,
+  evaluated 2026-09-19).** No Bun host on iOS — useWorkers consumer,
+  controller, and DOM share one webview context; HTMLRewriter unavailable,
+  so tools/html.ts cannot run there. Resolution: gate-at-the-sink already
+  chosen as doctrine, and on iOS the sink-owner IS the controller.
+  Recommended split: (a) attrs — inline validateAttribute in the
+  controller #attrs handler (pure JS + ajv, portable as-is); (b) render —
+  DOMParser inert parse → walk+validate the DOM → insert-or-report;
+  strictly safer than desktop's validate-then-setHTMLUnsafe; requires
+  extracting validateAndEscapeHtmlRaw's rules from its HTMLRewriter walker
+  into a walker-agnostic visitor module — ONE rulebook, two thin walkers
+  (HTMLRewriter for Bun hosts, DOM traversal for controller), lockstep via
+  the chain-*.html fixtures run through both; (c) CSS stays in the gate —
+  css-tree is pure JS, runs in WKWebView; (d) html-scale — pilot's
+  render-attached scale validation: controller checks fragment scale
+  assumptions against target effectiveScale on render, structured error
+  back carrying effectiveScale, agent re-renders; keep scale_check for
+  deliberate queries; iOS misses cost a postMessage. The html thread
+  stays composition-only (ui_event in, template get, htmlEscape fill,
+  render request, error-driven re-render) — byte-identical on both hosts.
+  WARNINGS logged: webview-side gates are INTEGRITY not isolation — the
+  real iOS security boundary is the Tauri IPC command allowlist (inline-
+  handler escapes reach the IPC bridge); and the tools shell worker
+  cannot run on iOS at all (tool_call = bash subprocess; no bash in
+  WKWebView sandbox) — store validate-before-put and all agent shell
+  capability have no iOS execution path today. Biggest open mobile item.
+
 - **Resolved 2026-09-19 (pilot): both families deleted.** git: superseded by
   capable models composing porcelain through the shell worker. typescript:
   scheduled to expire with 7.1's new-and-different API anyway, nothing is
@@ -1498,6 +1717,82 @@ repo and risks staleness.
   hold typescript.ts until 7.1, then either port the 4 handlers to the
   stable API or re-cut as the LSP satellite — decided by whether a
   consumer exists by then.
+- **html thread design (from the controller/HTMX comparison, 2026-09-19).**
+  Controller verdict: htmx's vocabulary (b-trigger/b-target, identical
+  swap modes, fragments, dumb client) on LiveView's topology (persistent
+  socket, server-held state, push). The html thread is the server-side
+  counterpart: waitFor on b-trigger event types (the "route handler"),
+  request scale_check → wait result → request render, snapshots as
+  rehydration ingress, success/error ids as once-thread correlations. Not
+  htmx: no URL routing, no per-interaction request/response mapping.
+  Drift flags surfaced: controller.constants.ts header says "hyperscript
+  runtime" (stale term — it's an event-binding runtime); ServerMessage
+  ingress is unvalidated (MINIMAL: parse-only admission; the validateBPEvent
+  gate's home is the HOST SEAM — the useWorkers consumer's useTrigger —
+  not the thread, corrected 2026-09-19). **Host seam = trust boundary
+  (pilot's proposal, 2026-09-19):** setHTMLUnsafe in #performSwap already
+  presumes an upstream gate; the traceListener/useTrigger choke point is
+  the only mandatory-by-construction gate. Policy recommended by navigator:
+  validate STRUCTURE at ingress (validateBPEvent at useTrigger), ESCAPE
+  MARKUP at egress (validateAndEscapeHtmlRaw on every render html before
+  transport — setHTMLUnsafe is the only interpreting sink; attrs/dispatch/
+  navigate are non-interpreting and need no html escaping). Hosts import
+  tool internals directly; agents shell out via tool_call. NO symmetric
+  escape-in/unescape-out: escape-at-sink doctrine — data stays canonical
+  (raw) inside engine/store/threads, escaped exactly once at the sink;
+  nothing is ever unescaped. Violations flow back via existing id acks.
+  Open: pilot's "unescaping both ways" — awaiting their intent.
+
+  **escape.ts placement (2026-09-19, after pilot's questions):**
+  htmlEscape/htmlUnescape have zero runtime consumers today. Answers:
+  (1) NOT in controller.ts — wrong process (browser is untrusted), wrong
+  tool (whole-payload escaping destroys markup; the gate is
+  validateAndEscapeHtmlRaw), double-escape hazard; setHTMLUnsafe already
+  names the caller-validated contract; htmlUnescape browser-side would
+  re-arm payloads. Controller stays a dumb relay. (2) Incoming user input
+  is NOT html-escaped anywhere — canonical raw form into the engine; the
+  ingress gate is STRUCTURAL: the host wraps the trigger useWorkers hands
+  it (validateBPEvent before trigger(event)) — single admission point for
+  ui_events/snapshots/errors. (3) htmlEscape earns its keep at
+  interpolation points in deterministic code only — template-fill helpers
+  embedding data into markup (store template → fill slot → host render
+  gate as backstop); the model-composed path never needs it (text nodes
+  are inert; the render gate handles dangerous attributes).
+  **CORRECTION to the prior sink analysis:** attrs is NOT fully
+  non-interpreting — setAttribute('onclick',...) arms handlers; style and
+  href values are interpreted. Host egress bridge therefore has TWO
+  gates: render → validateAndEscapeHtmlRaw; attrs → validateAttribute
+  per key/value pair (already exported by html.schemas.ts; the
+  html-validate-attribute-value fleet tool wraps it).
+  **Gate bundle size (measured 2026-09-19):** validateAndEscapeHtmlRaw via
+  its tool wrapper = 331 KB minified / 91 KB gzipped (target=bun).
+  Composition: ajv 130 KB (systemic, uncuttable), css-tree 118 KB (the one
+  discretionary chunk — style-block CSS validation only), repo code ~85 KB.
+  Marginal cost to the real host is zero: the useWorkers consumer (Bun
+  process running behavioral) already ships html.ts via cli/tools.ts.
+  Browser build is 431 KB but moot — the gate calls the Bun-only
+  HTMLRewriter global, so it cannot run browser-side, structurally
+  enforcing host-side placement. Build flag: validateAndEscapeHtmlRaw is
+  module-private (html.ts:195) — needs a leaf export for the host gate;
+  importing html.ts today module-executes all nine defineTool ajv
+  compiles at boot (cheap, but a leaf export skips it).
+  **Store as the html home (pilot's realization, 2026-09-19):** BMeta
+  already models html as a learned artifact (draft/stable/deprecated); the
+  html tools are stateless (caller holds the document); the old catalog
+  had `html` as a kind. So: store collections (`html-templates` fragments,
+  `html-pages` documents, values {html, meta, kind} with meta top-level
+  for query). Flows: render-from-template (store get → surgery → render
+  push, zero model calls), learn-a-page (validate → meta-stamp → put,
+  draft→stable promotion), snapshot persistence (serializedHTML →
+  space-scoped store put → rehydration). Spaces: templates root (shared),
+  pages/snapshots per-session. Decision to make: git vs store authority —
+  app-shipped templates stay git (store = cache/index at most);
+  runtime-learned pages are store-native (non-authority durable data).
+  Open sub-question: does draft→stable promotion mean export-to-git?
+  Elegant, unproven — don't build until a template earns it. Discipline:
+  validate-before-put (store op schemas stay generic; html semantics are
+  the thread's job at put-time; render-time validation is
+  defense-in-depth, not the boundary).
 - **Thread-authoring surface (gates the turn-loop proof).** Raw events vs
   thin factories in `src/threads/`; id-minting convention (`ueid`, prefix);
   where model input comes from. Settle by writing the re-cut raw and extracting

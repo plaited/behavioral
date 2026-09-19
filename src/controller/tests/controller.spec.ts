@@ -277,6 +277,66 @@ describe('controller: b-trigger routing', () => {
     expect(detail.event?.detail?.['b-trigger']).toBe('click:test_click')
     expect(detail.event?.detail?.id).toBe('test-btn')
   }, 20000)
+
+  test('a semicolon-separated two-pair b-trigger binds each pair to its own DOM event', async () => {
+    await using view = await open('/test/trigger-pairs')
+    await waitFor(async () => {
+      const has = await view.evaluate<boolean>("!!document.getElementById('pair-btn')")
+      return has ? true : undefined
+    }, 5000)
+    await view.evaluate<void>("document.getElementById('pair-btn').click()")
+    const click = await waitFor(
+      () =>
+        Promise.resolve(
+          getFixture()
+            .uiEvents.filter((e) => e.source === 'trigger-pairs')
+            .find((e) => (e.message.detail as { event?: { type?: string } }).event?.type === 'pair_click'),
+        ),
+      5000,
+    )
+    void click
+    await view.evaluate<void>("document.getElementById('pair-btn').dispatchEvent(new FocusEvent('focus'))")
+    const focus = await waitFor(
+      () =>
+        Promise.resolve(
+          getFixture()
+            .uiEvents.filter((e) => e.source === 'trigger-pairs')
+            .find((e) => (e.message.detail as { event?: { type?: string } }).event?.type === 'pair_focus'),
+        ),
+      5000,
+    )
+    void focus
+  }, 20000)
+})
+
+describe('controller: render floors', () => {
+  const errorByName = (name: string) =>
+    getFixture()
+      .errors.filter((e) => e.source === 'floors-test')
+      .find((e) => (e.message.detail as { name?: string }).name === name)
+
+  test('a fragment with a malformed b-trigger is rejected and never swapped in', async () => {
+    await using view = await open('/test/floors-test')
+    const error = await waitFor(() => Promise.resolve(errorByName('render_invalid_trigger')))
+    expect((error.message.detail as { id?: string }).id).toBe('ft1')
+    expect(await view.evaluate<boolean>("document.getElementById('bad-trigger-btn') === null")).toBe(true)
+  }, 20000)
+
+  test('a fragment carrying an on* attribute is rejected and never swapped in', async () => {
+    await using view = await open('/test/floors-test')
+    const error = await waitFor(() => Promise.resolve(errorByName('xss_vectors_detected')))
+    expect((error.message.detail as { id?: string }).id).toBe('ft2')
+    expect(await view.evaluate<boolean>("document.getElementById('on-attr-btn') === null")).toBe(true)
+  }, 20000)
+
+  test('an attrs update with a malformed b-trigger value is rejected and leaves the element unchanged', async () => {
+    await using view = await open('/test/floors-test')
+    const error = await waitFor(() => Promise.resolve(errorByName('update_trigger_attribute')))
+    expect((error.message.detail as { id?: string }).id).toBe('ft3')
+    expect(
+      await view.evaluate<boolean>("document.querySelector('[b-target=main]').getAttribute('b-trigger') === null"),
+    ).toBe(true)
+  }, 20000)
 })
 
 // ─── Extensions ─────────────────────────────────────────────────────────────

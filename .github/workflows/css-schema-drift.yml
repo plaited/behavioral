@@ -42,7 +42,7 @@ jobs:
                 title: 'CSS schema drift detected — @webref/css has new or changed properties',
                 labels: ['css-schema-drift'],
                 body: [
-                  'The CSS property schemas in `src/tools/css.schemas.ts` are out of date',
+                  'The CSS property schemas in `src/controller/css.schemas.ts` are out of date',
                   'with the latest `@webref/css` data.',
                   '',
                   'Run `bun run generate:css-schemas` to regenerate, then commit the result.',

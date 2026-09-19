@@ -90,28 +90,26 @@ test('hardcoded vendor entries appear in output', () => {
   expect(result.propertyCount).toBe(HARDCODED_ENTRY_COUNT)
 })
 
-test('generated output uses JSON Schema with additionalProperties and validateCSSValue', async () => {
+test('generated output is schema-only — one export, no ajv, no validation functions', async () => {
   const cssDataPath = Bun.resolveSync('@webref/css/css.json', import.meta.dir)
   const cssFile = Bun.file(cssDataPath)
   const cssJson = await cssFile.json()
 
   const result = generateCssSchemas(cssJson)
 
-  // Uses plain JSON Schema object with additionalProperties passthrough
+  // The schema object is the whole module
   expect(result.code).toContain('export const CSSPropertiesSchema = {')
   expect(result.code).toContain("additionalProperties: { type: ['string', 'number'] },")
 
-  // No switch function
-  expect(result.code).not.toContain('switch (prop)')
-
-  // Types + runtime validator exported
-  expect(result.code).toContain('export type CSSProperties = Record<string, string | number>')
-  expect(result.code).toContain('export const validateCSSValue = (property: string, value: unknown): boolean => {')
+  // Schema-only: no imports, no ajv, no compiled validator, no type alias —
+  // the schema is data (classifier context), not a validator module.
+  expect(result.code).not.toContain('import ')
+  expect(result.code).not.toContain('ajv')
+  expect(result.code).not.toContain('validateCSSValue')
+  expect(result.code).not.toContain('export type CSSProperties')
 
   const lines = result.code.split('\n')
-  const header = lines.slice(0, 12).join('\n')
-  const typeTail = lines.slice(-5).join('\n')
-  expect({ header, typeTail }).toMatchSnapshot()
+  expect({ head: lines.slice(0, 3).join('\n'), tail: lines.slice(-3).join('\n') }).toMatchSnapshot()
 })
 
 test('all properties use generated JSON Schema value schemas', async () => {

@@ -19,7 +19,7 @@ import { generateCssSchemas } from './generate.ts'
 // Config
 // ============================================================================
 
-const DEFAULT_OUTPUT_PATH = 'src/tools/css.schemas.ts'
+const DEFAULT_OUTPUT_PATH = 'src/controller/css.schemas.ts'
 
 // ============================================================================
 // Helpers
