@@ -20,7 +20,7 @@ import {
   StreamEventLaxSchema,
   UsageSchema,
   VideoContentSchema,
-} from '../open-responses.schemas.ts'
+} from '../responses-client.schemas.ts'
 import {
   createModelExecutor,
   createModelTools,
@@ -199,7 +199,7 @@ describe('model executor — cancellation', () => {
 })
 
 // ================================================================
-// open-responses.schemas — request, item, usage, error schemas + stream events
+// responses-client.schemas — request, item, usage, error schemas + stream events
 // ================================================================
 
 // --- Scenario 1: happy text turn ---
@@ -657,7 +657,7 @@ describe('stream event scenarios', () => {
 })
 
 // ================================================================
-// open-responses.schemas — input content part schemas
+// responses-client.schemas — input content part schemas
 // ================================================================
 
 // ================================================================

@@ -29,7 +29,7 @@ import {
   reasoningEffortEnum,
   TruncationSchema,
   UsageSchema,
-} from './open-responses.schemas.ts'
+} from './responses-client.schemas.ts'
 import {
   MODEL_ENDPOINTS_KEY,
   type ModelDeltaEvent,
@@ -40,7 +40,7 @@ import {
   type ModelRespondOutput,
   type Script,
   type ScriptedResponse,
-} from './open-responses.types.ts'
+} from './responses-client.types.ts'
 
 // ---------------------------------------------------------------------------
 // JSON schemas (host-facing tool boundary — the single validation point)
@@ -347,4 +347,4 @@ export const DEFAULT_SCRIPTED_RESPONSE: ScriptedResponse = {
 
 // Keep the reasoning-effort type (spec ReasoningEffortEnum) in the public
 // surface of this module.
-export type { ReasoningEffort } from './open-responses.schemas.ts'
+export type { ReasoningEffort } from './responses-client.schemas.ts'

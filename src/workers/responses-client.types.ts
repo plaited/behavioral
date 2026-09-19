@@ -19,7 +19,7 @@ import type {
   ReasoningEffort,
   Truncation,
   Usage,
-} from './open-responses.schemas.ts'
+} from './responses-client.schemas.ts'
 
 export type { ReasoningEffort }
 

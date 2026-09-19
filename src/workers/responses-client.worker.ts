@@ -36,7 +36,7 @@ import {
   StreamEventLaxSchema,
   type Usage,
   UsageSchema,
-} from './open-responses.schemas.ts'
+} from './responses-client.schemas.ts'
 import {
   MODEL_ENDPOINTS_KEY,
   type ModelDeltaEvent,
@@ -46,7 +46,7 @@ import {
   type ModelRespondInput,
   type ModelRespondOutput,
   type ModelResultEvent,
-} from './open-responses.types.ts'
+} from './responses-client.types.ts'
 
 // ---------------------------------------------------------------------------
 // Endpoint config (environment data — seeded by the host before spawn)
