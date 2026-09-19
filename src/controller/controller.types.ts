@@ -8,7 +8,7 @@
  * @packageDocumentation
  */
 
-import type { BPEvent, Disconnect, Trigger } from '../behavioral/behavioral.types.ts'
+import type { BPEvent, Disconnect, JsonValue, Trigger } from '../behavioral/behavioral.types.ts'
 import type {
   CONTROLLER_INCOMING_MESSAGE_TYPES,
   CONTROLLER_OUTGOING_MESSAGE_TYPES,
@@ -173,7 +173,7 @@ export type RenderMessage = {
  */
 export type ErrorMessage = {
   type: typeof CONTROLLER_OUTGOING_MESSAGE_TYPES.error
-  detail: { timeStamp: number; id?: string; name: string; error?: string; stack?: string }
+  detail: { timeStamp: number; id?: string; name: string; error?: string; stack?: string; violations?: JsonValue[] }
 }
 
 /**
@@ -377,3 +377,10 @@ export type Transport = {
   /** Register for carrier status/error events. Returns a disconnect. */
   onStatus: (handler: (event: TransportEvent) => void) => Disconnect
 }
+
+export type XssViolation = {
+  element: string
+  reason: string
+}
+
+export type DetectXssViolations = (root: Element | HTMLTemplateElement | DocumentFragment) => XssViolation[]

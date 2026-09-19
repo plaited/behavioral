@@ -35,9 +35,6 @@ export const B_SCALE = 'b-scale'
 
 export const B_FORM = 'b-form'
 
-/** Marker attribute (`b-meta`) for an embedded JSON metadata block on `<script type="application/json">`. */
-export const B_META = 'b-meta'
-
 /**
  * A Set containing HTML attribute names that are considered boolean attributes.
  * Their presence on an element implies a `true` value, and their absence implies `false`.
@@ -98,6 +95,9 @@ export const ERROR_TYPES = keyMirror(
   'page_extension',
   'web_socket',
   'form_submit',
+  'update_trigger_attribute',
+  'render_invalid_trigger',
+  'xss_vectors_detected',
 )
 
 /**

@@ -14,11 +14,15 @@ import {
   SWAP_TARGETS,
 } from './controller.constants.ts'
 import {
+  type ControllerErrors,
   ElementNotFoundError,
   FormSubmitError,
   PageExtensionError,
+  RenderInvalidTriggerError,
   TriggerError,
+  UpdateTriggerAttributeError,
   WebSocketMessageError,
+  XSSVectorsDetected,
 } from './controller.errors.ts'
 import type {
   AttrsMessage,
@@ -32,9 +36,13 @@ import type {
   ServerMessage,
   Transport,
 } from './controller.types.ts'
-import { DelegatedListener } from './delegated-listener.ts'
-import { swapBoundary } from './swap-boundary.ts'
-import { WebSocketTransport } from './ws-transport.ts'
+import {
+  DelegatedListener,
+  detectXssVectors,
+  isInvalidTrigger,
+  swapBoundary,
+  WebSocketTransport,
+} from './controller.utils.ts'
 
 const delegates = new WeakMap<EventTarget, DelegatedListener>()
 
@@ -152,7 +160,7 @@ export class Controller {
       },
     })
   }
-  #reportError(error: Error, id?: string) {
+  #reportError(error: ControllerErrors, id?: string) {
     this.#send({
       type: CONTROLLER_OUTGOING_MESSAGE_TYPES.error,
       detail: {
@@ -161,6 +169,7 @@ export class Controller {
         name: error.name,
         error: error.toString(),
         stack: error.stack,
+        violations: 'violations' in error ? error.violations : undefined,
       },
     })
   }
@@ -179,7 +188,7 @@ export class Controller {
       const raw = element.getAttribute(B_TRIGGER)
       if (!raw) continue
       const handlers = new Map<string, (event: Event) => void>()
-      for (const pair of raw.split(' ')) {
+      for (const pair of raw.split(';')) {
         const separator = pair.indexOf(':')
         if (separator <= 0) continue
 
@@ -265,10 +274,35 @@ export class Controller {
     }
   }
   // Server Message Handlers
-  #performSwap({ element, html, swap }: { element: Element; html: string; swap: keyof typeof SWAP_MODES }) {
+  #performSwap({
+    element,
+    html,
+    swap,
+    id,
+  }: {
+    element: Element
+    html: string
+    swap: keyof typeof SWAP_MODES
+    id: string
+  }) {
     const template = document.createElement('template')
     template.setHTMLUnsafe(html)
     const content = template.content
+    const invalidTriggers = Array.from(content.querySelectorAll(`[${B_TRIGGER}]`)).flatMap((element) => {
+      const value = element.getAttribute(B_TRIGGER)!
+      return isInvalidTrigger(value) ? (element.cloneNode(false) as Element).outerHTML : []
+    })
+
+    if (invalidTriggers.length) {
+      this.#reportError(new RenderInvalidTriggerError(invalidTriggers), id)
+      return
+    }
+    const xssVectors = detectXssVectors(content)
+    if (xssVectors.length) {
+      this.#reportError(new XSSVectorsDetected(xssVectors), id)
+      return
+    }
+
     this.#bindTriggers(content)
     this.#bindForms(content)
     switch (swap) {
@@ -308,6 +342,7 @@ export class Controller {
         element,
         html: html,
         swap,
+        id,
       })
     }
   }
@@ -324,6 +359,10 @@ export class Controller {
           },
         })
       for (const key in attr) {
+        if (key === B_TRIGGER && attr[key] !== null && isInvalidTrigger(attr[key])) {
+          this.#reportError(new UpdateTriggerAttributeError(`${attr[key]}`), id)
+          continue
+        }
         updateAttributes({
           element,
           attr: key,

@@ -1,4 +1,5 @@
 import { ERROR_TYPES } from './controller.constants.ts'
+import type { XssViolation } from './controller.types.ts'
 
 /**
  * Thrown when a server-pushed render or attrs message names a `b-target` that
@@ -59,3 +60,42 @@ export class WebSocketError extends Error implements Error {
 export class FormSubmitError extends Error implements Error {
   override name = ERROR_TYPES.form_submit
 }
+
+export class RenderInvalidTriggerError extends Error implements Error {
+  override name = ERROR_TYPES.render_invalid_trigger
+  readonly violations: string[]
+  constructor(violations: string[]) {
+    super(`${violations.length} Invalid b-trigger attributes detected`)
+    this.violations = violations
+  }
+}
+
+export class UpdateTriggerAttributeError extends Error implements Error {
+  override name = ERROR_TYPES.update_trigger_attribute
+  readonly violations: string[]
+  constructor(violation: string) {
+    super(`Invalid b-trigger detected`)
+    this.violations = [violation]
+  }
+}
+
+export class XSSVectorsDetected extends Error implements Error {
+  override name = ERROR_TYPES.xss_vectors_detected
+  readonly violations: XssViolation[]
+  constructor(violations: XssViolation[]) {
+    super(`${violations.length} XSS vector(s) detected`)
+    this.violations = violations
+  }
+}
+
+export type ControllerErrors =
+  | Error
+  | ElementNotFoundError
+  | WebSocketMessageError
+  | TriggerError
+  | PageExtensionError
+  | WebSocketError
+  | FormSubmitError
+  | RenderInvalidTriggerError
+  | UpdateTriggerAttributeError
+  | XSSVectorsDetected
