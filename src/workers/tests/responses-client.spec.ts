@@ -19,12 +19,12 @@ import {
   StreamEventLaxSchema,
   UsageSchema,
   VideoContentSchema,
-} from '../model.schemas.ts'
-import { createModelExecutor, type ModelDeltaSink } from '../use-model.ts'
-import { ASSISTANT_TEXT, COMPACT_ENCRYPTED_CONTENT, startOpenResponsesServer } from './model-server-fixture.ts'
+} from '../open-responses.schemas.ts'
+import { createModelExecutor, type ModelDeltaSink } from '../use-responses-client.ts'
+import { ASSISTANT_TEXT, startOpenResponsesServer } from './fixtures/model-server.ts'
 
 // ================================================================
-// Model executor — the use-model worker surface
+// Responses client — the use-responses-client worker surface
 // ================================================================
 
 describe('model executor — non-streaming respond', () => {
@@ -132,28 +132,6 @@ describe('model executor — endpoint config via environment data', () => {
   })
 })
 
-describe('model executor — compact', () => {
-  test('round-trips encrypted_content from a compaction resource', async () => {
-    const server = await startOpenResponsesServer()
-    const executor = createModelExecutor({ endpoints: { mock: { url: server.url } } })
-    try {
-      const out = await executor.compact({
-        provider: 'mock',
-        modelId: 'mock-model',
-        input: [{ type: 'message', role: 'user', content: 'compact me' }],
-      })
-      const success = out as { encrypted_content?: string; usage?: { total_tokens: number }; isError?: boolean }
-      expect(success.isError).toBeUndefined()
-      expect(success.encrypted_content).toBe(COMPACT_ENCRYPTED_CONTENT)
-      expect(success.usage).toMatchObject({ total_tokens: 150 })
-      expect(server.requests[0]?.path).toBe('/responses/compact')
-    } finally {
-      executor.destroy()
-      await server.close()
-    }
-  })
-})
-
 describe('model executor — failures are data', () => {
   test('a non-2xx response is error data carrying the structured message', async () => {
     const server = await startOpenResponsesServer()
@@ -211,7 +189,7 @@ describe('model executor — cancellation', () => {
 })
 
 // ================================================================
-// model.schemas — request, item, usage, error schemas + stream events
+// open-responses.schemas — request, item, usage, error schemas + stream events
 // ================================================================
 
 // --- Scenario 1: happy text turn ---
@@ -368,16 +346,16 @@ const unknownEventEvents: OpenResponsesStreamEvent[] = [
 describe('schema validation — request', () => {
   test('valid request parses successfully', () => {
     const result = OpenResponsesRequestSchema.parse({
-      model: { provider: 'anthropic', modelId: 'claude-sonnet-4' },
+      model: 'claude-sonnet-4',
       input: [{ type: 'message', role: 'user', content: 'Hello' }],
     })
-    expect(result.model.provider).toBe('anthropic')
+    expect(result.model).toBe('claude-sonnet-4')
     expect(result.input).toHaveLength(1)
   })
 
   test('valid request with function_call input parses', () => {
     const result = OpenResponsesRequestSchema.parse({
-      model: { provider: 'anthropic', modelId: 'claude-sonnet-4' },
+      model: 'claude-sonnet-4',
       input: [
         {
           type: 'function_call',
@@ -392,7 +370,7 @@ describe('schema validation — request', () => {
 
   test('valid request with function_call_output input parses', () => {
     const result = OpenResponsesRequestSchema.parse({
-      model: { provider: 'anthropic', modelId: 'claude-sonnet-4' },
+      model: 'claude-sonnet-4',
       input: [
         {
           type: 'function_call_output',
@@ -407,7 +385,7 @@ describe('schema validation — request', () => {
   test('malformed item (missing required field) is hard-rejected', () => {
     expect(() =>
       OpenResponsesRequestSchema.parse({
-        model: { provider: 'test', modelId: 'm' },
+        model: 'm',
         input: [
           { type: 'message', role: 'assistant' }, // missing content
         ],
@@ -418,7 +396,7 @@ describe('schema validation — request', () => {
   test('unknown item type is hard-rejected', () => {
     expect(() =>
       OpenResponsesRequestSchema.parse({
-        model: { provider: 'test', modelId: 'm' },
+        model: 'm',
         input: [{ type: 'computer_call', id: 'cc_1' }],
       }),
     ).toThrow()
@@ -426,7 +404,7 @@ describe('schema validation — request', () => {
 
   test('tools with name, description, parameters parse', () => {
     const result = OpenResponsesRequestSchema.parse({
-      model: { provider: 'test', modelId: 'm' },
+      model: 'm',
       input: [{ type: 'message', role: 'user', content: 'Hi' }],
       tools: [
         {
@@ -442,7 +420,7 @@ describe('schema validation — request', () => {
   test('tool missing parameters is hard-rejected', () => {
     expect(() =>
       OpenResponsesRequestSchema.parse({
-        model: { provider: 'test', modelId: 'm' },
+        model: 'm',
         input: [{ type: 'message', role: 'user', content: 'Hi' }],
         tools: [{ name: 'read_file', description: 'Read a file from disk' }],
       }),
@@ -451,13 +429,29 @@ describe('schema validation — request', () => {
 
   test('truncation and instructions parse', () => {
     const result = OpenResponsesRequestSchema.parse({
-      model: { provider: 'test', modelId: 'm' },
+      model: 'm',
       input: [{ type: 'message', role: 'system', content: 'You are helpful' }],
       truncation: 'disabled',
       instructions: 'Be concise',
     })
     expect(result.truncation).toBe('disabled')
     expect(result.instructions).toBe('Be concise')
+  })
+
+  test('spec reasoning param parses; effort is constrained to the spec enum', () => {
+    const result = OpenResponsesRequestSchema.parse({
+      model: 'm',
+      input: [{ type: 'message', role: 'user', content: 'Hi' }],
+      reasoning: { effort: 'xhigh' },
+    })
+    expect(result.reasoning?.effort).toBe('xhigh')
+    expect(() =>
+      OpenResponsesRequestSchema.parse({
+        model: 'm',
+        input: [{ type: 'message', role: 'user', content: 'Hi' }],
+        reasoning: { effort: 'ultra' },
+      }),
+    ).toThrow()
   })
 })
 
@@ -653,7 +647,7 @@ describe('stream event scenarios', () => {
 })
 
 // ================================================================
-// model.schemas — input content part schemas
+// open-responses.schemas — input content part schemas
 // ================================================================
 
 // ================================================================

@@ -1,12 +1,13 @@
 /**
- * Wire and option types shared by the model worker (`model.ts`) and its host
- * consumer (`use-model.ts`).
+ * Wire and option types shared by the model worker (`responses-client.ts`)
+ * and its host consumer (`use-responses-client.ts`).
  *
  * @remarks
- * `model.ts` mounts `self.onmessage` at top level, so the host must never
- * import it; both sides import here instead. Types plus one side-effect-free
- * key constant — the key is the only runtime value, so both sides agree on the
- * `setEnvironmentData` / `getEnvironmentData` key without a circular import.
+ * `responses-client.ts` mounts `self.onmessage` at top level, so the host
+ * must never import it; both sides import here instead. Types plus one
+ * side-effect-free key constant — the key is the only runtime value, so both
+ * sides agree on the `setEnvironmentData` / `getEnvironmentData` key without
+ * a circular import.
  */
 
 import type {
@@ -15,12 +16,12 @@ import type {
   Error as OpenResponsesError,
   OpenResponsesStreamEvent,
   OutputItem,
+  ReasoningEffort,
   Truncation,
   Usage,
-} from './model.schemas.ts'
+} from './open-responses.schemas.ts'
 
-/** Reasoning effort levels. */
-export type ReasoningEffort = 'xhigh' | 'high' | 'medium' | 'low' | 'minimal' | 'none'
+export type { ReasoningEffort }
 
 /**
  * One provisioned Open Responses endpoint. `apiKey` must already be resolved
@@ -29,9 +30,8 @@ export type ReasoningEffort = 'xhigh' | 'high' | 'medium' | 'low' | 'minimal' | 
  */
 export type ModelEndpointConfig = {
   /**
-   * The full base URL the operation paths append to. The worker appends only
-   * the operation path (`/responses`, `/responses/compact`) — no `/v1/`
-   * prefix is added.
+   * The full base URL the operation path appends to (`/responses`) — no
+   * `/v1/` prefix is added.
    */
   url: string
   apiKey?: string
@@ -56,7 +56,13 @@ export type ModelRespondInput = {
   instructions?: string
   truncation?: Truncation
   stream?: boolean
-  reasoningEffort?: ReasoningEffort
+  /** Spec ReasoningEffortEnum value, or a non-spec value passed through verbatim. */
+  reasoningEffort?: ReasoningEffort | (string & {})
+  /**
+   * Passthrough: spec request params we do not name + endpoint extensions,
+   * forwarded to the request body verbatim (named fields win on collision).
+   */
+  [key: string]: unknown
 }
 
 /**
@@ -75,39 +81,23 @@ export type ModelRespondOutput =
   | { isError: true; message: string }
 
 // ---------------------------------------------------------------------------
-// model-compact — input / output
-// ---------------------------------------------------------------------------
-
-export type ModelCompactInput = {
-  provider: string
-  modelId: string
-  input: InputItem[]
-  promptCacheKey?: string
-}
-
-export type ModelCompactOutput = { encrypted_content: string; usage?: Usage } | { isError: true; message: string }
-
-// ---------------------------------------------------------------------------
 // Wire protocol (host ⇄ worker)
 // ---------------------------------------------------------------------------
 
 /** Host → worker: run one respond call. */
 export type ModelRespondRequest = { type: 'RESPOND'; id: string; input: ModelRespondInput }
 
-/** Host → worker: run one compact call. */
-export type ModelCompactRequest = { type: 'COMPACT'; id: string; input: ModelCompactInput }
-
 /** Host → worker: stop one in-flight call. */
 export type ModelCancelRequest = { type: 'CANCEL'; id: string; reason?: string }
 
 /** Messages the worker accepts. */
-export type ModelInbound = ModelRespondRequest | ModelCompactRequest | ModelCancelRequest
+export type ModelInbound = ModelRespondRequest | ModelCancelRequest
 
 /** Worker → host: one streamed semantic event, emitted as it arrives. */
 export type ModelDeltaEvent = { type: 'DELTA'; id: string; event: OpenResponsesStreamEvent }
 
 /** Worker → host: the one terminal event per call. */
-export type ModelResultEvent = { type: 'RESULT'; id: string; result: ModelRespondOutput | ModelCompactOutput }
+export type ModelResultEvent = { type: 'RESULT'; id: string; result: ModelRespondOutput }
 
 /** Messages the worker emits. */
 export type ModelOutbound = ModelDeltaEvent | ModelResultEvent

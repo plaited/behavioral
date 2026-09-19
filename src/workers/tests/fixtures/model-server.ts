@@ -22,12 +22,12 @@
  * - POST /responses whose input mentions {@link FAILURE_MARKER} → SSE:
  *   output_item.added → response.failed → data: [DONE].
  * - POST /responses with empty `input` → 400 structured error body.
- * - POST /responses/compact without `model` → 400 structured error body
- *   (the suite's compact-missing-model template).
- * - POST /responses/compact otherwise → response.compaction resource with
- *   a compaction item (encrypted_content) + usage.
  * - When `apiKey` is configured, requests must carry
  *   `Authorization: Bearer <apiKey>` or get a 401 structured error body.
+ *
+ * No /responses/compact route: the compaction client was removed (context
+ * management is client-side — see plan.md Decision Log); no test surface
+ * needs it.
  *
  * Every request (path, authorization header, parsed JSON body) is recorded in
  * `requests` for routing/auth assertions.
@@ -46,7 +46,6 @@ export const FUNCTION_CALL = {
   name: 'get_weather',
   arguments: '{"location": "Paris"}',
 } as const
-export const COMPACT_ENCRYPTED_CONTENT = 'encrypted:mock-compaction'
 
 export type RecordedRequest = {
   path: string
@@ -65,12 +64,6 @@ const mockUsage = {
   input_tokens: 12,
   output_tokens: 8,
   total_tokens: 20,
-} as const
-
-const compactUsage = {
-  input_tokens: 100,
-  output_tokens: 50,
-  total_tokens: 150,
 } as const
 
 const assistantMessageItem = (text: string) => ({
@@ -218,22 +211,6 @@ export const startOpenResponsesServer = async ({
           ? [reasoningItem(REASONING_TEXT), assistantMessageItem(ASSISTANT_TEXT)]
           : [assistantMessageItem(ASSISTANT_TEXT)]
         return json(mockResponse(typed.model, output))
-      }
-
-      if (pathname === '/responses/compact' || pathname.endsWith('/responses/compact')) {
-        if (typeof typed.model !== 'string' || typed.model.length === 0) {
-          return jsonError(400, 'invalid_request_error', 'model is required')
-        }
-        if (!Array.isArray(typed.input) || typed.input.length === 0) {
-          return jsonError(400, 'invalid_request_error', 'input is required')
-        }
-        return json({
-          id: 'resp_compact_001',
-          object: 'response.compaction',
-          created_at: 1734366691,
-          output: [{ type: 'compaction', encrypted_content: COMPACT_ENCRYPTED_CONTENT }],
-          usage: compactUsage,
-        })
       }
 
       return new Response('not found', { status: 404 })

@@ -293,7 +293,7 @@ export const SHELL_TOOL_NAME = 'execute_shell'
  * executor's defaults; a b-thread guard can only `cancel(id)` through the
  * `onLine` seam until kernel ingress for event detail exists.
  */
-export const createShellTool = (executor: ShellExecutor) =>
+export const getShellWorker = (executor: ShellExecutor) =>
   useTool(
     {
       name: SHELL_TOOL_NAME,

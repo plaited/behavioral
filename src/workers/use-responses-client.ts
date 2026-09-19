@@ -1,7 +1,9 @@
 /**
  * Host consumer for the model worker — owns the worker lifecycle, correlates
- * request ids, and exposes the `respond`/`compact` surface the kernel consumes,
- * plus the `useTool` bindings and the in-process scripted (test/dev) executor.
+ * request ids, and exposes the `respond` surface the kernel consumes, plus the
+ * `useTool` binding and the in-process scripted (test/dev) executor. No
+ * compaction: context management is client-side (RLM-style thread recursion +
+ * distillation via the ordinary respond call — see plan.md Decision Log).
  *
  * @remarks
  * Endpoint config is seeded into the worker with `setEnvironmentData` before
@@ -20,27 +22,25 @@ import { setEnvironmentData } from 'node:worker_threads'
 import type { JSONSchemaType } from 'ajv'
 import { useTool } from '../tools/use-tool.ts'
 import {
-  ErrorSchema,
-  FunctionToolSchema,
-  InputItemSchema,
-  OutputItemSchema,
-  TruncationSchema,
-  UsageSchema,
-} from './model.schemas.ts'
-import {
   MODEL_ENDPOINTS_KEY,
-  type ModelCompactInput,
-  type ModelCompactOutput,
   type ModelDeltaEvent,
   type ModelEndpoints,
   type ModelInbound,
   type ModelOutbound,
   type ModelRespondInput,
   type ModelRespondOutput,
-  type ReasoningEffort,
   type Script,
   type ScriptedResponse,
 } from './model.types.ts'
+import {
+  ErrorSchema,
+  FunctionToolSchema,
+  InputItemSchema,
+  OutputItemSchema,
+  reasoningEffortEnum,
+  TruncationSchema,
+  UsageSchema,
+} from './open-responses.schemas.ts'
 
 // ---------------------------------------------------------------------------
 // JSON schemas (host-facing tool boundary — the single validation point)
@@ -68,17 +68,31 @@ export const ModelRespondInputSchema = {
     truncation: { ...truncationJsonSchema, nullable: true },
     stream: { type: 'boolean', nullable: true, description: 'request SSE streaming' },
     reasoningEffort: {
-      type: 'string',
-      enum: ['xhigh', 'high', 'medium', 'low', 'minimal', 'none'],
-      nullable: true,
-      description: 'reasoning effort level',
+      anyOf: [
+        {
+          type: 'string',
+          enum: [...reasoningEffortEnum],
+          description: 'spec ReasoningEffortEnum values (none|low|medium|high|xhigh)',
+        },
+        {
+          type: 'string',
+          minLength: 1,
+          description:
+            'non-spec value — passed through to reasoning.effort verbatim for endpoints that extend the spec (e.g. OpenAI-only minimal)',
+        },
+        { type: 'null' },
+      ],
+      description:
+        'reasoning effort; spec values are declared, others pass through (the endpoint is the authority on its supported efforts)',
     },
   },
   required: ['provider', 'modelId', 'input'],
-  additionalProperties: false,
+  additionalProperties: true,
   description:
     'Send input items to a provisioned Open Responses endpoint and get back output items. ' +
-    'function_call items are returned as data — dispatch them yourself.',
+    'function_call items are returned as data — dispatch them yourself. ' +
+    'Named fields are spec-only; any other key-value in args passes through to the ' +
+    'request body verbatim (spec params we do not name + endpoint extensions).',
 } as unknown as JSONSchemaType<ModelRespondInput>
 
 export const ModelRespondOutputSchema = {
@@ -109,55 +123,9 @@ export const ModelRespondOutputSchema = {
   description: 'Output items + status on success; { isError, message } on failure.',
 } as unknown as JSONSchemaType<ModelRespondOutput>
 
-export const ModelCompactInputSchema = {
-  type: 'object',
-  properties: {
-    provider: {
-      type: 'string',
-      minLength: 1,
-      description: 'provisioned endpoint selector — maps to a URL + key injected at provisioning',
-    },
-    modelId: { type: 'string', minLength: 1, description: 'model identifier at the endpoint' },
-    input: { type: 'array', items: inputItemJsonSchema, description: 'conversation transcript items to compact' },
-    promptCacheKey: { type: 'string', nullable: true },
-  },
-  required: ['provider', 'modelId', 'input'],
-  additionalProperties: false,
-  description:
-    'Compact a conversation via the endpoint /responses/compact. Returns encrypted_content ' +
-    'to pass back as a compaction input item on the next respond call.',
-} as unknown as JSONSchemaType<ModelCompactInput>
-
-export const ModelCompactOutputSchema = {
-  type: 'object',
-  oneOf: [
-    {
-      type: 'object',
-      properties: {
-        encrypted_content: { type: 'string' },
-        usage: { ...usageJsonSchema, nullable: true },
-      },
-      required: ['encrypted_content'],
-      additionalProperties: false,
-    },
-    {
-      type: 'object',
-      properties: {
-        isError: { type: 'boolean', const: true },
-        message: { type: 'string' },
-      },
-      required: ['isError', 'message'],
-      additionalProperties: false,
-    },
-  ],
-  description: 'Compaction encrypted_content (+ usage) on success; { isError, message } on failure.',
-} as unknown as JSONSchemaType<ModelCompactOutput>
-
 export const MODEL_RESPOND_TOOL_NAME = 'model-respond'
-export const MODEL_COMPACT_TOOL_NAME = 'model-compact'
 
 export type ModelRespondTool = ReturnType<typeof useTool<ModelRespondInput, ModelRespondOutput>>
-export type ModelCompactTool = ReturnType<typeof useTool<ModelCompactInput, ModelCompactOutput>>
 
 // ---------------------------------------------------------------------------
 // Executor — one worker, id-correlated requests
@@ -180,8 +148,6 @@ export type ModelExecutorConfig = {
 export type ModelExecutor = {
   /** Run one respond call; resolves a result and never rejects. */
   respond: (input: ModelRespondInput) => Promise<ModelRespondOutput>
-  /** Run one compact call; resolves a result and never rejects. */
-  compact: (input: ModelCompactInput) => Promise<ModelCompactOutput>
   /** Stop one in-flight call by correlation id. */
   cancel: (id: string) => void
   /** Terminate the worker. */
@@ -205,8 +171,8 @@ const abortedResult = (message: string): { isError: true; message: string } => (
  */
 export const createModelExecutor = (config: ModelExecutorConfig): ModelExecutor => {
   setEnvironmentData(MODEL_ENDPOINTS_KEY, config.endpoints)
-  const worker = new Worker(config.workerUrl ?? new URL('./model.ts', import.meta.url))
-  const pending = new Map<string, (result: ModelRespondOutput | ModelCompactOutput) => void>()
+  const worker = new Worker(config.workerUrl ?? new URL('./responses-client.ts', import.meta.url))
+  const pending = new Map<string, (result: ModelRespondOutput) => void>()
   let destroying = false
   let destroyWatchdog: ReturnType<typeof setTimeout> | undefined
   let dead: string | undefined
@@ -239,12 +205,8 @@ export const createModelExecutor = (config: ModelExecutorConfig): ModelExecutor 
     }
   }
 
-  const request = (
-    message:
-      | { type: 'RESPOND'; id: string; input: ModelRespondInput }
-      | { type: 'COMPACT'; id: string; input: ModelCompactInput },
-  ) =>
-    new Promise<ModelRespondOutput | ModelCompactOutput>((resolve) => {
+  const request = (message: { type: 'RESPOND'; id: string; input: ModelRespondInput }) =>
+    new Promise<ModelRespondOutput>((resolve) => {
       if (dead !== undefined) {
         resolve(abortedResult(`worker_error: ${dead}`))
         return
@@ -254,10 +216,7 @@ export const createModelExecutor = (config: ModelExecutorConfig): ModelExecutor 
     })
 
   const respond = (input: ModelRespondInput): Promise<ModelRespondOutput> =>
-    request({ type: 'RESPOND', id: crypto.randomUUID(), input }) as Promise<ModelRespondOutput>
-
-  const compact = (input: ModelCompactInput): Promise<ModelCompactOutput> =>
-    request({ type: 'COMPACT', id: crypto.randomUUID(), input }) as Promise<ModelCompactOutput>
+    request({ type: 'RESPOND', id: crypto.randomUUID(), input })
 
   const cancel = (id: string): void => {
     const message: ModelInbound = { type: 'CANCEL', id }
@@ -283,7 +242,7 @@ export const createModelExecutor = (config: ModelExecutorConfig): ModelExecutor 
     }, DESTROY_GRACE_MS)
   }
 
-  return { respond, compact, cancel, destroy }
+  return { respond, cancel, destroy }
 }
 
 // ---------------------------------------------------------------------------
@@ -294,13 +253,11 @@ const invalidInputMessage = (errors: { instancePath: string; message?: string }[
   `invalid input: ${errors?.map((e) => `${e.instancePath} ${e.message}`).join('; ')}`
 
 /**
- * Bind the model tools to an executor. The schema is the trust boundary:
+ * Bind the model tool to an executor. The schema is the trust boundary:
  * model input is validated here once, and the executor receives only valid
  * input.
  */
-export const createModelTools = (
-  executor: ModelExecutor,
-): { modelRespond: ModelRespondTool; modelCompact: ModelCompactTool } => {
+export const createModelTools = (executor: ModelExecutor): { modelRespond: ModelRespondTool } => {
   const modelRespond = useTool(
     {
       name: MODEL_RESPOND_TOOL_NAME,
@@ -317,22 +274,7 @@ export const createModelTools = (
     },
   )
 
-  const modelCompact = useTool(
-    {
-      name: MODEL_COMPACT_TOOL_NAME,
-      description:
-        'Compact a conversation via the endpoint /responses/compact. Returns encrypted_content ' +
-        'to pass back as a compaction input item on the next respond call.',
-      inputSchema: ModelCompactInputSchema,
-      outputSchema: ModelCompactOutputSchema,
-    },
-    (input, validate): Promise<ModelCompactOutput> => {
-      if (!validate.input(input)) return Promise.resolve(abortedResult(invalidInputMessage(validate.input.errors)))
-      return executor.compact(input)
-    },
-  )
-
-  return { modelRespond, modelCompact }
+  return { modelRespond }
 }
 
 // ---------------------------------------------------------------------------
@@ -340,20 +282,16 @@ export const createModelTools = (
 // ---------------------------------------------------------------------------
 
 /**
- * Build the model tools bound to a {@link Script} instead of a worker — no
- * fetch, no network, no worker. Same `{ modelRespond, modelCompact }` shape and
- * the same input/output schemas as {@link createModelTools}, so the turn loop,
+ * Build the model tool bound to a {@link Script} instead of a worker — no
+ * fetch, no network, no worker. Same `{ modelRespond }` shape and the same
+ * input/output schemas as {@link createModelTools}, so the turn loop,
  * dispatch bridge, and CLI seam run identically against the scripted or the
  * live worker. This is a host-side test/dev double for CLI/CI determinism — it
  * is deliberately NOT part of the worker.
  *
  * @public
  */
-export const createScriptedModelTools = ({
-  script,
-}: {
-  script: Script
-}): { modelRespond: ModelRespondTool; modelCompact: ModelCompactTool } => {
+export const createScriptedModelTools = ({ script }: { script: Script }): { modelRespond: ModelRespondTool } => {
   let callIndex = 0
   const resolveScript = async (input: ModelRespondInput, idx: number): Promise<ScriptedResponse> => {
     if (typeof script === 'function') return script(input, idx)
@@ -383,19 +321,7 @@ export const createScriptedModelTools = ({
       }
     },
   )
-  const modelCompact = useTool(
-    {
-      name: MODEL_COMPACT_TOOL_NAME,
-      description: 'Scripted (deterministic) model-compact — returns a canned compaction with no fetch.',
-      inputSchema: ModelCompactInputSchema,
-      outputSchema: ModelCompactOutputSchema,
-    },
-    async (_input, _validate): Promise<ModelCompactOutput> => ({
-      encrypted_content: 'scripted-compaction',
-      usage: { input_tokens: 0, output_tokens: 0, total_tokens: 0 },
-    }),
-  )
-  return { modelRespond, modelCompact }
+  return { modelRespond }
 }
 
 /**
@@ -419,5 +345,6 @@ export const DEFAULT_SCRIPTED_RESPONSE: ScriptedResponse = {
   usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
 }
 
-// Keep the reasoning-effort type in the public surface of this module.
-export type { ReasoningEffort }
+// Keep the reasoning-effort type (spec ReasoningEffortEnum) in the public
+// surface of this module.
+export type { ReasoningEffort } from './open-responses.schemas.ts'

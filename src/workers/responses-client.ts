@@ -1,10 +1,10 @@
 /**
- * Model worker — executes one Open Responses call per request (`/responses` or
- * `/responses/compact`), streams semantic SSE events to the host as they
- * arrive as `DELTA`, and returns a single terminal `RESULT`.
+ * Model worker — executes one Open Responses call per request (`/responses`),
+ * streams semantic SSE events to the host as they arrive as `DELTA`, and
+ * returns a single terminal `RESULT`.
  *
  * @remarks
- * Spawned by URL from `use-model.ts` (`new Worker(new URL('./model.ts', ...))`)
+ * Spawned by URL from `use-responses-client.ts` (`new Worker(new URL('./responses-client.ts', ...))`)
  * and imported by nobody, so it needs no main-vs-worker detection.
  *
  * Endpoint config (URL + resolved API key + extra headers) is delivered via
@@ -25,6 +25,16 @@
 
 import { getEnvironmentData } from 'node:worker_threads'
 import {
+  MODEL_ENDPOINTS_KEY,
+  type ModelDeltaEvent,
+  type ModelEndpointConfig,
+  type ModelEndpoints,
+  type ModelInbound,
+  type ModelRespondInput,
+  type ModelRespondOutput,
+  type ModelResultEvent,
+} from './model.types.ts'
+import {
   ErrorSchema,
   type KnownStreamEvent,
   KnownStreamEventSchema,
@@ -36,19 +46,7 @@ import {
   StreamEventLaxSchema,
   type Usage,
   UsageSchema,
-} from './model.schemas.ts'
-import {
-  MODEL_ENDPOINTS_KEY,
-  type ModelCompactInput,
-  type ModelCompactOutput,
-  type ModelDeltaEvent,
-  type ModelEndpointConfig,
-  type ModelEndpoints,
-  type ModelInbound,
-  type ModelRespondInput,
-  type ModelRespondOutput,
-  type ModelResultEvent,
-} from './model.types.ts'
+} from './open-responses.schemas.ts'
 
 // ---------------------------------------------------------------------------
 // Endpoint config (environment data — seeded by the host before spawn)
@@ -57,7 +55,7 @@ import {
 const endpoints = (getEnvironmentData(MODEL_ENDPOINTS_KEY) ?? {}) as ModelEndpoints
 
 // ---------------------------------------------------------------------------
-// Wire helpers — lifted from the former in-process model tool
+// Wire helpers
 // ---------------------------------------------------------------------------
 
 const joinUrl = (base: string, path: string): string => `${base.replace(/\/$/, '')}${path}`
@@ -69,16 +67,6 @@ const buildHeaders = (endpoint: ModelEndpointConfig): Record<string, string> => 
 })
 
 const FETCH_TIMEOUT_MS = 60_000
-
-const buildRespondBody = (input: ModelRespondInput): Record<string, unknown> => {
-  const body: Record<string, unknown> = { model: input.modelId, input: input.input }
-  if (input.tools !== undefined) body.tools = input.tools
-  if (input.instructions !== undefined) body.instructions = input.instructions
-  if (input.truncation !== undefined) body.truncation = input.truncation
-  if (input.stream === true) body.stream = true
-  if (input.reasoningEffort !== undefined) body.reasoning = { effort: input.reasoningEffort }
-  return body
-}
 
 /**
  * Structured error body ({ error: { code, message } }) on a non-2xx response,
@@ -99,6 +87,34 @@ const describeHttpError = async (res: Response): Promise<string> => {
     detail = ''
   }
   return `HTTP ${res.status}${detail ? ` — ${detail}` : ''}`
+}
+
+/** Tool-input fields with named wire mappings — everything else passes through. */
+const NAMED_INPUT_KEYS = new Set([
+  'provider',
+  'modelId',
+  'input',
+  'tools',
+  'instructions',
+  'truncation',
+  'stream',
+  'reasoningEffort',
+])
+
+const buildRespondBody = (input: ModelRespondInput): Record<string, unknown> => {
+  const body: Record<string, unknown> = { model: input.modelId, input: input.input }
+  // Passthrough: spec params we do not name + endpoint extensions cross the
+  // wire verbatim. Named mappings are assigned after, so they win collisions.
+  for (const [key, value] of Object.entries(input)) {
+    if (NAMED_INPUT_KEYS.has(key) || value === undefined) continue
+    body[key] = value
+  }
+  if (input.tools !== undefined) body.tools = input.tools
+  if (input.instructions !== undefined) body.instructions = input.instructions
+  if (input.truncation !== undefined) body.truncation = input.truncation
+  if (input.stream === true) body.stream = true
+  if (input.reasoningEffort !== undefined) body.reasoning = { effort: input.reasoningEffort }
+  return body
 }
 
 // ---------------------------------------------------------------------------
@@ -130,20 +146,6 @@ const responseResourceSchema = makeSchema<ResponseResource>({
     error: { ...errorJsonSchema, additionalProperties: true, nullable: true },
   },
   required: ['id', 'object', 'status', 'output'],
-  additionalProperties: true,
-})
-
-type CompactResource = { output: unknown[]; usage?: Usage }
-
-const compactResourceSchema = makeSchema<CompactResource>({
-  type: 'object',
-  properties: {
-    id: { type: 'string' },
-    object: { type: 'string' },
-    output: { type: 'array', items: { type: 'object' } },
-    usage: { ...usageJsonSchema, nullable: true },
-  },
-  required: ['id', 'object', 'output'],
   additionalProperties: true,
 })
 
@@ -266,7 +268,7 @@ const postDelta = (id: string, event: OpenResponsesStreamEvent): void => {
   self.postMessage(message)
 }
 
-const postResult = (id: string, result: ModelRespondOutput | ModelCompactOutput): void => {
+const postResult = (id: string, result: ModelRespondOutput): void => {
   const message: ModelResultEvent = { type: 'RESULT', id, result }
   self.postMessage(message)
 }
@@ -307,39 +309,6 @@ const runRespond = async (
   }
 }
 
-const runCompact = async (input: ModelCompactInput, request: ActiveRequest): Promise<ModelCompactOutput> => {
-  const endpoint = endpoints[input.provider]
-  if (!endpoint) return { isError: true, message: `[Error: unknown provider "${input.provider}"]` }
-  try {
-    const body: Record<string, unknown> = { model: input.modelId, input: input.input }
-    if (input.promptCacheKey !== undefined) body.prompt_cache_key = input.promptCacheKey
-    const res = await fetch(joinUrl(endpoint.url, '/responses/compact'), {
-      method: 'POST',
-      headers: buildHeaders(endpoint),
-      body: JSON.stringify(body),
-      signal: request.controller.signal,
-    })
-    if (!res.ok) return { isError: true, message: await describeHttpError(res) }
-    const parsed = compactResourceSchema.safeParse(await res.json())
-    if (!parsed.success) return { isError: true, message: 'invalid compact response from endpoint' }
-    const compaction = parsed.data.output.find((item) => (item as { type?: unknown }).type === 'compaction') as
-      | { encrypted_content?: unknown }
-      | undefined
-    if (typeof compaction?.encrypted_content !== 'string') {
-      return { isError: true, message: 'no compaction item with encrypted_content in response' }
-    }
-    return {
-      encrypted_content: compaction.encrypted_content,
-      ...(parsed.data.usage !== undefined && { usage: parsed.data.usage }),
-    }
-  } catch (error) {
-    if (request.reason === 'timeout')
-      return { isError: true, message: `model request timed out after ${FETCH_TIMEOUT_MS}ms` }
-    if (request.reason === 'canceled') return { isError: true, message: 'model request canceled' }
-    return { isError: true, message: error instanceof Error ? error.message : String(error) }
-  }
-}
-
 /** Route one inbound message. */
 const handleInbound = async (message: ModelInbound): Promise<void> => {
   if (message.type === 'CANCEL') {
@@ -364,12 +333,9 @@ const handleInbound = async (message: ModelInbound): Promise<void> => {
   }
   active.set(message.id, request)
 
-  // `respond`/`compact` never reject: any worker-side throw becomes result data.
+  // `respond` never rejects: any worker-side throw becomes result data.
   try {
-    const result =
-      message.type === 'RESPOND'
-        ? await runRespond(message.id, message.input, request)
-        : await runCompact(message.input, request)
+    const result = await runRespond(message.id, message.input, request)
     postResult(message.id, result)
   } catch (err) {
     postResult(message.id, { isError: true, message: err instanceof Error ? err.message : String(err) })
@@ -381,7 +347,7 @@ const handleInbound = async (message: ModelInbound): Promise<void> => {
 
 // The wire payload is produced by our own host code, so it is typed by
 // assertion rather than re-validated here — model input is validated once, at
-// the tool boundary (see `use-model.ts`). MINIMAL: add an AJV wire validator if
+// the tool boundary (see `use-responses-client.ts`). MINIMAL: add an AJV wire validator if
 // the worker ever accepts messages from outside this process.
 self.onmessage = (event: MessageEvent): void => {
   void handleInbound(event.data as ModelInbound)

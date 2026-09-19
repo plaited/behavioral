@@ -5,19 +5,14 @@ import {
   createModelTools,
   createScriptedModelTools,
   DEFAULT_SCRIPTED_RESPONSE,
-  MODEL_COMPACT_TOOL_NAME,
   MODEL_RESPOND_TOOL_NAME,
-  ModelCompactInputSchema,
-  ModelCompactOutputSchema,
   ModelRespondInputSchema,
   ModelRespondOutputSchema,
-} from '../use-model.ts'
-import { ASSISTANT_TEXT, startOpenResponsesServer } from './model-server-fixture.ts'
+} from '../use-responses-client.ts'
+import { ASSISTANT_TEXT, startOpenResponsesServer } from './fixtures/model-server.ts'
 
 const validateRespondInput = ajv.compile(ModelRespondInputSchema)
 const validateRespondOutput = ajv.compile(ModelRespondOutputSchema)
-const validateCompactInput = ajv.compile(ModelCompactInputSchema)
-const validateCompactOutput = ajv.compile(ModelCompactOutputSchema)
 
 const userMessage = { type: 'message', role: 'user', content: 'Say hello' } as const
 
@@ -28,20 +23,69 @@ describe('model tools — schema contract', () => {
     expect(validateRespondInput({ provider: 'p', modelId: 'm', input: [] })).toBe(true)
   })
 
-  test('respond rejects unknown/host-only fields (no apiKey or url on the wire)', () => {
-    expect(validateRespondInput({ provider: 'p', modelId: 'm', input: [], apiKey: 'leak' })).toBe(false)
-    expect(validateRespondInput({ provider: 'p', modelId: 'm', input: [], url: 'http://x' })).toBe(false)
+  test('respond rejects unknown/host-only fields as endpoint config — extras are inert body data', async () => {
+    const server = await startOpenResponsesServer({ apiKey: 'real-key' })
+    const executor = createModelExecutor({
+      endpoints: { mock: { url: server.url, apiKey: 'real-key' } },
+    })
+    try {
+      const { modelRespond } = createModelTools(executor)
+      const out = await modelRespond({
+        provider: 'mock',
+        modelId: 'mock-model',
+        input: [userMessage],
+        apiKey: 'inert-body-value',
+        url: 'http://evil.example',
+      })
+      // The call still went to the provisioned endpoint with the provisioned
+      // key — args never reconfigure the connection.
+      expect((out as { isError?: boolean }).isError).toBeUndefined()
+      expect(server.requests[0]?.path).toBe('/responses')
+      expect(server.requests[0]?.auth).toBe('Bearer real-key')
+      // Extra keys pass through as plain body data, nothing more.
+      const body = server.requests[0]?.body as Record<string, unknown>
+      expect(body.apiKey).toBe('inert-body-value')
+      expect(body.url).toBe('http://evil.example')
+    } finally {
+      executor.destroy()
+      await server.close()
+    }
   })
 
-  test('reasoningEffort is constrained to the enum', () => {
-    expect(validateRespondInput({ provider: 'p', modelId: 'm', input: [], reasoningEffort: 'ultra' })).toBe(false)
+  test('reasoningEffort declares the spec enum and passes non-spec values through', () => {
+    // Spec values accepted.
     expect(validateRespondInput({ provider: 'p', modelId: 'm', input: [], reasoningEffort: 'high' })).toBe(true)
+    expect(validateRespondInput({ provider: 'p', modelId: 'm', input: [], reasoningEffort: 'xhigh' })).toBe(true)
+    // Non-spec values (OpenAI-only minimal, endpoint extensions) pass through.
+    expect(validateRespondInput({ provider: 'p', modelId: 'm', input: [], reasoningEffort: 'minimal' })).toBe(true)
+    // Structure is still guarded: empty and non-string values rejected.
+    expect(validateRespondInput({ provider: 'p', modelId: 'm', input: [], reasoningEffort: '' })).toBe(false)
+    expect(validateRespondInput({ provider: 'p', modelId: 'm', input: [], reasoningEffort: 3 })).toBe(false)
   })
 
-  test('compact requires provider, modelId, and input; promptCacheKey is optional', () => {
-    expect(validateCompactInput({ provider: 'p', modelId: 'm' })).toBe(false)
-    expect(validateCompactInput({ provider: 'p', modelId: 'm', input: [] })).toBe(true)
-    expect(validateCompactInput({ provider: 'p', modelId: 'm', input: [], promptCacheKey: 'k' })).toBe(true)
+  test('extra key-values pass through validation and reach the wire verbatim', async () => {
+    const server = await startOpenResponsesServer()
+    const executor = createModelExecutor({ endpoints: { mock: { url: server.url } } })
+    try {
+      const { modelRespond } = createModelTools(executor)
+      const out = await modelRespond({
+        provider: 'mock',
+        modelId: 'mock-model',
+        input: [userMessage],
+        prompt_cache_key: 'cache-1',
+        temperature: 0.2,
+        // OpenAI-only effort flows through as the raw spec param object.
+        reasoning: { effort: 'minimal' },
+      })
+      expect((out as { isError?: boolean }).isError).toBeUndefined()
+      const body = server.requests[0]?.body as Record<string, unknown>
+      expect(body.prompt_cache_key).toBe('cache-1')
+      expect(body.temperature).toBe(0.2)
+      expect(body.reasoning).toEqual({ effort: 'minimal' })
+    } finally {
+      executor.destroy()
+      await server.close()
+    }
   })
 })
 
@@ -50,9 +94,8 @@ describe('model tools — call-through over the executor', () => {
     const server = await startOpenResponsesServer()
     const executor = createModelExecutor({ endpoints: { mock: { url: server.url } } })
     try {
-      const { modelRespond, modelCompact } = createModelTools(executor)
+      const { modelRespond } = createModelTools(executor)
       expect(modelRespond.name).toBe(MODEL_RESPOND_TOOL_NAME)
-      expect(modelCompact.name).toBe(MODEL_COMPACT_TOOL_NAME)
 
       const out = await modelRespond({ provider: 'mock', modelId: 'mock-model', input: [userMessage] })
       expect(validateRespondOutput(out)).toBe(true)
@@ -76,16 +119,12 @@ describe('model tools — call-through over the executor', () => {
 
 describe('createScriptedModelTools — deterministic in-process double (no worker, no fetch)', () => {
   test('a single scripted response repeats on every call', async () => {
-    const { modelRespond, modelCompact } = createScriptedModelTools({ script: DEFAULT_SCRIPTED_RESPONSE })
+    const { modelRespond } = createScriptedModelTools({ script: DEFAULT_SCRIPTED_RESPONSE })
     const first = await modelRespond({ provider: 'scripted', modelId: 'm', input: [userMessage] })
     const second = await modelRespond({ provider: 'scripted', modelId: 'm', input: [userMessage] })
     expect(validateRespondOutput(first)).toBe(true)
     expect((first as { items: unknown[] }).items).toHaveLength(1)
     expect((second as { items: unknown[] }).items).toHaveLength(1)
-
-    const compact = await modelCompact({ provider: 'scripted', modelId: 'm', input: [userMessage] })
-    expect(validateCompactOutput(compact)).toBe(true)
-    expect((compact as { encrypted_content?: string }).encrypted_content).toBe('scripted-compaction')
   })
 
   test('an array script advances one entry per call', async () => {

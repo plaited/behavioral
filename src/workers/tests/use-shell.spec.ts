@@ -11,7 +11,7 @@
 
 import { describe, expect, test } from 'bun:test'
 import { ajv } from '../../tools/use-tool.ts'
-import { createShellExecutor, createShellTool, ShellToolInputSchema, ShellToolOutputSchema } from '../use-shell.ts'
+import { createShellExecutor, getShellWorker, ShellToolInputSchema, ShellToolOutputSchema } from '../use-shell.ts'
 
 const validateInput = ajv.compile(ShellToolInputSchema)
 const validateOutput = ajv.compile(ShellToolOutputSchema)
@@ -36,7 +36,7 @@ describe('shell tool — call-through', () => {
   test('runs a script through the executor and the result satisfies the output schema', async () => {
     const executor = createShellExecutor()
     try {
-      const shell = createShellTool(executor)
+      const shell = getShellWorker(executor)
 
       expect(shell.name).toBe('execute_shell')
 
@@ -52,7 +52,7 @@ describe('shell tool — call-through', () => {
   test('a json run also satisfies the output schema', async () => {
     const executor = createShellExecutor()
     try {
-      const shell = createShellTool(executor)
+      const shell = getShellWorker(executor)
 
       const result = await shell({ script: `echo '{"ok":true}'`, format: 'json' })
       expect(result.status).toBe('completed')

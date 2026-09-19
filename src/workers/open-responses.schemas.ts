@@ -7,8 +7,10 @@ import Ajv2020 from 'ajv/dist/2020'
 // Source of truth: https://github.com/openresponses/openresponses
 //   schema/components/schemas/*.json
 //
-// This subset covers tool-calling loop + reasoning as content parts.
-// Out of scope: hosted tools, tool_choice, truncation, service_tier,
+// This subset covers the tool-calling loop (function tools + items),
+// reasoning (items, content parts, and the request `reasoning.effort`
+// param — spec ReasoningParam/ReasoningEffortEnum), truncation, and
+// compaction items. Out of scope: hosted tools, tool_choice, service_tier,
 // image generation.
 //
 // Request schemas validate strictly; stream events tolerate unknown
@@ -113,6 +115,19 @@ export type ItemStatus = (typeof itemStatusEnum)[number]
 export const TruncationSchema = makeSchema<Truncation>({ type: 'string', enum: truncationEnum })
 /** @public */
 export type Truncation = (typeof truncationEnum)[number]
+
+/**
+ * Reasoning effort levels for the request `reasoning.effort` param — the
+ * spec's PUBLISHED (filtered) ReasoningEffortEnum: none | low | medium |
+ * high | xhigh. The spec's openapi_filter_manifest.yaml explicitly drops
+ * OpenAI's `minimal` value; a provider that accepts it can still be reached
+ * by passing the raw `reasoning: { effort: "minimal" }` object through tool
+ * args verbatim (passthrough), not via this named enum.
+ * @public
+ */
+export const reasoningEffortEnum = ['none', 'low', 'medium', 'high', 'xhigh'] as const
+/** @public */
+export type ReasoningEffort = (typeof reasoningEffortEnum)[number]
 
 // ----------------------------------------------------------------
 // Content parts (message.content entries)
@@ -250,7 +265,15 @@ export type FunctionCallOutputItem = {
   output: string
 }
 
-/** @public */
+/**
+ * A compaction output item — spec `CompactionBody`: requires `type`, `id`,
+ * `encrypted_content`; `status` is NOT required by the spec schema (the
+ * prose's "every item has id/type/status" general rule conflicts with the
+ * normative CompactionBody.json, which omits it — the schema wins here),
+ * and provider extras (e.g. `created_by`) are tolerated loosely.
+ *
+ * @public
+ */
 export const CompactionItemSchema = makeSchema<CompactionItem>({
   type: 'object',
   properties: {
@@ -259,15 +282,16 @@ export const CompactionItemSchema = makeSchema<CompactionItem>({
     status: { type: 'string', enum: itemStatusEnum },
     encrypted_content: { type: 'string' },
   },
-  required: ['id', 'type', 'status', 'encrypted_content'],
-  additionalProperties: false,
+  required: ['id', 'type', 'encrypted_content'],
+  additionalProperties: true,
 })
 /** @public */
 export type CompactionItem = {
   id: string
   type: 'compaction'
-  status: ItemStatus
+  status?: ItemStatus
   encrypted_content: string
+  [key: string]: unknown
 }
 
 const outputItemSchema = {
@@ -485,27 +509,35 @@ export type FunctionTool = {
 export const OpenResponsesRequestSchema = makeSchema<OpenResponsesRequest>({
   type: 'object',
   properties: {
-    model: {
-      type: 'object',
-      properties: { provider: { type: 'string' }, modelId: { type: 'string' } },
-      required: ['provider', 'modelId'],
-      additionalProperties: false,
-    },
+    // Spec: `model` is a plain string (CreateResponseBody.model), e.g.
+    // 'claude-sonnet-4'. Provider selection is client-side provisioning in
+    // this repo (see ModelRespondInput.provider) and never crosses the wire.
+    model: { type: 'string' },
     input: { type: 'array', items: inputItemSchema },
     tools: { type: 'array', items: FunctionToolSchema.schema },
     truncation: { type: 'string', enum: truncationEnum },
     instructions: { type: 'string' },
+    // Spec ReasoningParam — `reasoning: { effort }`; the spec schema requires
+    // no sub-field (required: []).
+    reasoning: {
+      type: 'object',
+      properties: {
+        effort: { type: 'string', enum: [...reasoningEffortEnum] },
+      },
+      additionalProperties: true,
+    },
   },
   required: ['model', 'input'],
   additionalProperties: false,
 })
 /** @public */
 export type OpenResponsesRequest = {
-  model: { provider: string; modelId: string }
+  model: string
   input: InputItem[]
   tools?: FunctionTool[]
   truncation?: Truncation
   instructions?: string
+  reasoning?: { effort?: ReasoningEffort; [key: string]: unknown }
 }
 
 // ----------------------------------------------------------------
