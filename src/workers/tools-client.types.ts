@@ -8,7 +8,7 @@
  * mounts `self.onmessage` at top level, so the host must never import it for
  * types; both sides import here instead. The wire itself is the behavioral
  * event vocabulary (`tool_call` / `tool_cancel` in, one `tool_call_result`
- * out) defined in `src/behavioral/use-behavioral.types.ts` — only the
+ * out) defined in `src/workers/workers.types.ts` — only the
  * `detail.input` and `detail.result` payload shapes live here.
  *
  * @packageDocumentation

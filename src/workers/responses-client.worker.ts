@@ -29,12 +29,6 @@
  */
 
 import { getEnvironmentData } from 'node:worker_threads'
-import { WORKER_MESSAGE_KINDS } from '../behavioral/behavioral.constants.ts'
-import {
-  type ResponseRequestEvent,
-  validateResponseCancelEvent,
-  validateResponseRequestEvent,
-} from '../behavioral/use-behavioral.types.ts'
 import {
   ErrorSchema,
   type KnownStreamEvent,
@@ -56,6 +50,12 @@ import {
   type ModelRespondInput,
   type ModelRespondOutput,
 } from './responses-client.types.ts'
+import { WORKER_MESSAGE_KINDS } from './workers.constants.ts'
+import {
+  type ResponseRequestEvent,
+  validateResponseCancelEvent,
+  validateResponseRequestEvent,
+} from './workers.types.ts'
 
 // ---------------------------------------------------------------------------
 // Endpoint config (environment data — seeded by the host before spawn)

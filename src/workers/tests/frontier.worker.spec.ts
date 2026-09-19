@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { WORKER_MESSAGE_KINDS } from '../../behavioral/behavioral.constants.ts'
 import type { Thread } from '../../behavioral/behavioral.types.ts'
+import { WORKER_MESSAGE_KINDS } from '../workers.constants.ts'
 
 /**
  * Frontier worker integration tests — exercised through the real worker

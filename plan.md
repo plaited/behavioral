@@ -149,6 +149,28 @@ ingress + a plugin-shipped behavior surface.
 
 ## Decision Log
 
+### 2026-09-19 — process layer moves to src/workers/; useBehavioral → useWorkers
+
+- **Pilot's call, verified against the import graph and executed.** The wire's
+  consumers were already majority-workers (6 of 9 importers); behavioral/ held
+  two process entries plus the jq spawn bridge — the process layer was smeared
+  across both dirs. After the move: `src/behavioral/` is the pure language
+  (types, constants, utils, interpreter core, internal jq subprocess);
+  `src/workers/` is the entire process layer (wire home, engine entry, router,
+  four satellite families). Dependency arrow is one-way: workers → behavioral.
+- **Move rule (settled, non-ad-hoc):** a process file lives in `src/workers/`
+  iff something outside behavioral/ speaks its wire. The engine entry and the
+  satellites qualify; `jq.worker.ts` does not (engine-internal SAB frames, no
+  request/result family) — it stays in behavioral/ with its spawner.
+- **Naming per repo convention:** `workers.types.ts` / `workers.constants.ts`
+  (the wire + kind registry), `use-workers.ts` (`useWorkers` — matches the
+  settled `workers` map param). The engine-transport envelope types
+  (`WorkerMessage`/`AddThreadsMessage`/`TriggerMessage`) moved to the wire home
+  too, so the pure layer holds zero wire references.
+- **The rename hit at its cheapest window:** the router had exactly one
+  importer (its spec). After the turn-loop proof and Tauri hosts exist, the
+  name would be baked into every host.
+
 ### 2026-09-19 — `src/kernel/threads.ts` deleted; the kernel directory is no more
 
 - **Pilot deleted the last kernel file** — resolving the fold-vs-move question

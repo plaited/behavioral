@@ -2,10 +2,10 @@ import { describe, expect, test } from 'bun:test'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setEnvironmentData } from 'node:worker_threads'
-import { WORKER_MESSAGE_KINDS } from '../../behavioral/behavioral.constants.ts'
 import type { JsonObject } from '../../behavioral/behavioral.types.ts'
-import type { StoreOp } from '../../behavioral/use-behavioral.types.ts'
 import { STORE_DB_PATH_KEY } from '../store.types.ts'
+import { WORKER_MESSAGE_KINDS } from '../workers.constants.ts'
+import type { StoreOp } from '../workers.types.ts'
 
 /**
  * Store worker integration tests — exercised through the real worker boundary

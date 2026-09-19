@@ -1,11 +1,6 @@
 import type { JSONSchemaType } from 'ajv'
 import Ajv2020 from 'ajv/dist/2020'
-import {
-  type FRONTIER_STATUS,
-  IDIOMS,
-  type TRACE_MESSAGE_KINDS,
-  type WORKER_MESSAGE_KINDS,
-} from './behavioral.constants.ts'
+import { type FRONTIER_STATUS, IDIOMS, type TRACE_MESSAGE_KINDS } from './behavioral.constants.ts'
 
 /**
  * Shared Ajv instance for the behavioral kernel.
@@ -646,15 +641,3 @@ export type SendTrace = {
   (value: Trace): void
   subscribe(listener: (msg: Trace) => void | Promise<void>): () => void
 }
-
-export type AddThreadsMessage = {
-  kind: typeof WORKER_MESSAGE_KINDS.add_threads
-  threads: Thread[]
-}
-
-export type TriggerMessage = {
-  kind: typeof WORKER_MESSAGE_KINDS.trigger
-  event: BPEvent
-}
-
-export type WorkerMessage = AddThreadsMessage | TriggerMessage

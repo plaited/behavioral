@@ -1,5 +1,6 @@
-import { TRACE_MESSAGE_KINDS, WORKER_MESSAGE_KINDS } from './behavioral.constants.ts'
-import type { BPEvent, JsonObject, Thread, Trace, TraceListener, Trigger } from './behavioral.types.ts'
+import { TRACE_MESSAGE_KINDS } from '../behavioral/behavioral.constants.ts'
+import type { BPEvent, JsonObject, Thread, Trace, TraceListener, Trigger } from '../behavioral/behavioral.types.ts'
+import { WORKER_MESSAGE_KINDS } from './workers.constants.ts'
 import {
   validateFrontierRequestEvent,
   validateFrontierRequestResultEvent,
@@ -11,7 +12,7 @@ import {
   validateToolCallEvent,
   validateToolCallResultEvent,
   validateToolCancelEvent,
-} from './use-behavioral.types.ts'
+} from './workers.types.ts'
 
 /*
  * The runtime composition hook: a dumb pump between the engine worker and the
@@ -38,7 +39,7 @@ import {
  * exist.
  */
 
-export const useBehavioral = ({
+export const useWorkers = ({
   threads,
   traceListener,
   workers,

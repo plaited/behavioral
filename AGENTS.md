@@ -74,20 +74,23 @@ and the impact is broad or unclear, expand coverage until the affected surface i
 
 ## Directory Boundaries
 
-**`src/workers/`** — the satellite worker families, each speaking the behavioral event wire
-(`src/behavioral/use-behavioral.types.ts`): `responses-client` (Open Responses model calls),
-`tools-client` (shell execution), `frontier` (reachability analysis), `store` (durable
-space-scoped persistence). Spawn-by-URL entries end in `.worker.ts`; each family owns its event
-types + input boundary; results echo the request `space`. The router in
-`src/behavioral/use-behavioral.ts` (`useBehavioral` — supersedes the deleted kernel) forwards
-selections verbatim and re-enters worker results as once-threads.
+**`src/workers/`** — the process layer: the worker event wire (`workers.types.ts` +
+`workers.constants.ts` — every request/result event family, validators, and the kind
+registry), the engine entry (`behavioral.worker.ts` — a dumb transport over one behavioral
+program), the router (`use-workers.ts`, `useWorkers` — supersedes the deleted kernel; forwards
+selections verbatim and re-enters worker results as once-threads), and the satellite families:
+`responses-client` (Open Responses model calls), `tools-client` (shell execution), `frontier`
+(reachability analysis), `store` (durable space-scoped persistence). Spawn-by-URL entries end in
+`.worker.ts`; each family owns its event types + input boundary; results echo the request
+`space`.
 **`src/tools/`** — the tool fleet (29 tools): stateless `defineTool` units (`src/tools/define-tool.ts`), each
 with AJV `JSONSchemaType` input/output schemas (`html`, `mcp-client`,
 `plugin-client`, `skill-client`, `git`, `typescript`). Dispatched from the CLI via `behavioral tools`;
 agent-facing usage docs live in `skills/behavioral-tools/`.
-**`src/behavioral/`** — the behavioral runtime: types, constants, utils, the engine, and the
-`useBehavioral` router (`use-behavioral.ts`) — the runtime composition hook wiring the engine
-worker to the satellite families.
+**`src/behavioral/`** — the pure language layer: types, constants, utils, the interpreter core
+(`behavioral.ts`), and its internal jq subprocess (`jq.worker.ts` — engine-internal, wire-external;
+nothing outside behavioral/ speaks its wire). Zero process entries that speak the worker wire —
+dependency arrow is one-way: `src/workers/` → `src/behavioral/`.
 **`src/controller/`** — the browser Controller, delegated listener, swap boundary.
 **`src/cli/`** — the `behavioral` CLI framework (`makeCliRouter`/`parseCli`) and its commands,
 registered in `bin/behavioral.ts`. `tools.ts` is the fleet dispatcher: `behavioral tools

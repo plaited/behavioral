@@ -13,8 +13,8 @@
  */
 
 import { describe, expect, test } from 'bun:test'
-import { WORKER_MESSAGE_KINDS } from '../../behavioral/behavioral.constants.ts'
 import type { ToolsResult } from '../tools-client.types.ts'
+import { WORKER_MESSAGE_KINDS } from '../workers.constants.ts'
 
 /** Pids whose command line matches `pattern` — used to prove a killed group is gone. */
 const matching = async (pattern: string): Promise<string[]> =>

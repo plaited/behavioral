@@ -39,9 +39,7 @@ import { homedir } from 'node:os'
 import * as path from 'node:path'
 import { getEnvironmentData } from 'node:worker_threads'
 import type { JSONSchemaType } from 'ajv'
-import { WORKER_MESSAGE_KINDS } from '../behavioral/behavioral.constants.ts'
 import { ajv, type JsonObject } from '../behavioral/behavioral.types.ts'
-import { type StoreRequestEvent, validateStoreRequestEvent } from '../behavioral/use-behavioral.types.ts'
 import { deepEqual } from '../utils.ts'
 import {
   ROOT_SPACE,
@@ -51,6 +49,8 @@ import {
   type StorePutInput,
   type StoreQueryInput,
 } from './store.types.ts'
+import { WORKER_MESSAGE_KINDS } from './workers.constants.ts'
+import { type StoreRequestEvent, validateStoreRequestEvent } from './workers.types.ts'
 
 // ---------------------------------------------------------------------------
 // Backing — one owned connection, migrations on boot

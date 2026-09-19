@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { WORKER_MESSAGE_KINDS } from '../behavioral.constants.ts'
+import { WORKER_MESSAGE_KINDS } from '../workers.constants.ts'
 import {
   validateFrontierRequestEvent,
   validateFrontierRequestResultEvent,
@@ -12,9 +12,9 @@ import {
   validateToolCallResultEvent,
   validateToolCancelEvent,
   validateWorkerErrorEvent,
-} from '../use-behavioral.types.ts'
+} from '../workers.types.ts'
 
-describe('use-behavioral event vocabulary', () => {
+describe('workers.types event vocabulary', () => {
   describe('response_request', () => {
     test('accepts a well-formed request', () => {
       const valid = validateResponseRequestEvent({

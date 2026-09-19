@@ -6,7 +6,7 @@
  * `cancel-` prefixed id so specs can observe cancel routing without real
  * in-flight state.
  */
-import { WORKER_MESSAGE_KINDS } from '../../behavioral.constants.ts'
+import { WORKER_MESSAGE_KINDS } from '../../workers.constants.ts'
 
 type InboundEvent = {
   type: string

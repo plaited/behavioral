@@ -1,9 +1,10 @@
 import { describe, expect, test } from 'bun:test'
 import { setEnvironmentData } from 'node:worker_threads'
-import { STORE_DB_PATH_KEY } from '../../workers/store.types.ts'
-import { TRACE_MESSAGE_KINDS, WORKER_MESSAGE_KINDS } from '../behavioral.constants.ts'
-import type { SelectionTrace, Thread, Trace, Trigger } from '../behavioral.types.ts'
-import { useBehavioral } from '../use-behavioral.ts'
+import { TRACE_MESSAGE_KINDS } from '../../behavioral/behavioral.constants.ts'
+import type { SelectionTrace, Thread, Trace, Trigger } from '../../behavioral/behavioral.types.ts'
+import { STORE_DB_PATH_KEY } from '../store.types.ts'
+import { useWorkers } from '../use-workers.ts'
+import { WORKER_MESSAGE_KINDS } from '../workers.constants.ts'
 
 const spawnSatellite = () => new Worker(new URL('./fixtures/satellite.worker.ts', import.meta.url))
 const spawnCrashing = () => new Worker(new URL('./fixtures/crash.worker.ts', import.meta.url))
@@ -27,12 +28,12 @@ const idSchema = (id: string) => ({
   required: ['id'],
 })
 
-describe('useBehavioral router', () => {
+describe('useWorkers router', () => {
   test('routes a selected tool_call to the tools worker and re-enters its result', async () => {
     const traces: Trace[] = []
     const toolsClientWorker = spawnSatellite()
     const responsesClientWorker = spawnSatellite()
-    const engineWorker = useBehavioral({
+    const engineWorker = useWorkers({
       threads: [
         {
           once: true,
@@ -70,7 +71,7 @@ describe('useBehavioral router', () => {
     const traces: Trace[] = []
     const toolsClientWorker = spawnSatellite()
     const responsesClientWorker = spawnSatellite()
-    const engineWorker = useBehavioral({
+    const engineWorker = useWorkers({
       threads: [
         {
           once: true,
@@ -106,7 +107,7 @@ describe('useBehavioral router', () => {
     const toolsClientWorker = spawnSatellite()
     const responsesClientWorker = spawnSatellite()
     let trigger: Trigger | undefined
-    const engineWorker = useBehavioral({
+    const engineWorker = useWorkers({
       threads: [{ once: true, label: 'booted', rules: [{ waitFor: [{ type: 'boot' }] }] }],
       traceListener: (trace) => {
         traces.push(trace)
@@ -129,7 +130,7 @@ describe('useBehavioral router', () => {
     const traces: Trace[] = []
     const toolsClientWorker = spawnSatellite()
     const responsesClientWorker = spawnSatellite()
-    const engineWorker = useBehavioral({
+    const engineWorker = useWorkers({
       threads: [
         {
           space: 's1',
@@ -165,7 +166,7 @@ describe('useBehavioral router', () => {
     const traces: Trace[] = []
     const toolsClientWorker = spawnSatellite()
     const responsesClientWorker = spawnSatellite()
-    const engineWorker = useBehavioral({
+    const engineWorker = useWorkers({
       threads: [
         {
           once: true,
@@ -213,7 +214,7 @@ describe('useBehavioral router', () => {
     const toolsClientWorker = spawnCrashing()
     const responsesClientWorker = spawnSatellite()
     const frontierWorker = spawnSatellite()
-    const engineWorker = useBehavioral({
+    const engineWorker = useWorkers({
       threads: [
         {
           once: true,
@@ -247,8 +248,8 @@ describe('useBehavioral router', () => {
   test('routes store_requests to the store worker port and re-enters the result', async () => {
     const traces: Trace[] = []
     setEnvironmentData(STORE_DB_PATH_KEY, ':memory:')
-    const storeWorker = new Worker(new URL('../../workers/store.worker.ts', import.meta.url))
-    const engineWorker = useBehavioral({
+    const storeWorker = new Worker(new URL('../store.worker.ts', import.meta.url))
+    const engineWorker = useWorkers({
       threads: [
         {
           once: true,
@@ -283,7 +284,7 @@ describe('useBehavioral router', () => {
     const traces: Trace[] = []
     const toolsClientWorker = spawnCrashing()
     const responsesClientWorker = spawnSatellite()
-    const engineWorker = useBehavioral({
+    const engineWorker = useWorkers({
       threads: [
         {
           once: true,

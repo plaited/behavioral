@@ -1,9 +1,9 @@
 import type { JSONSchemaType } from 'ajv'
-import { WORKER_MESSAGE_KINDS } from './behavioral.constants.ts'
-import { ajv, type JsonObject } from './behavioral.types.ts'
+import { ajv, type BPEvent, type JsonObject, type Thread } from '../behavioral/behavioral.types.ts'
+import { WORKER_MESSAGE_KINDS } from './workers.constants.ts'
 
 /*
- * Router-domain event vocabulary for `use-behavioral.ts`.
+ * Worker event-wire vocabulary — every request/result event family plus validators.
  *
  * Behavioral defines the protocol; worker families adapt to speak it. These are
  * the events the router moves between the engine port and the satellite worker
@@ -311,3 +311,19 @@ export const validateFrontierRequestEvent = ajv.compile(FrontierRequestEventSche
 export const validateFrontierRequestResultEvent = ajv.compile(FrontierRequestResultEventSchema)
 export const validateStoreRequestEvent = ajv.compile(StoreRequestEventSchema)
 export const validateStoreRequestResultEvent = ajv.compile(StoreRequestResultEventSchema)
+
+/**
+ * The engine transport — what the router posts INTO the engine worker.
+ * Two kinds, both of which evaluate.
+ */
+export type AddThreadsMessage = {
+  kind: typeof WORKER_MESSAGE_KINDS.add_threads
+  threads: Thread[]
+}
+
+export type TriggerMessage = {
+  kind: typeof WORKER_MESSAGE_KINDS.trigger
+  event: BPEvent
+}
+
+export type WorkerMessage = AddThreadsMessage | TriggerMessage

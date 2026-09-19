@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'bun:test'
 import { setEnvironmentData } from 'node:worker_threads'
-import { WORKER_MESSAGE_KINDS } from '../../behavioral/behavioral.constants.ts'
 import {
   AudioContentSchema,
   CompactionItemSchema,
@@ -25,6 +24,7 @@ import {
   validateModelRespondOutput,
 } from '../responses-client.schemas.ts'
 import { MODEL_ENDPOINTS_KEY, type ModelEndpoints, type ModelRespondOutput } from '../responses-client.types.ts'
+import { WORKER_MESSAGE_KINDS } from '../workers.constants.ts'
 import { ASSISTANT_TEXT, startOpenResponsesServer } from './fixtures/model-server.ts'
 
 // ================================================================

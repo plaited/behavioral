@@ -22,9 +22,9 @@
  * distinguish "waiting on host I/O" from "turn over."
  */
 
-import { WORKER_MESSAGE_KINDS } from './behavioral.constants.ts'
-import { behavioral } from './behavioral.ts'
-import type { WorkerMessage } from './behavioral.types.ts'
+import { behavioral } from '../behavioral/behavioral.ts'
+import { WORKER_MESSAGE_KINDS } from './workers.constants.ts'
+import type { WorkerMessage } from './workers.types.ts'
 
 const { addThread, trigger, step, useTrace } = behavioral()
 useTrace((message) => postMessage(message))

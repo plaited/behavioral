@@ -24,14 +24,10 @@
  */
 
 import type { JSONSchemaType } from 'ajv'
-import { WORKER_MESSAGE_KINDS } from '../behavioral/behavioral.constants.ts'
 import { ajv } from '../behavioral/behavioral.types.ts'
-import {
-  type ToolCallEvent,
-  validateToolCallEvent,
-  validateToolCancelEvent,
-} from '../behavioral/use-behavioral.types.ts'
 import type { ToolsFormat, ToolsOptions, ToolsResult, ToolsStatus } from './tools-client.types.ts'
+import { WORKER_MESSAGE_KINDS } from './workers.constants.ts'
+import { type ToolCallEvent, validateToolCallEvent, validateToolCancelEvent } from './workers.types.ts'
 
 // ---------------------------------------------------------------------------
 // Defaults

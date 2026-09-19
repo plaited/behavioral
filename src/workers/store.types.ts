@@ -7,7 +7,7 @@
  * effects, so importing this module is safe on both sides of the worker
  * boundary. The wire itself is the behavioral event vocabulary
  * (`store_request` / `store_request_result`, defined in
- * `src/behavioral/use-behavioral.types.ts`); only the op payload shapes live
+ * `src/workers/workers.types.ts`); only the op payload shapes live
  * here. The worker compiles and enforces the input schemas itself — the
  * sqlite schema is worker-internal by design (schema churn never becomes
  * protocol churn).

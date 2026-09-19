@@ -23,7 +23,7 @@
  */
 
 import type { JSONSchemaType } from 'ajv'
-import { FRONTIER_STATUS, TRACE_MESSAGE_KINDS, WORKER_MESSAGE_KINDS } from '../behavioral/behavioral.constants.ts'
+import { FRONTIER_STATUS, TRACE_MESSAGE_KINDS } from '../behavioral/behavioral.constants.ts'
 import type {
   BPEvent,
   CandidateBid,
@@ -48,8 +48,9 @@ import {
   resumePendingThreadsForSelectedEvent,
   useThread,
 } from '../behavioral/behavioral.utils.ts'
-import { type FrontierRequestEvent, validateFrontierRequestEvent } from '../behavioral/use-behavioral.types.ts'
 import { ueid } from '../utils.ts'
+import { WORKER_MESSAGE_KINDS } from './workers.constants.ts'
+import { type FrontierRequestEvent, validateFrontierRequestEvent } from './workers.types.ts'
 
 // ---------------------------------------------------------------------------
 // Private helpers

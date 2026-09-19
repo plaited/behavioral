@@ -49,19 +49,3 @@ export const TRACE_MESSAGE_KINDS = keyMirror(
 export const FRONTIER_STATUS = keyMirror('ready', 'deadlock', 'idle')
 
 export const IDIOMS = keyMirror('waitFor', 'interrupt', 'request', 'block', 'transform')
-
-export const WORKER_MESSAGE_KINDS = keyMirror(
-  'trigger',
-  'add_threads',
-  'response_request',
-  'response_request_result',
-  'response_cancel',
-  'tool_call',
-  'tool_call_result',
-  'tool_cancel',
-  'frontier_request',
-  'frontier_request_result',
-  'store_request',
-  'store_request_result',
-  'worker_error',
-)
