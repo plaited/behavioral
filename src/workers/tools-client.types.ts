@@ -1,6 +1,6 @@
 /**
  * Wire and option types shared by the tools-client worker (`tools-client.worker.ts`) and its host
- * consumer (`use-tools.ts`).
+ * consumer (`tools-client.ts`).
  *
  * @remarks
  * Types only — no runtime values, so importing this module has no side effects

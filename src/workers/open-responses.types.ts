@@ -1,6 +1,6 @@
 /**
  * Wire and option types shared by the model worker (`responses-client.worker.ts`)
- * and its host consumer (`use-responses-client.ts`).
+ * and its host consumer (`responses-client.ts`).
  *
  * @remarks
  * `responses-client.worker.ts` mounts `self.onmessage` at top level, so the host

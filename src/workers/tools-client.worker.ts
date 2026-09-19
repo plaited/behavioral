@@ -4,7 +4,7 @@
  * returns a single bounded terminal result.
  *
  * @remarks
- * Spawned by URL from `use-tools.ts` (`new Worker(new URL('./tools-client.worker.ts', ...))`)
+ * Spawned by URL from `tools-client.ts` (`new Worker(new URL('./tools-client.worker.ts', ...))`)
  * and imported by nobody, so it needs no main-vs-worker detection: Bun exposes
  * `self` and `self.postMessage` on the main thread too, and `self.importScripts`
  * is undefined in both, so every ambient discriminator lies.
@@ -414,7 +414,7 @@ const handleInbound = async (message: ToolsInbound): Promise<void> => {
 
 // The wire payload is produced by our own host code, so it is typed by
 // assertion rather than re-validated here — model input is validated once, at
-// the tool boundary (see `use-tools.ts`). MINIMAL: add an AJV wire validator if
+// the tool boundary (see `tools-client.ts`). MINIMAL: add an AJV wire validator if
 // the worker ever accepts messages from outside this process.
 self.onmessage = (event: MessageEvent): void => {
   void handleInbound(event.data as ToolsInbound)

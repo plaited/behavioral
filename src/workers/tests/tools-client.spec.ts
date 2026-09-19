@@ -11,7 +11,7 @@
 
 import { describe, expect, test } from 'bun:test'
 import { ajv } from '../../tools/define-tool.ts'
-import { createToolsExecutor, getToolsWorker, ToolsToolInputSchema, ToolsToolOutputSchema } from '../use-tools.ts'
+import { createToolsExecutor, getToolsWorker, ToolsToolInputSchema, ToolsToolOutputSchema } from '../tools-client.ts'
 
 const validateInput = ajv.compile(ToolsToolInputSchema)
 const validateOutput = ajv.compile(ToolsToolOutputSchema)

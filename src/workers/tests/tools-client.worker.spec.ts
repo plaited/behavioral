@@ -14,7 +14,7 @@
 import { describe, expect, test } from 'bun:test'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createToolsExecutor } from '../use-tools.ts'
+import { createToolsExecutor } from '../tools-client.ts'
 
 /** Pids whose command line matches `pattern` — used to prove a killed group is gone. */
 const matching = async (pattern: string): Promise<string[]> =>

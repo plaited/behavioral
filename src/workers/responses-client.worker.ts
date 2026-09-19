@@ -4,7 +4,7 @@
  * returns a single terminal `RESULT`.
  *
  * @remarks
- * Spawned by URL from `use-responses-client.ts` (`new Worker(new URL('./responses-client.worker.ts', ...))`)
+ * Spawned by URL from `responses-client.ts` (`new Worker(new URL('./responses-client.worker.ts', ...))`)
  * and imported by nobody, so it needs no main-vs-worker detection.
  *
  * Endpoint config (URL + resolved API key + extra headers) is delivered via
@@ -347,7 +347,7 @@ const handleInbound = async (message: ModelInbound): Promise<void> => {
 
 // The wire payload is produced by our own host code, so it is typed by
 // assertion rather than re-validated here — model input is validated once, at
-// the tool boundary (see `use-responses-client.ts`). MINIMAL: add an AJV wire validator if
+// the tool boundary (see `responses-client.ts`). MINIMAL: add an AJV wire validator if
 // the worker ever accepts messages from outside this process.
 self.onmessage = (event: MessageEvent): void => {
   void handleInbound(event.data as ModelInbound)
