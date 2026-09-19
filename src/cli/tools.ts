@@ -26,7 +26,6 @@ import {
   discoverySearch,
   discoveryUpdate,
 } from '../tools/discovery.ts'
-import { frontierExplore, frontierReplay, frontierVerify } from '../tools/frontier.ts'
 import { gitContext, gitHistory, gitStatus, gitWorktrees } from '../tools/git.ts'
 import {
   htmlMetaRead,
@@ -95,9 +94,6 @@ const FLEET: FleetEntry[] = [
   entry(discoveryUpdate),
   entry(discoveryDelete),
   entry(discoverySearch),
-  entry(frontierReplay),
-  entry(frontierExplore),
-  entry(frontierVerify),
   entry(htmlMetaRead),
   entry(htmlMetaStamp),
   entry(htmlMetaValidate),

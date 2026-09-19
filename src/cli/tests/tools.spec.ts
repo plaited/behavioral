@@ -24,7 +24,6 @@ describe('behavioral tools', () => {
 
     expect(code).toBe(0)
     expect(stderr).toContain('Usage: tools')
-    expect(stderr).toContain('frontier-replay')
     expect(stderr).toContain('git-status')
     expect(stderr).toContain('git-history')
     expect(stderr).toContain('git-worktrees')

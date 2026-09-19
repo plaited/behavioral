@@ -1,36 +1,26 @@
 /**
- * Behavioral frontier analysis utilities for replaying, exploring, and verifying
- * behavioral thread frontiers.
+ * Frontier worker — the reachability analysis engine as a satellite worker:
+ * replays, explores, and verifies behavioral thread sets off the host thread.
  *
  * @remarks
- * These functions work with in-memory {@link Thread} arrays so extensions and agents
- * can analyze behavioral programs without file-IO or a running BP engine.
+ * Spawned by URL (never imported) and speaks the behavioral event wire:
+ * `tool_call` events in (dispatched by `detail.tool`: frontier-replay /
+ * frontier-explore / frontier-verify), one `tool_call_result` out with the
+ * request `space` echoed. The analysis engine below is the former fleet tool
+ * implementation, moved wholesale; only the boundary changed.
  *
- * ## Entry points
+ * Self-analysis is safe by construction: the trace a caller passes is a frozen
+ * postMessage payload, this worker's simulation state is private, and its own
+ * calls in the host trace are logical breakpoints (see plan Decision Log).
  *
- * - {@link frontierReplay} — replay one concrete event-selection trace
- * - {@link frontierExplore} — enumerate reachable histories, find deadlocks
- * - {@link frontierVerify} — derive a pass/fail/truncated status from exploration
- *
- * The raw algorithm functions (`replayToFrontierRaw`, `exploreFrontiersRaw`,
- * `verifyFrontiersRaw`) and the graph internals are module-private; the tools
- * above are the public surface.
- *
- * ## Trace kind filters
- *
- * Frontier tools discriminate {@link Trace} messages by their `kind`
- * field (values from {@link TRACE_MESSAGE_KINDS}). The three kinds they
- * filter on:
- *
- * - {@link SelectionTrace} — a concrete event selection
- * - {@link FrontierTrace} — the frontier at a step
- * - {@link DeadlockTrace} — a deadlock at a step
+ * MINIMAL: results are synchronous analyses; a frontier call blocks this
+ * worker only, never the host — no stream lane needed.
  *
  * @packageDocumentation
  */
 
 import type { JSONSchemaType } from 'ajv'
-import { FRONTIER_STATUS, TRACE_MESSAGE_KINDS } from '../behavioral/behavioral.constants.ts'
+import { FRONTIER_STATUS, TRACE_MESSAGE_KINDS, WORKER_MESSAGE_KINDS } from '../behavioral/behavioral.constants.ts'
 import type {
   BPEvent,
   CandidateBid,
@@ -46,7 +36,7 @@ import type {
   Thread,
   Trace,
 } from '../behavioral/behavioral.types.ts'
-import { BPEventSchema } from '../behavioral/behavioral.types.ts'
+import { ajv, BPEventSchema } from '../behavioral/behavioral.types.ts'
 import {
   advanceRunningToPending,
   computeFrontier,
@@ -55,8 +45,8 @@ import {
   resumePendingThreadsForSelectedEvent,
   useThread,
 } from '../behavioral/behavioral.utils.ts'
+import { type ToolCallEvent, validateToolCallEvent } from '../behavioral/use-behavioral.types.ts'
 import { ueid } from '../utils.ts'
-import { defineTool } from './define-tool.ts'
 
 // ---------------------------------------------------------------------------
 // Private helpers
@@ -921,31 +911,11 @@ const verifyFrontiersRaw = ({ progress, ...args }: VerifyFrontiersArgs): VerifyF
 }
 
 // ---------------------------------------------------------------------------
-// defineTool wrappers — the public interface
+
 // ---------------------------------------------------------------------------
-//
-// The interface IS the tool. The raw algorithm functions above
-// (replayToFrontierRaw, exploreFrontiersRaw, verifyFrontiersRaw) and every
-// graph internal (frontierStateKey, findStronglyConnectedComponents,
-// findLivelocks, isCycle, StateNode, the *Args/*Result/*Finding/*Record types)
-// are the implementation; the three tools below are the only public surface.
-
-/**
- * Serialized {@link Frontier} for JSON output. CandidateBid is JSON-safe
- * (priority/type/detail/space — no generator or compiled validator), so the
- * frontier crosses the boundary verbatim.
- */
-const frontierJsonSchema = {
-  type: 'object',
-  properties: {
-    status: { type: 'string', enum: ['ready', 'deadlock', 'idle'] },
-    candidates: { type: 'array', items: { type: 'object', additionalProperties: true } },
-    enabled: { type: 'array', items: { type: 'object', additionalProperties: true } },
-  },
-  required: ['status', 'candidates', 'enabled'],
-  additionalProperties: false,
-} as const
-
+// Input boundary — the three tools' input schemas (moved from the fleet
+// wrapper; the worker compiles them and validates `detail.input` here)
+// ---------------------------------------------------------------------------
 // threads — structural (label + rules); idiom internals permissive so a
 // caller's detailSchema (JSON Schema) reaches the runtime validator verbatim
 // (generateRulesFunctions compiles it). The permissive idiom items can't be
@@ -1007,23 +977,6 @@ export const FrontierReplayInputSchema = {
   description: 'Replay one concrete event-selection trace against a thread set and return the resulting frontier.',
 } as unknown as JSONSchemaType<FrontierReplayInput>
 
-export const FrontierReplayOutputSchema = {
-  type: 'object',
-  properties: {
-    frontier: { ...frontierJsonSchema, nullable: true, description: 'the resulting frontier; null on error' },
-    stateKey: { type: 'string', nullable: true, description: 'canonical state key for the pending set; null on error' },
-    pendingCount: { type: 'integer', nullable: true, description: 'count of pending bids; null on error' },
-    isError: {
-      type: 'boolean',
-      nullable: true,
-      description: 'true when a selection was not enabled at its replay step',
-    },
-    message: { type: 'string', nullable: true, description: 'error detail when isError' },
-  },
-  required: ['frontier', 'stateKey', 'pendingCount'],
-  additionalProperties: false,
-} as unknown as JSONSchemaType<FrontierReplayOutput>
-
 /**
  * Replay one concrete event-selection trace and return the resulting frontier.
  *
@@ -1033,33 +986,6 @@ export const FrontierReplayOutputSchema = {
  * throws — the tool catches it and returns `{ isError: true, message }` so the
  * throw never crosses the model channel.
  */
-export const frontierReplay = defineTool(
-  {
-    name: 'frontier-replay',
-    description:
-      'Replay one concrete event-selection trace against a thread set and return the resulting frontier, the canonical pending-state key, and the pending-bid count. Use to inspect a known event sequence and prove it was valid — a disabled selection returns isError instead of throwing.',
-    inputSchema: FrontierReplayInputSchema,
-    outputSchema: FrontierReplayOutputSchema,
-  },
-  ({ threads, messages, space, instanceId }) => {
-    try {
-      const { pending, frontier } = replayToFrontierRaw({ threads, messages, space, instanceId })
-      return {
-        frontier,
-        stateKey: frontierStateKey({ pending }),
-        pendingCount: pending.size,
-      }
-    } catch (err) {
-      return {
-        frontier: null,
-        stateKey: null,
-        pendingCount: null,
-        isError: true,
-        message: (err as Error).message,
-      }
-    }
-  },
-)
 
 // Serialized reachable state in the explored graph. StateNode (module-private)
 // has the identical shape; this is the JSON-public mirror so consumers don't
@@ -1155,41 +1081,6 @@ export const FrontierExploreInputSchema = {
     'Enumerate every reachable frontier of a thread set, collecting traces, deadlock findings, and the labeled state graph (serialized to a plain object keyed by stateKey).',
 } as unknown as JSONSchemaType<FrontierExploreInput>
 
-export const FrontierExploreOutputSchema = {
-  type: 'object',
-  properties: {
-    traces: { type: 'array', items: { type: 'object', additionalProperties: true } },
-    findings: { type: 'array', items: { type: 'object', additionalProperties: true } },
-    report: {
-      type: 'object',
-      properties: {
-        strategy: { type: 'string', enum: ['bfs', 'dfs'] },
-        selectionPolicy: { type: 'string', enum: ['all-enabled', 'scheduler'] },
-        visitedCount: { type: 'integer' },
-        findingCount: { type: 'integer' },
-        truncated: { type: 'boolean' },
-        maxDepth: { type: 'integer', nullable: true },
-      },
-      required: ['strategy', 'selectionPolicy', 'visitedCount', 'findingCount', 'truncated'],
-      additionalProperties: false,
-    },
-    stateGraph: {
-      type: 'object',
-      additionalProperties: true,
-      description:
-        'reachable states keyed by canonical stateKey; each value is { stateKey, frontier, step, successors }',
-    },
-    isError: {
-      type: 'boolean',
-      nullable: true,
-      description: 'true when exploration threw (e.g. an unsupported strategy slipped past the schema)',
-    },
-    message: { type: 'string', nullable: true, description: 'error detail when isError' },
-  },
-  required: ['traces', 'findings', 'report', 'stateGraph'],
-  additionalProperties: false,
-} as unknown as JSONSchemaType<FrontierExploreOutput>
-
 /**
  * Enumerate every reachable frontier of a thread set.
  *
@@ -1200,51 +1091,6 @@ export const FrontierExploreOutputSchema = {
  * unsupported strategy slipping past the enum, etc.) is caught into
  * `{ isError, message }` with empty structural defaults.
  */
-export const frontierExplore = defineTool(
-  {
-    name: 'frontier-explore',
-    description:
-      'Enumerate every reachable frontier of a thread set — traces, deadlock findings, and the labeled state graph (serialized to a plain object keyed by stateKey). maxDepth bounds unbounded-state programs; finite-state loops terminate via state-key dedup. Use to answer "can this deadlock?" across all reachable states, not sampled runs.',
-    inputSchema: FrontierExploreInputSchema,
-    outputSchema: FrontierExploreOutputSchema,
-  },
-  ({ threads, messages, triggers, strategy, selectionPolicy, maxDepth, space, instanceId }) => {
-    try {
-      const { traces, findings, report, stateGraph } = exploreFrontiersRaw({
-        threads,
-        messages,
-        triggers,
-        strategy,
-        selectionPolicy,
-        maxDepth,
-        space,
-        instanceId,
-      })
-      return {
-        traces,
-        findings,
-        report,
-        stateGraph: serializeStateGraph(stateGraph),
-      }
-    } catch (err) {
-      return {
-        traces: [],
-        findings: [],
-        report: {
-          strategy: strategy ?? 'bfs',
-          selectionPolicy: selectionPolicy ?? 'all-enabled',
-          visitedCount: 0,
-          findingCount: 0,
-          truncated: false,
-          maxDepth,
-        },
-        stateGraph: {},
-        isError: true,
-        message: (err as Error).message,
-      }
-    }
-  },
-)
 
 export type FrontierVerifyInput = {
   threads: Thread[]
@@ -1319,49 +1165,6 @@ export const FrontierVerifyInputSchema = {
     'Verify a thread set: explore every reachable frontier and derive a verified/failed/truncated status. With the progress spec, also detects livelocks (cycles that never select a progress event).',
 } as unknown as JSONSchemaType<FrontierVerifyInput>
 
-export const FrontierVerifyOutputSchema = {
-  type: 'object',
-  properties: {
-    status: {
-      type: 'string',
-      enum: ['verified', 'failed', 'truncated'],
-      description:
-        'the verdict: verified (clean, fully-explored, finding-free), failed (deadlock or livelock found), or truncated (maxDepth cut off — not a pass)',
-    },
-    findings: { type: 'array', items: { type: 'object', additionalProperties: true } },
-    report: {
-      type: 'object',
-      properties: {
-        strategy: { type: 'string', enum: ['bfs', 'dfs'] },
-        selectionPolicy: { type: 'string', enum: ['all-enabled', 'scheduler'] },
-        visitedCount: { type: 'integer' },
-        findingCount: { type: 'integer' },
-        truncated: { type: 'boolean' },
-        maxDepth: { type: 'integer', nullable: true },
-      },
-      required: ['strategy', 'selectionPolicy', 'visitedCount', 'findingCount', 'truncated'],
-      additionalProperties: false,
-    },
-    livelocks: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          code: { type: 'string', enum: ['livelock'] },
-          states: { type: 'array', items: { type: 'string' } },
-          progressTypes: { type: 'array', items: { type: 'string' } },
-        },
-        required: ['code', 'states', 'progressTypes'],
-        additionalProperties: false,
-      },
-    },
-    isError: { type: 'boolean', nullable: true, description: 'true when verification threw unexpectedly' },
-    message: { type: 'string', nullable: true, description: 'error detail when isError' },
-  },
-  required: ['status', 'findings', 'report', 'livelocks'],
-  additionalProperties: false,
-} as unknown as JSONSchemaType<FrontierVerifyOutput>
-
 /**
  * Verify a thread set: explore every reachable frontier and derive a
  * pass/fail/truncated status.
@@ -1372,44 +1175,160 @@ export const FrontierVerifyOutputSchema = {
  * `{ isError, message }` with a `failed` status (never throw into the model
  * channel).
  */
-export const frontierVerify = defineTool(
-  {
-    name: 'frontier-verify',
-    description:
-      'Verify a thread set across every reachable state — is it deadlock- or livelock-free? Returns verified/failed/truncated. With the progress spec, a reachable cycle that never selects a progress event is a livelock (failed). Never treat truncated as a pass.',
-    inputSchema: FrontierVerifyInputSchema,
-    outputSchema: FrontierVerifyOutputSchema,
-  },
-  ({ threads, messages, triggers, strategy, selectionPolicy, maxDepth, progress, space, instanceId }) => {
-    try {
-      const { status, findings, report, livelocks } = verifyFrontiersRaw({
-        threads,
-        messages,
-        triggers,
-        strategy,
-        selectionPolicy,
-        maxDepth,
-        progress,
-        space,
-        instanceId,
-      })
-      return { status, findings, report, livelocks }
-    } catch (err) {
-      return {
-        status: 'failed' as const,
-        findings: [],
-        report: {
-          strategy: strategy ?? 'bfs',
-          selectionPolicy: selectionPolicy ?? 'all-enabled',
-          visitedCount: 0,
-          findingCount: 0,
-          truncated: false,
-          maxDepth,
-        },
-        livelocks: [],
-        isError: true,
-        message: (err as Error).message,
+
+// ---------------------------------------------------------------------------
+// Event dispatch — the wire surface
+// ---------------------------------------------------------------------------
+
+const postResult = ({ id, result, space }: { id: string; result: unknown; space?: string }): void => {
+  self.postMessage({
+    type: WORKER_MESSAGE_KINDS.tool_call_result,
+    detail: { id, result },
+    ...(space === undefined ? {} : { space }),
+  })
+}
+
+const validateReplayInput = ajv.compile(FrontierReplayInputSchema)
+const validateExploreInput = ajv.compile(FrontierExploreInputSchema)
+const validateVerifyInput = ajv.compile(FrontierVerifyInputSchema)
+
+type ToolRunner = {
+  validate: (input: unknown) => boolean
+  errors: () => string | null
+  run: (input: never) => unknown
+}
+
+const TOOL_RUNNERS: Record<string, ToolRunner> = {
+  'frontier-replay': {
+    validate: validateReplayInput,
+    errors: () => ajv.errorsText(validateReplayInput.errors),
+    run: ({ threads, messages, space, instanceId }: FrontierReplayInput): FrontierReplayOutput => {
+      try {
+        const { pending, frontier } = replayToFrontierRaw({ threads, messages, space, instanceId })
+        return { frontier, stateKey: frontierStateKey({ pending }), pendingCount: pending.size }
+      } catch (err) {
+        return {
+          frontier: null,
+          stateKey: null,
+          pendingCount: null,
+          isError: true,
+          message: (err as Error).message,
+        }
       }
-    }
+    },
   },
-)
+  'frontier-explore': {
+    validate: validateExploreInput,
+    errors: () => ajv.errorsText(validateExploreInput.errors),
+    run: ({
+      threads,
+      messages,
+      triggers,
+      strategy,
+      selectionPolicy,
+      maxDepth,
+      space,
+      instanceId,
+    }: FrontierExploreInput): FrontierExploreOutput => {
+      try {
+        const { traces, findings, report, stateGraph } = exploreFrontiersRaw({
+          threads,
+          messages,
+          triggers,
+          strategy,
+          selectionPolicy,
+          maxDepth,
+          space,
+          instanceId,
+        })
+        return { traces, findings, report, stateGraph: serializeStateGraph(stateGraph) }
+      } catch (err) {
+        return {
+          traces: [],
+          findings: [],
+          report: {
+            strategy: strategy ?? 'bfs',
+            selectionPolicy: selectionPolicy ?? 'all-enabled',
+            visitedCount: 0,
+            findingCount: 0,
+            truncated: false,
+            maxDepth,
+          },
+          stateGraph: {},
+          isError: true,
+          message: (err as Error).message,
+        }
+      }
+    },
+  },
+  'frontier-verify': {
+    validate: validateVerifyInput,
+    errors: () => ajv.errorsText(validateVerifyInput.errors),
+    run: ({
+      threads,
+      messages,
+      triggers,
+      strategy,
+      selectionPolicy,
+      maxDepth,
+      progress,
+      space,
+      instanceId,
+    }: FrontierVerifyInput): FrontierVerifyOutput => {
+      try {
+        const { status, findings, report, livelocks } = verifyFrontiersRaw({
+          threads,
+          messages,
+          triggers,
+          strategy,
+          selectionPolicy,
+          maxDepth,
+          progress,
+          space,
+          instanceId,
+        })
+        return { status, findings, report, livelocks }
+      } catch (err) {
+        return {
+          status: 'failed' as const,
+          findings: [],
+          report: {
+            strategy: strategy ?? 'bfs',
+            selectionPolicy: selectionPolicy ?? 'all-enabled',
+            visitedCount: 0,
+            findingCount: 0,
+            truncated: false,
+            maxDepth,
+          },
+          livelocks: [],
+          isError: true,
+          message: (err as Error).message,
+        }
+      }
+    },
+  },
+}
+
+// The wire is the behavioral event vocabulary, validated with the shared
+// schemas — the trust boundary for anything crossing into this process. The
+// raw analysis functions throw; every throw is caught and posted as
+// { isError, message } data, so a throw never crosses the process boundary.
+const handleInbound = (message: unknown): void => {
+  if (!validateToolCallEvent(message)) return
+  const event = message as ToolCallEvent
+  const { id, tool, input } = event.detail
+  const runner = TOOL_RUNNERS[tool]
+  if (runner === undefined) {
+    postResult({ id, result: { isError: true, message: `unknown frontier tool: ${tool}` }, space: event.space })
+    return
+  }
+  if (!runner.validate(input)) {
+    postResult({ id, result: { isError: true, message: `invalid input: ${runner.errors()}` }, space: event.space })
+    return
+  }
+  postResult({ id, result: runner.run(input as never), space: event.space })
+}
+
+self.onmessage = ({ data }: MessageEvent): void => {
+  handleInbound(data)
+}

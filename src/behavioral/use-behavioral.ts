@@ -38,12 +38,15 @@ export const useBehavioral = ({
   traceListener,
   toolsClientWorker,
   responsesClientWorker,
+  frontierWorker,
   useTrigger,
 }: {
   threads: Thread[]
   traceListener: TraceListener
   toolsClientWorker: Worker
   responsesClientWorker: Worker
+  /** Optional satellite running the frontier analysis worker. */
+  frontierWorker?: Worker
   useTrigger: (trigger: Trigger) => void
 }): Worker => {
   const behavioralWorker = new Worker(new URL('./behavioral.worker.ts', import.meta.url))
@@ -53,12 +56,19 @@ export const useBehavioral = ({
     behavioralWorker.postMessage({ kind: WORKER_MESSAGE_KINDS.add_threads, threads: newThreads })
 
   // The router's only family knowledge: which port an event type routes to.
+  // Tool-calling is two-level: every tool shares the `tool_call` event type, so
+  // satellite tools (frontier) are discriminated by `detail.tool` and fall
+  // back to the tools worker. Cancels carry only an id — they cannot be
+  // attributed to a satellite tool and land on the tools port, where an
+  // unknown id is a no-op (frontier analyses are synchronous and cannot be
+  // canceled mid-run anyway).
   const routes: Record<string, Worker> = {
     [WORKER_MESSAGE_KINDS.response_request]: responsesClientWorker,
     [WORKER_MESSAGE_KINDS.response_cancel]: responsesClientWorker,
     [WORKER_MESSAGE_KINDS.tool_call]: toolsClientWorker,
     [WORKER_MESSAGE_KINDS.tool_cancel]: toolsClientWorker,
   }
+  const toolRoutes: Record<string, Worker> = {}
 
   const reenter = (message: { type: string; detail: JsonObject & { id: string }; space?: string }): void => {
     addThreads([
@@ -71,6 +81,12 @@ export const useBehavioral = ({
     ])
   }
 
+  // Both tool-speaking satellites post tool_call_result events.
+  const onToolCallResult = ({ data }: MessageEvent): void => {
+    if (!validateToolCallResultEvent(data)) return
+    reenter(data)
+  }
+
   behavioralWorker.onmessage = async ({ data }: MessageEvent<Trace>): Promise<void> => {
     await traceListener(data)
     if (data.kind !== TRACE_MESSAGE_KINDS.selection) return
@@ -79,7 +95,8 @@ export const useBehavioral = ({
     // worker processes: only schema-valid events route.
     const candidate = data.selected
     const event = { type: candidate.type, detail: candidate.detail, space: candidate.space }
-    const port = routes[event.type]
+    const tool = event.type === WORKER_MESSAGE_KINDS.tool_call ? (event.detail as { tool?: string }).tool : undefined
+    const port = (tool === undefined ? undefined : toolRoutes[tool]) ?? routes[event.type]
     if (port === undefined) return
     if (
       !validateResponseRequestEvent(event) &&
@@ -97,10 +114,7 @@ export const useBehavioral = ({
     reenter(data)
   }
 
-  toolsClientWorker.onmessage = ({ data }: MessageEvent): void => {
-    if (!validateToolCallResultEvent(data)) return
-    reenter(data)
-  }
+  toolsClientWorker.onmessage = onToolCallResult
 
   // Only the router can see a satellite crash — no thread ever could — so the
   // crash is synthesized as one worker_error event (errors-as-data).
@@ -125,6 +139,17 @@ export const useBehavioral = ({
 
   responsesClientWorker.onerror = onCrash('responses-client')
   toolsClientWorker.onerror = onCrash('tools-client')
+
+  // The frontier satellite is optional: hosts without one simply have no
+  // frontier tool routes, and a frontier tool_call falls back to the tools
+  // worker (which reports `invalid input` for an unknown tool name).
+  if (frontierWorker !== undefined) {
+    for (const tool of ['frontier-replay', 'frontier-explore', 'frontier-verify']) {
+      toolRoutes[tool] = frontierWorker
+    }
+    frontierWorker.onmessage = onToolCallResult
+    frontierWorker.onerror = onCrash('frontier')
+  }
 
   addThreads(threads)
   useTrigger(((event: BPEvent) => {

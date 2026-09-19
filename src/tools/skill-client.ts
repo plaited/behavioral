@@ -91,7 +91,7 @@ export type SkillValidateLinksOutput = {
 // Tool JSON schemas — one schema pair per tool, no `mode` discriminator.
 // AJV validates at runtime; `SkillRecord`'s open index signature means the
 // discover output schema is cast through `unknown` (same precedent as
-// frontier.ts / html.ts).
+// html.ts).
 // ---------------------------------------------------------------------------
 
 const skillRecordJsonSchema = {

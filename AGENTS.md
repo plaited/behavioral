@@ -77,8 +77,8 @@ and the impact is broad or unclear, expand coverage until the affected surface i
 **`src/kernel/`** — the irreducible coordination floor: `behavioral()`, threads, the dispatch
 bridge, OAuth. Not removable; without it there is no turn cycle, no spec-event streaming, no tool
 dispatch.
-**`src/tools/`** — the tool fleet (35 tools): stateless `defineTool` units (`src/tools/define-tool.ts`), each
-with AJV `JSONSchemaType` input/output schemas (`discovery`, `frontier`, `html`, `mcp-client`,
+**`src/tools/`** — the tool fleet (34 tools): stateless `defineTool` units (`src/tools/define-tool.ts`), each
+with AJV `JSONSchemaType` input/output schemas (`discovery`, `html`, `mcp-client`,
 `plugin-client`, `skill-client`, `git`, `typescript`). Dispatched from the CLI via `behavioral tools`;
 agent-facing usage docs live in `skills/behavioral-tools/`.
 **`src/behavioral/`** — the behavioral runtime: types, constants, utils.
