@@ -56,7 +56,9 @@ describe(TRACE_MESSAGE_KINDS.deadlock, () => {
 
     addThread({ label: 'watcher', rules: [{ waitFor: [onType('dangerous')] }] })
 
-    expect(traces).toHaveLength(0)
+    // Provisioning traces (thread_added) do not step the program — no
+    // pending_bids/frontier/deadlock until a trigger arrives.
+    expect(traces.map((t) => t.kind)).toEqual(['thread_added'])
   })
 
   test('publishes selection trace when enabled candidates exist and keeps priority selection behavior', () => {

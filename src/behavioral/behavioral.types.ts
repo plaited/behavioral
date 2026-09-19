@@ -370,6 +370,19 @@ export type AddThreadError = TraceBase & {
   space?: string
 }
 
+/**
+ * Emitted when `addThread` successfully registers a thread — the provision
+ * record. Carries the full validated {@link Thread} so the trace log is
+ * self-contained: replay = `thread_added` payloads + ingress events in
+ * order (see `StepTrace.ingress` for the replay filter).
+ *
+ * @public
+ */
+export type ThreadAddedTrace = TraceBase & {
+  kind: typeof TRACE_MESSAGE_KINDS.thread_added
+  thread: Thread
+}
+
 export type SerializedThread = {
   label: string
   priority: number
@@ -519,6 +532,7 @@ export type Trace =
   | DeadlockTrace
   | SelectionTrace
   | AddThreadError
+  | ThreadAddedTrace
   | PendingBidsTrace
   | InterruptTrace
   | TransformTrace
@@ -637,12 +651,10 @@ export type AddThreadsMessage = {
   kind: typeof WORKER_MESSAGE_KINDS.addThreads
   threads: Thread[]
 }
-export type StepMessage = {
-  kind: typeof WORKER_MESSAGE_KINDS.step
-}
+
 export type TriggerMessage = {
   kind: typeof WORKER_MESSAGE_KINDS.trigger
   event: BPEvent
 }
 
-export type WorkerMessage = AddThreadsMessage | StepMessage | TriggerMessage
+export type WorkerMessage = AddThreadsMessage | TriggerMessage

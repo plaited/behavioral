@@ -201,6 +201,15 @@ export const behavioral = () => {
           generator: thread(),
           label,
         })
+        // The provision record — after registration, so thread_added means
+        // registered. Makes the trace log self-contained (replay = these +
+        // ingress events).
+        sendTrace({
+          kind: TRACE_MESSAGE_KINDS.thread_added,
+          timestamp: Date.now(),
+          instanceId,
+          thread: args,
+        })
       } catch (err) {
         sendTrace({
           kind: TRACE_MESSAGE_KINDS.add_thread_error,

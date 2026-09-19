@@ -51,8 +51,9 @@ describe('useTrace — listener isolation and subscription semantics', () => {
 
     const threw = consoleErrors.find((args) => String(args[0]).includes('trace listener threw'))
     expect(threw).toBeDefined()
-    // Second arg is the trace kind — the step trace now leads every super-step
-    expect(threw![1]).toBe(TRACE_MESSAGE_KINDS.step)
+    // First trace the listener sees is the provision record (thread_added
+    // fires at addThread, before any step trace)
+    expect(threw![1]).toBe(TRACE_MESSAGE_KINDS.thread_added)
   })
 
   test('a rejecting async listener does not produce an unhandled rejection', () => {

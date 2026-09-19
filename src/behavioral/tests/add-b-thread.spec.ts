@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { TRACE_MESSAGE_KINDS } from '../behavioral.constants.ts'
 import { behavioral } from '../behavioral.ts'
-import type { DeadlockTrace, FrontierTrace, SelectionTrace, Trace } from '../behavioral.types.ts'
+import type { DeadlockTrace, FrontierTrace, SelectionTrace, ThreadAddedTrace, Trace } from '../behavioral.types.ts'
 import { onSelection } from './helpers.ts'
 
 const onType = (type: string) => ({ type })
@@ -138,8 +138,36 @@ describe('addThread quiescence', () => {
 
     addThread({ label: 'requester', rules: [{ request: { type: 'x' } }], once: true })
 
-    // `addThread` is inert: no super-step runs until an event enters via
-    // `trigger` or `step`.
-    expect(traces).toHaveLength(0)
+    // `addThread` is inert beyond its provision trace: no super-step runs
+    // until an event enters via `trigger` or `step`.
+    expect(traces.map((t) => t.kind)).toEqual([TRACE_MESSAGE_KINDS.thread_added])
+  })
+
+  test('a registered thread emits thread_added carrying the full definition — the provision record', () => {
+    const added: Trace[] = []
+    const program = behavioral()
+    const { addThread, useTrace } = program
+    useTrace((trace: Trace) => {
+      if (trace.kind === TRACE_MESSAGE_KINDS.thread_added) added.push(trace)
+    })
+
+    const thread = {
+      label: 'provisioned',
+      space: 'demo',
+      once: true as const,
+      rules: [{ request: { type: 'go' } }],
+    }
+    addThread(thread)
+
+    expect(added).toHaveLength(1)
+    const trace = added[0] as ThreadAddedTrace
+    // The full validated Thread — the trace log is self-contained: replay =
+    // thread_added payloads + ingress events.
+    expect(trace.thread).toEqual(thread)
+    expect(trace.instanceId).toBeTypeOf('string')
+
+    // An invalid thread emits add_thread_error, never thread_added.
+    addThread({ label: 'no-rules' } as never)
+    expect(added).toHaveLength(1)
   })
 })

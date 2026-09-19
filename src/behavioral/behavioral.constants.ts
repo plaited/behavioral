@@ -29,6 +29,7 @@ export const TRACE_MESSAGE_KINDS = keyMirror(
   'selection',
   'trigger_error',
   'add_thread_error',
+  'thread_added',
   'interrupt',
   'transform',
   'transform_error',
@@ -49,4 +50,4 @@ export const FRONTIER_STATUS = keyMirror('ready', 'deadlock', 'idle')
 
 export const IDIOMS = keyMirror('waitFor', 'interrupt', 'request', 'block', 'transform')
 
-export const WORKER_MESSAGE_KINDS = keyMirror('trigger', 'addThreads', 'step')
+export const WORKER_MESSAGE_KINDS = keyMirror('trigger', 'addThreads')
