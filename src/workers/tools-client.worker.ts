@@ -1,13 +1,16 @@
 /**
- * Tools-client worker — executes one script per request in a cancellable `bash`
- * subprocess, streams stdout/stderr lines to the host as they arrive, and
- * returns a single bounded terminal result.
+ * Tools-client worker — executes one script per `tool_call` event in a
+ * cancellable `bash` subprocess and returns a single bounded terminal
+ * `tool_call_result` event.
  *
  * @remarks
- * Spawned by URL from `tools-client.ts` (`new Worker(new URL('./tools-client.worker.ts', ...))`)
- * and imported by nobody, so it needs no main-vs-worker detection: Bun exposes
- * `self` and `self.postMessage` on the main thread too, and `self.importScripts`
- * is undefined in both, so every ambient discriminator lies.
+ * Spawned by URL (never imported) and speaks the behavioral event wire:
+ * `tool_call` / `tool_cancel` in, `tool_call_result` out, with any request
+ * `space` echoed on the result. `detail.input` is validated against the
+ * input boundary below (§5 surface + host bounds); over-ceiling bounds are
+ * clamped and the clamp is reported in `ToolsResult.clamped` — policy lives
+ * with enforcement. Streamed lines are counted for quotas but not posted:
+ * no consumer exists (MINIMAL: router-published delta trace when one does).
  *
  * MINIMAL: `Bun.spawn` + `bash -lc` is the launch path (the spec's `Bun.$.lines()`
  * cannot stream or be cancelled — it buffers to EOF and exposes no signal/kill).
@@ -20,15 +23,15 @@
  * @packageDocumentation
  */
 
-import type {
-  ToolsInbound,
-  ToolsLineEvent,
-  ToolsRequest,
-  ToolsResult,
-  ToolsResultEvent,
-  ToolsStatus,
-  ToolsStream,
-} from './tools-client.types.ts'
+import type { JSONSchemaType } from 'ajv'
+import { WORKER_MESSAGE_KINDS } from '../behavioral/behavioral.constants.ts'
+import { ajv } from '../behavioral/behavioral.types.ts'
+import {
+  type ToolCallEvent,
+  validateToolCallEvent,
+  validateToolCancelEvent,
+} from '../behavioral/use-behavioral.types.ts'
+import type { ToolsFormat, ToolsOptions, ToolsResult, ToolsStatus } from './tools-client.types.ts'
 
 // ---------------------------------------------------------------------------
 // Defaults
@@ -51,6 +54,74 @@ const DEFAULT_TIMEOUT_MS = 30_000
 
 /** Default stdout+stderr lines allowed before a group kill. */
 const DEFAULT_MAX_LINES = 250
+
+// ---------------------------------------------------------------------------
+// Input boundary (§5 surface + host bounds)
+// ---------------------------------------------------------------------------
+
+/** The `tool_call` event's `detail.input`. */
+export type ToolsCallInput = {
+  script: string
+  format?: ToolsFormat
+  offset?: number
+  limit?: number
+  timeoutMs?: number
+  maxLines?: number
+  maxCharacters?: number
+  stdin?: string
+  cwd?: string
+  env?: Record<string, string>
+}
+
+export const ToolsCallInputSchema: JSONSchemaType<ToolsCallInput> = {
+  type: 'object',
+  properties: {
+    script: { type: 'string', minLength: 1 },
+    format: { type: 'string', enum: ['paged', 'json', 'raw'], nullable: true },
+    offset: { type: 'integer', minimum: 0, nullable: true },
+    limit: { type: 'integer', minimum: 1, nullable: true },
+    timeoutMs: { type: 'integer', minimum: 1, nullable: true },
+    maxLines: { type: 'integer', minimum: 1, nullable: true },
+    maxCharacters: { type: 'integer', minimum: 1, nullable: true },
+    stdin: { type: 'string', nullable: true },
+    cwd: { type: 'string', nullable: true },
+    env: { type: 'object', required: [], additionalProperties: { type: 'string' }, nullable: true },
+  },
+  required: ['script'],
+  additionalProperties: false,
+}
+
+const validateToolsCallInput = ajv.compile(ToolsCallInputSchema)
+
+/** Hard bounds a caller cannot exceed — clamping lives with enforcement. */
+const CEILINGS = { timeoutMs: 120_000, maxLines: 5_000, maxCharacters: 200_000, limit: 1_000 } as const
+
+const CLAMPED_KEYS = ['timeoutMs', 'maxLines', 'maxCharacters', 'limit'] as const
+
+/** Clamp over-ceiling bounds, recording every adjustment as `'<key> <given> -> <applied>'`. */
+const clampOptions = (input: ToolsCallInput): { options: ToolsOptions; clamped: string[] } => {
+  const clamped: string[] = []
+  const options: ToolsOptions = {
+    ...(input.format === undefined ? {} : { format: input.format }),
+    ...(input.offset === undefined ? {} : { offset: input.offset }),
+    ...(input.limit === undefined ? {} : { limit: input.limit }),
+    ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
+    ...(input.maxLines === undefined ? {} : { maxLines: input.maxLines }),
+    ...(input.maxCharacters === undefined ? {} : { maxCharacters: input.maxCharacters }),
+    ...(input.stdin === undefined ? {} : { stdin: input.stdin }),
+    ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
+    ...(input.env === undefined ? {} : { env: input.env }),
+  }
+  for (const key of CLAMPED_KEYS) {
+    const given = options[key]
+    if (given !== undefined && given > CEILINGS[key]) {
+      clamped.push(`${key} ${given} -> ${CEILINGS[key]}`)
+      // CLAMPED_KEYS are all numeric ToolsOptions fields.
+      ;(options as Record<string, number>)[key] = CEILINGS[key]
+    }
+  }
+  return { options, clamped }
+}
 
 /** Why an execution was stopped early. */
 type StopReason = 'canceled' | 'timeout' | 'line_quota' | 'byte_quota'
@@ -161,26 +232,13 @@ const pumpLines = async ({
   if (carry !== '') emit(carry)
 }
 
-/** Post one output line to the host. */
-const postLine = ({
-  id,
-  lineNumber,
-  stream,
-  line,
-}: {
-  id: string
-  lineNumber: number
-  stream: ToolsStream
-  line: string
-}): void => {
-  const event: ToolsLineEvent = { type: 'LINE', id, lineNumber, stream, line }
-  self.postMessage(event)
-}
-
-/** Post the single terminal event for an execution. */
-const postResult = ({ id, result }: { id: string; result: ToolsResult }): void => {
-  const event: ToolsResultEvent = { type: 'RESULT', id, result }
-  self.postMessage(event)
+/** Post the single terminal result event for an execution, echoing any request space. */
+const postResult = ({ id, result, space }: { id: string; result: ToolsResult; space?: string }): void => {
+  self.postMessage({
+    type: WORKER_MESSAGE_KINDS.tool_call_result,
+    detail: { id, result },
+    ...(space === undefined ? {} : { space }),
+  })
 }
 
 // ---------------------------------------------------------------------------
@@ -198,8 +256,15 @@ const JSON_SNIPPET_CHARS = 200
  * `offset`/`limit`, `raw`/`stderr` by tail-truncation, `json` by the byte
  * quota's group kill, and the whole run by `maxLines` and the deadline.
  */
-const runScript = async ({ request }: { request: ToolsRequest }): Promise<ToolsResult> => {
-  const { id, script, options } = request
+const runScript = async ({
+  id,
+  script,
+  options,
+}: {
+  id: string
+  script: string
+  options: ToolsOptions
+}): Promise<ToolsResult> => {
   const started = performance.now()
   const format = options.format ?? 'paged'
   const offset = options.offset ?? DEFAULT_OFFSET
@@ -260,7 +325,6 @@ const runScript = async ({ request }: { request: ToolsRequest }): Promise<ToolsR
       const clean = Bun.stripANSI(raw)
       sequence += 1
       stdoutSeen += 1
-      postLine({ id, lineNumber: sequence, stream: 'stdout', line: clean })
       if (format === 'paged') {
         if (stdoutSeen > offset && pagedLines.length < limit) pagedLines.push(clean)
       } else if (format === 'json') {
@@ -290,7 +354,7 @@ const runScript = async ({ request }: { request: ToolsRequest }): Promise<ToolsR
       const clean = Bun.stripANSI(raw)
       sequence += 1
       // Tail-biased like `raw`: failures print at the end, so the dropped head
-      // is the least useful part. LINE events still carry every line.
+      // is the least useful part.
       const next = stderrTail === '' ? clean : `${stderrTail}\n${clean}`
       stderrChars += next.length - stderrTail.length
       stderrTail = next
@@ -299,7 +363,6 @@ const runScript = async ({ request }: { request: ToolsRequest }): Promise<ToolsR
         stderrTail = stderrTail.slice(-maxCharacters)
         stderrDropped = stderrChars - stderrTail.length
       }
-      postLine({ id, lineNumber: sequence, stream: 'stderr', line: clean })
       enforceLineCap()
     }
 
@@ -389,33 +452,46 @@ const errorResult = ({ id, message }: { id: string; message: string }): ToolsRes
   message,
 })
 
-/** Route one inbound message. */
-const handleInbound = async (message: ToolsInbound): Promise<void> => {
-  if (message.type === 'CANCEL') {
-    const execution = active.get(message.id)
+/** Route one inbound event. */
+const handleInbound = async (message: unknown): Promise<void> => {
+  if (validateToolCancelEvent(message)) {
+    const execution = active.get(message.detail.id)
     if (execution !== undefined) stopExecution({ execution, reason: 'canceled' })
     return
   }
-  // `execute` never rejects on the host side: any worker-side throw (bad cwd,
+  // Events failing the shared schema have no correlation id to report to and
+  // are dropped — the router only forwards schema-valid events, so this is
+  // defense in depth at the process boundary.
+  if (!validateToolCallEvent(message)) return
+  const event = message as ToolCallEvent
+  const { id, input } = event.detail
+  // Input that fails the boundary is error data, not a throw: the id is valid,
+  // so the caller learns why nothing ran.
+  if (!validateToolsCallInput(input)) {
+    postResult({
+      id,
+      result: errorResult({ id, message: `invalid input: ${ajv.errorsText(validateToolsCallInput.errors)}` }),
+      space: event.space,
+    })
+    return
+  }
+  const { options, clamped } = clampOptions(input)
+  // `runScript` never rejects on the host side: any worker-side throw (bad cwd,
   // missing interpreter, a kill race) becomes `status: 'error'` data instead.
   try {
-    const result = await runScript({ request: message })
-    postResult({ id: message.id, result })
+    const result = await runScript({ id, script: input.script, options })
+    postResult({ id, result: clamped.length === 0 ? result : { ...result, clamped }, space: event.space })
   } catch (err) {
     postResult({
-      id: message.id,
-      result: errorResult({
-        id: message.id,
-        message: err instanceof Error ? err.message : String(err),
-      }),
+      id,
+      result: errorResult({ id, message: err instanceof Error ? err.message : String(err) }),
+      space: event.space,
     })
   }
 }
 
-// The wire payload is produced by our own host code, so it is typed by
-// assertion rather than re-validated here — model input is validated once, at
-// the tool boundary (see `tools-client.ts`). MINIMAL: add an AJV wire validator if
-// the worker ever accepts messages from outside this process.
+// The wire is the behavioral event vocabulary, validated with the shared
+// schemas — the trust boundary for anything crossing into this process.
 self.onmessage = (event: MessageEvent): void => {
-  void handleInbound(event.data as ToolsInbound)
+  void handleInbound(event.data)
 }

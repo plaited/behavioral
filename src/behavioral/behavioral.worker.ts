@@ -31,7 +31,7 @@ useTrace((message) => postMessage(message))
 
 self.onmessage = ({ data }: MessageEvent<WorkerMessage>) => {
   const { kind } = data
-  if (kind === WORKER_MESSAGE_KINDS.addThreads) {
+  if (kind === WORKER_MESSAGE_KINDS.add_threads) {
     for (const thread of data.threads) addThread(thread)
     step()
   }

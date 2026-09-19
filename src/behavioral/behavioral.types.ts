@@ -590,7 +590,7 @@ export type Disconnect = () => void | Promise<void>
  * @see {@link UseTrace} for registering trace listeners
  * @see {@link Trace} for the engine's trace structure
  */
-type TraceListener = (msg: Trace) => void | Promise<void>
+export type TraceListener = (msg: Trace) => void | Promise<void>
 
 /**
  * Represents a generic structure for event detail payloads.
@@ -648,7 +648,7 @@ export type SendTrace = {
 }
 
 export type AddThreadsMessage = {
-  kind: typeof WORKER_MESSAGE_KINDS.addThreads
+  kind: typeof WORKER_MESSAGE_KINDS.add_threads
   threads: Thread[]
 }
 

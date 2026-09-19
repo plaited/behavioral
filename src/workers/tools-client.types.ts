@@ -1,27 +1,21 @@
 /**
- * Wire and option types shared by the tools-client worker (`tools-client.worker.ts`) and its host
- * consumer (`tools-client.ts`).
+ * Types shared by the tools-client worker (`tools-client.worker.ts`) and its
+ * event-wire consumers.
  *
  * @remarks
- * Types only — no runtime values, so importing this module has no side effects
- * on either side of the worker boundary. `tools-client.worker.ts` mounts `self.onmessage` at
- * top level, so the host must never import it for types; both sides import
- * here instead.
- *
- * The host sends {@link ToolsRequest} / {@link ToolsCancel} and receives
- * {@link ToolsOutbound} — zero or more {@link ToolsLineEvent}s followed by
- * exactly one {@link ToolsResultEvent}. A single terminal event (rather than
- * separate complete/aborted/error events) keeps the host's correlation map to
- * one branch; {@link ToolsResult.status} carries the outcome.
+ * Types only — no runtime values, so importing this module has no side
+ * effects on either side of the worker boundary. `tools-client.worker.ts`
+ * mounts `self.onmessage` at top level, so the host must never import it for
+ * types; both sides import here instead. The wire itself is the behavioral
+ * event vocabulary (`tool_call` / `tool_cancel` in, one `tool_call_result`
+ * out) defined in `src/behavioral/use-behavioral.types.ts` — only the
+ * `detail.input` and `detail.result` payload shapes live here.
  *
  * @packageDocumentation
  */
 
 /** Output representation for a completed execution. */
 export type ToolsFormat = 'paged' | 'json' | 'raw'
-
-/** Stream a line arrived on. */
-export type ToolsStream = 'stdout' | 'stderr'
 
 /** Terminal state of one execution. */
 export type ToolsStatus = 'completed' | 'timeout' | 'line_quota' | 'canceled' | 'error'
@@ -85,41 +79,3 @@ export type ToolsResult = {
   /** Failure detail when `status` is `error`. */
   message?: string
 }
-
-/** Host → worker: run one script. */
-export type ToolsRequest = {
-  type: 'EXECUTE'
-  id: string
-  script: string
-  options: ToolsOptions
-}
-
-/** Host → worker: stop one running execution. */
-export type ToolsCancel = {
-  type: 'CANCEL'
-  id: string
-  reason?: string
-}
-
-/** Messages the worker accepts. */
-export type ToolsInbound = ToolsRequest | ToolsCancel
-
-/** Worker → host: one streamed line, emitted as it arrives. */
-export type ToolsLineEvent = {
-  type: 'LINE'
-  id: string
-  /** 1-based, monotonic across stdout and stderr — the supervisor feed, not a paging index. */
-  lineNumber: number
-  stream: ToolsStream
-  line: string
-}
-
-/** Worker → host: the one terminal event per execution. */
-export type ToolsResultEvent = {
-  type: 'RESULT'
-  id: string
-  result: ToolsResult
-}
-
-/** Messages the worker emits. */
-export type ToolsOutbound = ToolsLineEvent | ToolsResultEvent

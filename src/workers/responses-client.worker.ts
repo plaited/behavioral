@@ -1,11 +1,16 @@
 /**
- * Model worker — executes one Open Responses call per request (`/responses`),
- * streams semantic SSE events to the host as they arrive as `DELTA`, and
- * returns a single terminal `RESULT`.
+ * Model worker — executes one Open Responses call (`/responses`) per
+ * `response_request` event and returns a single terminal
+ * `response_request_result` event.
  *
  * @remarks
- * Spawned by URL from `responses-client.ts` (`new Worker(new URL('./responses-client.worker.ts', ...))`)
- * and imported by nobody, so it needs no main-vs-worker detection.
+ * Spawned by URL (never imported) and speaks the behavioral event wire:
+ * `response_request` / `response_cancel` in, `response_request_result` out,
+ * with any request `space` echoed on the result. `detail.input` is validated
+ * against `validateModelRespondInput` (the one home, in
+ * `responses-client.schemas.ts`); stream events are assembled internally and
+ * never posted — no consumer exists (MINIMAL: router-published delta trace
+ * when one does).
  *
  * Endpoint config (URL + resolved API key + extra headers) is delivered via
  * `setEnvironmentData` before the worker is spawned and read once at startup
@@ -24,6 +29,12 @@
  */
 
 import { getEnvironmentData } from 'node:worker_threads'
+import { WORKER_MESSAGE_KINDS } from '../behavioral/behavioral.constants.ts'
+import {
+  type ResponseRequestEvent,
+  validateResponseCancelEvent,
+  validateResponseRequestEvent,
+} from '../behavioral/use-behavioral.types.ts'
 import {
   ErrorSchema,
   type KnownStreamEvent,
@@ -36,16 +47,14 @@ import {
   StreamEventLaxSchema,
   type Usage,
   UsageSchema,
+  validateModelRespondInput,
 } from './responses-client.schemas.ts'
 import {
   MODEL_ENDPOINTS_KEY,
-  type ModelDeltaEvent,
   type ModelEndpointConfig,
   type ModelEndpoints,
-  type ModelInbound,
   type ModelRespondInput,
   type ModelRespondOutput,
-  type ModelResultEvent,
 } from './responses-client.types.ts'
 
 // ---------------------------------------------------------------------------
@@ -263,14 +272,12 @@ type ActiveRequest = {
 /** In-flight requests, keyed by correlation id. */
 const active = new Map<string, ActiveRequest>()
 
-const postDelta = (id: string, event: OpenResponsesStreamEvent): void => {
-  const message: ModelDeltaEvent = { type: 'DELTA', id, event }
-  self.postMessage(message)
-}
-
-const postResult = (id: string, result: ModelRespondOutput): void => {
-  const message: ModelResultEvent = { type: 'RESULT', id, result }
-  self.postMessage(message)
+const postResult = (id: string, result: ModelRespondOutput, space?: string): void => {
+  self.postMessage({
+    type: WORKER_MESSAGE_KINDS.response_request_result,
+    detail: { id, result },
+    ...(space === undefined ? {} : { space }),
+  })
 }
 
 const runRespond = async (
@@ -289,7 +296,9 @@ const runRespond = async (
     })
     if (!res.ok) return { isError: true, message: await describeHttpError(res) }
     if (input.stream === true && (res.headers.get('content-type') ?? '').includes('text/event-stream')) {
-      const outcome = await streamEvents(res.body as ReadableStream<Uint8Array>, (event) => postDelta(id, event))
+      // Stream events are assembled into the terminal result; nothing is
+      // posted mid-stream (no consumer — see the header MINIMAL note).
+      const outcome = await streamEvents(res.body as ReadableStream<Uint8Array>, () => {})
       if ('isError' in outcome) return outcome
       return assembleResponse(outcome.events, outcome.knownEvents)
     }
@@ -309,14 +318,27 @@ const runRespond = async (
   }
 }
 
-/** Route one inbound message. */
-const handleInbound = async (message: ModelInbound): Promise<void> => {
-  if (message.type === 'CANCEL') {
-    const request = active.get(message.id)
+/** Route one inbound event. */
+const handleInbound = async (message: unknown): Promise<void> => {
+  if (validateResponseCancelEvent(message)) {
+    const request = active.get(message.detail.id)
     if (request !== undefined && request.reason === null) {
       request.reason = 'canceled'
       request.controller.abort()
     }
+    return
+  }
+  // Events failing the shared schema have no correlation id to report to and
+  // are dropped — the router only forwards schema-valid events, so this is
+  // defense in depth at the process boundary.
+  if (!validateResponseRequestEvent(message)) return
+  const event = message as ResponseRequestEvent
+  const { id, input } = event.detail
+  // Input that fails the boundary is error data, not a throw: the id is valid,
+  // so the caller learns why nothing ran.
+  if (!validateModelRespondInput(input)) {
+    const detail = validateModelRespondInput.errors?.map((e) => `${e.instancePath} ${e.message}`).join('; ')
+    postResult(id, { isError: true, message: `invalid input: ${detail}` }, event.space)
     return
   }
 
@@ -331,24 +353,22 @@ const handleInbound = async (message: ModelInbound): Promise<void> => {
       }
     }, FETCH_TIMEOUT_MS),
   }
-  active.set(message.id, request)
+  active.set(id, request)
 
   // `respond` never rejects: any worker-side throw becomes result data.
   try {
-    const result = await runRespond(message.id, message.input, request)
-    postResult(message.id, result)
+    const result = await runRespond(id, input, request)
+    postResult(id, result, event.space)
   } catch (err) {
-    postResult(message.id, { isError: true, message: err instanceof Error ? err.message : String(err) })
+    postResult(id, { isError: true, message: err instanceof Error ? err.message : String(err) }, event.space)
   } finally {
     clearTimeout(request.timer)
-    active.delete(message.id)
+    active.delete(id)
   }
 }
 
-// The wire payload is produced by our own host code, so it is typed by
-// assertion rather than re-validated here — model input is validated once, at
-// the tool boundary (see `responses-client.ts`). MINIMAL: add an AJV wire validator if
-// the worker ever accepts messages from outside this process.
+// The wire is the behavioral event vocabulary, validated with the shared
+// schemas — the trust boundary for anything crossing into this process.
 self.onmessage = (event: MessageEvent): void => {
-  void handleInbound(event.data as ModelInbound)
+  void handleInbound(event.data)
 }

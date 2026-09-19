@@ -1,5 +1,6 @@
-import type { ErrorObject, ValidateFunction } from 'ajv'
+import type { ErrorObject, JSONSchemaType, ValidateFunction } from 'ajv'
 import Ajv2020 from 'ajv/dist/2020'
+import type { ModelRespondInput, ModelRespondOutput } from './responses-client.types.ts'
 
 // ================================================================
 // Open Responses — Phase 0 subset schemas (AJV / JSON Schema)
@@ -847,3 +848,94 @@ export const StreamEventLaxSchema = makeSchema<OpenResponsesStreamEvent>({
 })
 /** @public */
 export type OpenResponsesStreamEvent = KnownStreamEvent | UnknownStreamEvent
+
+// ----------------------------------------------------------------
+// Event-input boundary — the single validation point for
+// `response_request` detail.input (moved here from the deleted
+// host client; the worker compiles nothing, it consumes these)
+// ----------------------------------------------------------------
+
+const inputItemJsonSchema = InputItemSchema.schema
+const functionToolJsonSchema = FunctionToolSchema.schema
+const outputItemJsonSchema = OutputItemSchema.schema
+const usageJsonSchema = UsageSchema.schema
+const errorJsonSchema = ErrorSchema.schema
+const truncationJsonSchema = TruncationSchema.schema
+
+/** @public */
+export const ModelRespondInputSchema = {
+  type: 'object',
+  properties: {
+    provider: {
+      type: 'string',
+      minLength: 1,
+      description: 'provisioned endpoint selector — maps to a URL + key injected at provisioning',
+    },
+    modelId: { type: 'string', minLength: 1, description: 'model identifier at the endpoint' },
+    input: { type: 'array', items: inputItemJsonSchema, description: 'conversation transcript items' },
+    tools: { type: 'array', items: functionToolJsonSchema, nullable: true },
+    instructions: { type: 'string', nullable: true },
+    truncation: { ...truncationJsonSchema, nullable: true },
+    stream: { type: 'boolean', nullable: true, description: 'request SSE streaming' },
+    reasoningEffort: {
+      anyOf: [
+        {
+          type: 'string',
+          enum: [...reasoningEffortEnum],
+          description: 'spec ReasoningEffortEnum values (none|low|medium|high|xhigh)',
+        },
+        {
+          type: 'string',
+          minLength: 1,
+          description:
+            'non-spec value — passed through to reasoning.effort verbatim for endpoints that extend the spec (e.g. OpenAI-only minimal)',
+        },
+        { type: 'null' },
+      ],
+      description:
+        'reasoning effort; spec values are declared, others pass through (the endpoint is the authority on its supported efforts)',
+    },
+  },
+  required: ['provider', 'modelId', 'input'],
+  additionalProperties: true,
+  description:
+    'Send input items to a provisioned Open Responses endpoint and get back output items. ' +
+    'function_call items are returned as data — dispatch them yourself. ' +
+    'Named fields are spec-only; any other key-value in args passes through to the ' +
+    'request body verbatim (spec params we do not name + endpoint extensions).',
+} as unknown as JSONSchemaType<ModelRespondInput>
+
+/** @public */
+export const validateModelRespondInput = ajv.compile(ModelRespondInputSchema)
+
+/** @public */
+export const ModelRespondOutputSchema = {
+  type: 'object',
+  oneOf: [
+    {
+      type: 'object',
+      properties: {
+        items: { type: 'array', items: outputItemJsonSchema },
+        status: { type: 'string' },
+        events: { type: 'array', items: { type: 'object' }, nullable: true },
+        usage: { ...usageJsonSchema, nullable: true },
+        error: { ...errorJsonSchema, nullable: true },
+      },
+      required: ['items', 'status'],
+      additionalProperties: false,
+    },
+    {
+      type: 'object',
+      properties: {
+        isError: { type: 'boolean', const: true },
+        message: { type: 'string' },
+      },
+      required: ['isError', 'message'],
+      additionalProperties: false,
+    },
+  ],
+  description: 'Output items + status on success; { isError, message } on failure.',
+} as unknown as JSONSchemaType<ModelRespondOutput>
+
+/** @public */
+export const validateModelRespondOutput = ajv.compile(ModelRespondOutputSchema)

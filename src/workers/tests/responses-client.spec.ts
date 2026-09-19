@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { ajv } from '../../tools/define-tool.ts'
+import { setEnvironmentData } from 'node:worker_threads'
+import { WORKER_MESSAGE_KINDS } from '../../behavioral/behavioral.constants.ts'
 import {
   AudioContentSchema,
   CompactionItemSchema,
@@ -20,67 +21,101 @@ import {
   StreamEventLaxSchema,
   UsageSchema,
   VideoContentSchema,
+  validateModelRespondInput,
+  validateModelRespondOutput,
 } from '../responses-client.schemas.ts'
-import {
-  createModelExecutor,
-  createModelTools,
-  createScriptedModelTools,
-  DEFAULT_SCRIPTED_RESPONSE,
-  MODEL_RESPOND_TOOL_NAME,
-  type ModelDeltaSink,
-  ModelRespondInputSchema,
-  ModelRespondOutputSchema,
-} from '../responses-client.ts'
+import { MODEL_ENDPOINTS_KEY, type ModelEndpoints, type ModelRespondOutput } from '../responses-client.types.ts'
 import { ASSISTANT_TEXT, startOpenResponsesServer } from './fixtures/model-server.ts'
 
 // ================================================================
-// Responses client — the host client + worker surface
+// responses worker — the event-wire surface
 // ================================================================
 
-describe('model executor — non-streaming respond', () => {
-  test('round-trips a JSON ResponseResource through the worker', async () => {
+type WireResult = { id: string; result: ModelRespondOutput; space?: string }
+
+/** Spawn the model worker and expose an event-wire harness over it. */
+const spawnModelWorker = (endpoints: ModelEndpoints) => {
+  // Endpoint config is seeded into environment data immediately before spawn
+  // (the provisioning contract): the worker reads it once at startup and no
+  // secret ever crosses the message boundary.
+  setEnvironmentData(MODEL_ENDPOINTS_KEY, endpoints)
+  const worker = new Worker(new URL('../responses-client.worker.ts', import.meta.url))
+  const messages: { type?: string }[] = []
+  const results: WireResult[] = []
+  worker.onmessage = ({ data }: MessageEvent): void => {
+    const message = data as { type?: string; detail?: { id: string; result: ModelRespondOutput }; space?: string }
+    messages.push(message)
+    if (message?.type === WORKER_MESSAGE_KINDS.response_request_result && message.detail !== undefined) {
+      results.push({ id: message.detail.id, result: message.detail.result, space: message.space })
+    }
+  }
+  const respond = (id: string, input: unknown, space?: string): void => {
+    worker.postMessage({
+      type: WORKER_MESSAGE_KINDS.response_request,
+      detail: { id, input },
+      ...(space === undefined ? {} : { space }),
+    })
+  }
+  const cancel = (id: string): void => {
+    worker.postMessage({ type: WORKER_MESSAGE_KINDS.response_cancel, detail: { id } })
+  }
+  const resultFor = async (id: string): Promise<WireResult> => {
+    const deadline = Date.now() + 5_000
+    for (;;) {
+      const found = results.find((r) => r.id === id)
+      if (found !== undefined) return found
+      if (Date.now() > deadline) throw new Error(`no result for ${id}`)
+      await Bun.sleep(10)
+    }
+  }
+  return { respond, cancel, resultFor, messages, terminate: () => worker.terminate() }
+}
+
+const userMessage = { type: 'message', role: 'user', content: 'Say hello' } as const
+
+describe('model worker — non-streaming respond', () => {
+  test('round-trips a JSON ResponseResource as a result event', async () => {
     const server = await startOpenResponsesServer()
-    const executor = createModelExecutor({ endpoints: { mock: { url: server.url } } })
+    const model = spawnModelWorker({ mock: { url: server.url } })
     try {
-      const out = await executor.respond({
+      model.respond('call_1', {
         provider: 'mock',
         modelId: 'mock-model',
         input: [{ type: 'message', role: 'user', content: 'Say hello' }],
       })
-      const success = out as {
+      const { id, result } = await model.resultFor('call_1')
+      const success = result as {
         items: Array<{ type: string; content?: Array<{ text?: string }> }>
         status: string
         usage?: { total_tokens: number }
         isError?: boolean
       }
+      expect(id).toBe('call_1')
       expect(success.isError).toBeUndefined()
       expect(success.status).toBe('completed')
       expect(success.items).toHaveLength(1)
       expect(success.items[0]?.content?.[0]?.text).toBe(ASSISTANT_TEXT)
       expect(success.usage).toMatchObject({ total_tokens: 20 })
     } finally {
-      executor.destroy()
+      model.terminate()
       await server.close()
     }
   })
 })
 
-describe('model executor — streaming respond', () => {
-  test('emits DELTA events as they arrive and assembles the terminal result', async () => {
+describe('model worker — streaming respond', () => {
+  test('streams are assembled internally; the only message is the terminal result event', async () => {
     const server = await startOpenResponsesServer()
-    const deltas: ModelDeltaSink[] = []
-    const executor = createModelExecutor({
-      endpoints: { mock: { url: server.url } },
-      onDelta: (event) => deltas.push(event),
-    })
+    const model = spawnModelWorker({ mock: { url: server.url } })
     try {
-      const out = await executor.respond({
+      model.respond('call_1', {
         provider: 'mock',
         modelId: 'mock-model',
         input: [{ type: 'message', role: 'user', content: 'Count from 1 to 5.' }],
         stream: true,
       })
-      const success = out as {
+      const { result } = await model.resultFor('call_1')
+      const success = result as {
         items: Array<{ type: string; content?: Array<{ text?: string }> }>
         status: string
         events?: Array<{ type: string; delta?: string }>
@@ -88,77 +123,80 @@ describe('model executor — streaming respond', () => {
       }
       expect(success.isError).toBeUndefined()
       expect(success.status).toBe('completed')
-      expect(deltas.map((d) => d.event.type)).toEqual([
+      // The terminal result still carries the buffered event list.
+      expect(success.events?.map((e) => e.type)).toEqual([
         'response.output_item.added',
         'response.output_text.delta',
         'response.output_text.delta',
         'response.output_item.done',
         'response.completed',
       ])
-      // The terminal result still carries the buffered event list.
-      expect(success.events?.map((e) => e.type)).toEqual(deltas.map((d) => d.event.type))
       const text = success.items[0]?.content?.[0]?.text
       expect(text).toBe(ASSISTANT_TEXT)
+      // The DELTA wire kind is dead: nothing but the result event is posted.
+      expect(model.messages).toHaveLength(1)
+      expect(model.messages[0]?.type).toBe(WORKER_MESSAGE_KINDS.response_request_result)
     } finally {
-      executor.destroy()
+      model.terminate()
       await server.close()
     }
   })
 })
 
-describe('model executor — endpoint config via environment data', () => {
+describe('model worker — endpoint config via environment data', () => {
   test('the provisioned apiKey reaches the wire as a bearer header', async () => {
     const server = await startOpenResponsesServer({ apiKey: 'secret-token' })
-    const executor = createModelExecutor({
-      endpoints: { mock: { url: server.url, apiKey: 'secret-token' } },
-    })
+    const model = spawnModelWorker({ mock: { url: server.url, apiKey: 'secret-token' } })
     try {
-      const out = await executor.respond({
+      model.respond('call_1', {
         provider: 'mock',
         modelId: 'mock-model',
         input: [{ type: 'message', role: 'user', content: 'hi' }],
       })
-      expect((out as { isError?: boolean }).isError).toBeUndefined()
+      const { result } = await model.resultFor('call_1')
+      expect((result as { isError?: boolean }).isError).toBeUndefined()
       expect(server.requests[0]?.auth).toBe('Bearer secret-token')
     } finally {
-      executor.destroy()
+      model.terminate()
       await server.close()
     }
   })
 
   test('an unknown provider is error data, never a throw', async () => {
-    const executor = createModelExecutor({ endpoints: {} })
+    const model = spawnModelWorker({})
     try {
-      const out = await executor.respond({
+      model.respond('call_1', {
         provider: 'nope',
         modelId: 'm',
         input: [{ type: 'message', role: 'user', content: 'hi' }],
       })
-      expect((out as { isError?: boolean }).isError).toBe(true)
-      expect((out as { message?: string }).message).toContain('unknown provider')
+      const { result } = await model.resultFor('call_1')
+      expect((result as { isError?: boolean }).isError).toBe(true)
+      expect((result as { message?: string }).message).toContain('unknown provider')
     } finally {
-      executor.destroy()
+      model.terminate()
     }
   })
 })
 
-describe('model executor — failures are data', () => {
+describe('model worker — failures are data', () => {
   test('a non-2xx response is error data carrying the structured message', async () => {
     const server = await startOpenResponsesServer()
-    const executor = createModelExecutor({ endpoints: { mock: { url: server.url } } })
+    const model = spawnModelWorker({ mock: { url: server.url } })
     try {
-      const out = await executor.respond({ provider: 'mock', modelId: 'mock-model', input: [] })
-      expect((out as { isError?: boolean }).isError).toBe(true)
-      expect((out as { message?: string }).message).toContain('HTTP 400')
+      model.respond('call_1', { provider: 'mock', modelId: 'mock-model', input: [] })
+      const { result } = await model.resultFor('call_1')
+      expect((result as { isError?: boolean }).isError).toBe(true)
+      expect((result as { message?: string }).message).toContain('HTTP 400')
     } finally {
-      executor.destroy()
+      model.terminate()
       await server.close()
     }
   })
 })
 
-describe('model executor — cancellation', () => {
-  test('cancel aborts an in-flight streamed call as error data', async () => {
+describe('model worker — cancellation', () => {
+  test('a response_cancel event aborts an in-flight streamed call as error data', async () => {
     const encoder = new TextEncoder()
     // A real server that emits one event and then never closes the stream.
     const server = Bun.serve({
@@ -178,22 +216,73 @@ describe('model executor — cancellation', () => {
           { headers: { 'content-type': 'text/event-stream' } },
         ),
     })
-    const executor = createModelExecutor({
-      endpoints: { mock: { url: `http://localhost:${server.port}` } },
-      onDelta: (event) => executor.cancel(event.id),
-    })
+
+    const model = spawnModelWorker({ mock: { url: `http://localhost:${server.port}` } })
     try {
-      const out = await executor.respond({
+      model.respond('call_1', {
         provider: 'mock',
         modelId: 'mock-model',
         input: [{ type: 'message', role: 'user', content: 'hi' }],
         stream: true,
       })
-      expect((out as { isError?: boolean }).isError).toBe(true)
-      expect((out as { message?: string }).message).toContain('canceled')
+      await Bun.sleep(150)
+      model.cancel('call_1')
+      const { result } = await model.resultFor('call_1')
+      expect((result as { isError?: boolean }).isError).toBe(true)
+      expect((result as { message?: string }).message).toContain('canceled')
     } finally {
-      executor.destroy()
+      model.terminate()
       server.stop(true)
+    }
+  })
+})
+
+describe('model worker — event wire', () => {
+  test('a request space is echoed on the result event', async () => {
+    const model = spawnModelWorker({})
+    try {
+      model.respond('call_1', { provider: 'nope', modelId: 'm', input: [] }, 's1')
+      const { space } = await model.resultFor('call_1')
+      expect(space).toBe('s1')
+    } finally {
+      model.terminate()
+    }
+  })
+
+  test('a request without space returns a result without space', async () => {
+    const model = spawnModelWorker({})
+    try {
+      model.respond('call_1', { provider: 'nope', modelId: 'm', input: [] })
+      const { space } = await model.resultFor('call_1')
+      expect(space).toBeUndefined()
+    } finally {
+      model.terminate()
+    }
+  })
+
+  test('input that fails the boundary schema is error data', async () => {
+    const model = spawnModelWorker({})
+    try {
+      model.respond('call_1', { modelId: 'm', input: [] })
+      const { result } = await model.resultFor('call_1')
+      expect((result as { isError?: boolean }).isError).toBe(true)
+      expect((result as { message?: string }).message).toContain('invalid input')
+    } finally {
+      model.terminate()
+    }
+  })
+
+  test('an event failing the shared event schema is dropped — no result', async () => {
+    const model = spawnModelWorker({})
+    try {
+      // No id: fails the trust boundary, nothing to correlate a result to.
+      model.respond('', { provider: 'nope', modelId: 'm', input: [] })
+      model.respond('call_2', { provider: 'nope', modelId: 'm', input: [] })
+      const { id } = await model.resultFor('call_2')
+      expect(id).toBe('call_2')
+      expect(model.messages).toHaveLength(1)
+    } finally {
+      model.terminate()
     }
   })
 })
@@ -890,38 +979,44 @@ describe('MessageItemParamSchema with InputContentPart[]', () => {
 })
 
 // ================================================================
-// model tools — bindings, schema contract, passthrough, scripted double
+// Event-input boundary — schema contract + passthrough over the wire
 // ================================================================
 
-const validateRespondInput = ajv.compile(ModelRespondInputSchema)
-const validateRespondOutput = ajv.compile(ModelRespondOutputSchema)
-
-const userMessage = { type: 'message', role: 'user', content: 'Say hello' } as const
-
-describe('model tools — schema contract', () => {
+describe('respond input schema — contract', () => {
   test('respond requires provider, modelId, and input', () => {
-    expect(validateRespondInput({})).toBe(false)
-    expect(validateRespondInput({ provider: 'p', modelId: 'm' })).toBe(false)
-    expect(validateRespondInput({ provider: 'p', modelId: 'm', input: [] })).toBe(true)
+    expect(validateModelRespondInput({})).toBe(false)
+    expect(validateModelRespondInput({ provider: 'p', modelId: 'm' })).toBe(false)
+    expect(validateModelRespondInput({ provider: 'p', modelId: 'm', input: [] })).toBe(true)
   })
 
-  test('respond rejects unknown/host-only fields as endpoint config — extras are inert body data', async () => {
+  test('reasoningEffort declares the spec enum and passes non-spec values through', () => {
+    // Spec values accepted.
+    expect(validateModelRespondInput({ provider: 'p', modelId: 'm', input: [], reasoningEffort: 'high' })).toBe(true)
+    expect(validateModelRespondInput({ provider: 'p', modelId: 'm', input: [], reasoningEffort: 'xhigh' })).toBe(true)
+    // Non-spec values (OpenAI-only minimal, endpoint extensions) pass through.
+    expect(validateModelRespondInput({ provider: 'p', modelId: 'm', input: [], reasoningEffort: 'minimal' })).toBe(true)
+    // Structure is still guarded: empty and non-string values rejected.
+    expect(validateModelRespondInput({ provider: 'p', modelId: 'm', input: [], reasoningEffort: '' })).toBe(false)
+    expect(validateModelRespondInput({ provider: 'p', modelId: 'm', input: [], reasoningEffort: 3 })).toBe(false)
+  })
+})
+
+describe('model worker — passthrough to the wire', () => {
+  test('extras are inert body data and never reconfigure the endpoint', async () => {
     const server = await startOpenResponsesServer({ apiKey: 'real-key' })
-    const executor = createModelExecutor({
-      endpoints: { mock: { url: server.url, apiKey: 'real-key' } },
-    })
+    const model = spawnModelWorker({ mock: { url: server.url, apiKey: 'real-key' } })
     try {
-      const { modelRespond } = createModelTools(executor)
-      const out = await modelRespond({
+      model.respond('call_1', {
         provider: 'mock',
         modelId: 'mock-model',
         input: [userMessage],
         apiKey: 'inert-body-value',
         url: 'http://evil.example',
       })
+      const { result } = await model.resultFor('call_1')
       // The call still went to the provisioned endpoint with the provisioned
       // key — args never reconfigure the connection.
-      expect((out as { isError?: boolean }).isError).toBeUndefined()
+      expect((result as { isError?: boolean }).isError).toBeUndefined()
       expect(server.requests[0]?.path).toBe('/responses')
       expect(server.requests[0]?.auth).toBe('Bearer real-key')
       // Extra keys pass through as plain body data, nothing more.
@@ -929,28 +1024,16 @@ describe('model tools — schema contract', () => {
       expect(body.apiKey).toBe('inert-body-value')
       expect(body.url).toBe('http://evil.example')
     } finally {
-      executor.destroy()
+      model.terminate()
       await server.close()
     }
   })
 
-  test('reasoningEffort declares the spec enum and passes non-spec values through', () => {
-    // Spec values accepted.
-    expect(validateRespondInput({ provider: 'p', modelId: 'm', input: [], reasoningEffort: 'high' })).toBe(true)
-    expect(validateRespondInput({ provider: 'p', modelId: 'm', input: [], reasoningEffort: 'xhigh' })).toBe(true)
-    // Non-spec values (OpenAI-only minimal, endpoint extensions) pass through.
-    expect(validateRespondInput({ provider: 'p', modelId: 'm', input: [], reasoningEffort: 'minimal' })).toBe(true)
-    // Structure is still guarded: empty and non-string values rejected.
-    expect(validateRespondInput({ provider: 'p', modelId: 'm', input: [], reasoningEffort: '' })).toBe(false)
-    expect(validateRespondInput({ provider: 'p', modelId: 'm', input: [], reasoningEffort: 3 })).toBe(false)
-  })
-
   test('extra key-values pass through validation and reach the wire verbatim', async () => {
     const server = await startOpenResponsesServer()
-    const executor = createModelExecutor({ endpoints: { mock: { url: server.url } } })
+    const model = spawnModelWorker({ mock: { url: server.url } })
     try {
-      const { modelRespond } = createModelTools(executor)
-      const out = await modelRespond({
+      model.respond('call_1', {
         provider: 'mock',
         modelId: 'mock-model',
         input: [userMessage],
@@ -959,66 +1042,34 @@ describe('model tools — schema contract', () => {
         // OpenAI-only effort flows through as the raw spec param object.
         reasoning: { effort: 'minimal' },
       })
-      expect((out as { isError?: boolean }).isError).toBeUndefined()
+      const { result } = await model.resultFor('call_1')
+      expect((result as { isError?: boolean }).isError).toBeUndefined()
       const body = server.requests[0]?.body as Record<string, unknown>
       expect(body.prompt_cache_key).toBe('cache-1')
       expect(body.temperature).toBe(0.2)
       expect(body.reasoning).toEqual({ effort: 'minimal' })
     } finally {
-      executor.destroy()
+      model.terminate()
       await server.close()
     }
   })
 })
 
-describe('model tools — call-through over the executor', () => {
-  test('runs a respond call through the worker and the result satisfies the output schema', async () => {
+describe('model worker — output conformance', () => {
+  test('the terminal result satisfies the output schema', async () => {
     const server = await startOpenResponsesServer()
-    const executor = createModelExecutor({ endpoints: { mock: { url: server.url } } })
+    const model = spawnModelWorker({ mock: { url: server.url } })
     try {
-      const { modelRespond } = createModelTools(executor)
-      expect(modelRespond.name).toBe(MODEL_RESPOND_TOOL_NAME)
-
-      const out = await modelRespond({ provider: 'mock', modelId: 'mock-model', input: [userMessage] })
-      expect(validateRespondOutput(out)).toBe(true)
-      expect((out as { isError?: boolean }).isError).toBeUndefined()
-      expect((out as { items: Array<{ content?: Array<{ text?: string }> }> }).items[0]?.content?.[0]?.text).toBe(
+      model.respond('call_1', { provider: 'mock', modelId: 'mock-model', input: [userMessage] })
+      const { result } = await model.resultFor('call_1')
+      expect(validateModelRespondOutput(result)).toBe(true)
+      expect((result as { isError?: boolean }).isError).toBeUndefined()
+      expect((result as { items: Array<{ content?: Array<{ text?: string }> }> }).items[0]?.content?.[0]?.text).toBe(
         ASSISTANT_TEXT,
       )
     } finally {
-      executor.destroy()
+      model.terminate()
       await server.close()
     }
-  })
-
-  test('invalid input is rejected at the boundary and never reaches the executor', async () => {
-    const { modelRespond } = createScriptedModelTools({ script: DEFAULT_SCRIPTED_RESPONSE })
-    const out = await modelRespond({ provider: '', modelId: '', input: [] })
-    expect((out as { isError?: boolean }).isError).toBe(true)
-    expect((out as { message?: string }).message).toContain('invalid input')
-  })
-})
-
-describe('createScriptedModelTools — deterministic in-process double (no worker, no fetch)', () => {
-  test('a single scripted response repeats on every call', async () => {
-    const { modelRespond } = createScriptedModelTools({ script: DEFAULT_SCRIPTED_RESPONSE })
-    const first = await modelRespond({ provider: 'scripted', modelId: 'm', input: [userMessage] })
-    const second = await modelRespond({ provider: 'scripted', modelId: 'm', input: [userMessage] })
-    expect(validateRespondOutput(first)).toBe(true)
-    expect((first as { items: unknown[] }).items).toHaveLength(1)
-    expect((second as { items: unknown[] }).items).toHaveLength(1)
-  })
-
-  test('an array script advances one entry per call', async () => {
-    const { modelRespond } = createScriptedModelTools({
-      script: [
-        { items: [], status: 'first' },
-        { items: [], status: 'second' },
-      ],
-    })
-    const first = await modelRespond({ provider: 'scripted', modelId: 'm', input: [userMessage] })
-    const second = await modelRespond({ provider: 'scripted', modelId: 'm', input: [userMessage] })
-    expect((first as { status?: string }).status).toBe('first')
-    expect((second as { status?: string }).status).toBe('second')
   })
 })
