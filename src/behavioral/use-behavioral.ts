@@ -6,6 +6,8 @@ import {
   validateResponseCancelEvent,
   validateResponseRequestEvent,
   validateResponseRequestResultEvent,
+  validateStoreRequestEvent,
+  validateStoreRequestResultEvent,
   validateToolCallEvent,
   validateToolCallResultEvent,
   validateToolCancelEvent,
@@ -13,7 +15,8 @@ import {
 
 /*
  * The runtime composition hook: a dumb pump between the engine worker and the
- * satellite workers, and the one wiring point every host shares — CLI, local
+ * satellite worker families (responses, tools, frontier, store), and the one
+ * wiring point every host shares — CLI, local
  * PWA, Tauri mobile each pass their own workers and threads through here.
  *
  * One communication protocol: BPEvent-shaped messages everywhere. The router
@@ -38,19 +41,30 @@ import {
 export const useBehavioral = ({
   threads,
   traceListener,
-  toolsClientWorker,
-  responsesClientWorker,
-  frontierWorker,
+  workers,
   useTrigger,
 }: {
   threads: Thread[]
   traceListener: TraceListener
-  toolsClientWorker: Worker
-  responsesClientWorker: Worker
-  /** Optional satellite running the frontier analysis worker. */
-  frontierWorker?: Worker
+  /** The satellite worker families keyed by family — the router holds no positional knowledge. */
+  workers: {
+    /** Executes shell scripts (`tool_call`). */
+    tools: Worker
+    /** Runs Open Responses model calls (`response_request`). */
+    responses: Worker
+    /** Optional: frontier analysis (`frontier_request`). */
+    frontier?: Worker
+    /** Optional: durable space-scoped store (`store_request`). */
+    store?: Worker
+  }
   useTrigger: (trigger: Trigger) => void
 }): Worker => {
+  const {
+    tools: toolsClientWorker,
+    responses: responsesClientWorker,
+    frontier: frontierWorker,
+    store: storeWorker,
+  } = workers
   const behavioralWorker = new Worker(new URL('./behavioral.worker.ts', import.meta.url))
 
   // Engine port — the {kind} envelope is behavioral.worker.ts's protocol.
@@ -58,10 +72,10 @@ export const useBehavioral = ({
     behavioralWorker.postMessage({ kind: WORKER_MESSAGE_KINDS.add_threads, threads: newThreads })
 
   // The router's only family knowledge: which port an event type routes to.
-  // Each worker family owns its event types (response_*, tool_*, frontier_*),
-  // so routing is one lookup on the type. Cancels exist only for the async
-  // families (model calls, shell runs); frontier analyses are synchronous and
-  // have no cancel.
+  // Each worker family owns its event types (response_*, tool_*, frontier_*,
+  // store_*), so routing is one lookup on the type. Cancels exist only for the
+  // async families (model calls, shell runs); frontier analyses and store ops
+  // are short-lived and have no cancel.
   const routes: Record<string, Worker> = {
     [WORKER_MESSAGE_KINDS.response_request]: responsesClientWorker,
     [WORKER_MESSAGE_KINDS.response_cancel]: responsesClientWorker,
@@ -89,6 +103,10 @@ export const useBehavioral = ({
     if (!validateFrontierRequestResultEvent(data)) return
     reenter(data)
   }
+  const onStoreResult = ({ data }: MessageEvent): void => {
+    if (!validateStoreRequestResultEvent(data)) return
+    reenter(data)
+  }
 
   behavioralWorker.onmessage = async ({ data }: MessageEvent<Trace>): Promise<void> => {
     await traceListener(data)
@@ -105,7 +123,8 @@ export const useBehavioral = ({
       !validateToolCallEvent(event) &&
       !validateResponseCancelEvent(event) &&
       !validateToolCancelEvent(event) &&
-      !validateFrontierRequestEvent(event)
+      !validateFrontierRequestEvent(event) &&
+      !validateStoreRequestEvent(event)
     ) {
       return
     }
@@ -140,17 +159,21 @@ export const useBehavioral = ({
       ])
     }
 
-  responsesClientWorker.onerror = onCrash('responses-client')
-  toolsClientWorker.onerror = onCrash('tools-client')
+  responsesClientWorker.onerror = onCrash('responses')
+  toolsClientWorker.onerror = onCrash('tools')
 
-  // The frontier satellite is optional: hosts without one simply have no
-  // frontier route, and a frontier_request stays unrouted (the requesting
-  // thread waits — a program should not request frontier events it did not
-  // wire a worker for, same as any unknown event type).
+  // Optional families: hosts without one simply have no route for that
+  // family's events, and the requesting thread waits — a program should not
+  // request events it did not wire a worker for, same as any unknown type.
   if (frontierWorker !== undefined) {
     routes[WORKER_MESSAGE_KINDS.frontier_request] = frontierWorker
     frontierWorker.onmessage = onFrontierResult
     frontierWorker.onerror = onCrash('frontier')
+  }
+  if (storeWorker !== undefined) {
+    routes[WORKER_MESSAGE_KINDS.store_request] = storeWorker
+    storeWorker.onmessage = onStoreResult
+    storeWorker.onerror = onCrash('store')
   }
 
   addThreads(threads)

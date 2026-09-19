@@ -6,6 +6,8 @@ import {
   validateResponseCancelEvent,
   validateResponseRequestEvent,
   validateResponseRequestResultEvent,
+  validateStoreRequestEvent,
+  validateStoreRequestResultEvent,
   validateToolCallEvent,
   validateToolCallResultEvent,
   validateToolCancelEvent,
@@ -206,6 +208,47 @@ describe('use-behavioral event vocabulary', () => {
       const valid = validateFrontierRequestResultEvent({
         type: WORKER_MESSAGE_KINDS.frontier_request_result,
         detail: { id: 'fr_1', result: 'not-an-object' },
+      })
+      expect(valid).toBe(false)
+    })
+  })
+
+  describe('store_request', () => {
+    test('accepts a well-formed put request', () => {
+      const valid = validateStoreRequestEvent({
+        type: WORKER_MESSAGE_KINDS.store_request,
+        detail: { id: 's1', op: 'put', input: { collection: 'runs', key: 'r1', value: {} } },
+      })
+      expect(valid).toBe(true)
+    })
+    test('rejects an op outside the enum — put|get|delete|query is the whole surface', () => {
+      const valid = validateStoreRequestEvent({
+        type: WORKER_MESSAGE_KINDS.store_request,
+        detail: { id: 's1', op: 'purge', input: {} },
+      })
+      expect(valid).toBe(false)
+    })
+    test('rejects a detail without op', () => {
+      const valid = validateStoreRequestEvent({
+        type: WORKER_MESSAGE_KINDS.store_request,
+        detail: { id: 's1', input: {} },
+      })
+      expect(valid).toBe(false)
+    })
+  })
+
+  describe('store_request_result', () => {
+    test('accepts a well-formed result', () => {
+      const valid = validateStoreRequestResultEvent({
+        type: WORKER_MESSAGE_KINDS.store_request_result,
+        detail: { id: 's1', result: { ok: true } },
+      })
+      expect(valid).toBe(true)
+    })
+    test('rejects a non-object result payload', () => {
+      const valid = validateStoreRequestResultEvent({
+        type: WORKER_MESSAGE_KINDS.store_request_result,
+        detail: { id: 's1', result: 'not-an-object' },
       })
       expect(valid).toBe(false)
     })

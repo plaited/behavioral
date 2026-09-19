@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test'
+import { setEnvironmentData } from 'node:worker_threads'
+import { STORE_DB_PATH_KEY } from '../../workers/store.types.ts'
 import { TRACE_MESSAGE_KINDS, WORKER_MESSAGE_KINDS } from '../behavioral.constants.ts'
 import type { SelectionTrace, Thread, Trace, Trigger } from '../behavioral.types.ts'
 import { useBehavioral } from '../use-behavioral.ts'
@@ -49,8 +51,7 @@ describe('useBehavioral router', () => {
       traceListener: (trace) => {
         traces.push(trace)
       },
-      toolsClientWorker,
-      responsesClientWorker,
+      workers: { tools: toolsClientWorker, responses: responsesClientWorker },
       useTrigger: () => {},
     })
     await waitForTraces(traces, (s) => s.some((t) => t.selected.type === WORKER_MESSAGE_KINDS.tool_call_result))
@@ -88,8 +89,7 @@ describe('useBehavioral router', () => {
       traceListener: (trace) => {
         traces.push(trace)
       },
-      toolsClientWorker,
-      responsesClientWorker,
+      workers: { tools: toolsClientWorker, responses: responsesClientWorker },
       useTrigger: () => {},
     })
     await waitForTraces(traces, (s) => s.some((t) => t.selected.type === WORKER_MESSAGE_KINDS.response_request_result))
@@ -111,8 +111,7 @@ describe('useBehavioral router', () => {
       traceListener: (trace) => {
         traces.push(trace)
       },
-      toolsClientWorker,
-      responsesClientWorker,
+      workers: { tools: toolsClientWorker, responses: responsesClientWorker },
       useTrigger: (t) => {
         trigger = t
       },
@@ -149,8 +148,7 @@ describe('useBehavioral router', () => {
       traceListener: (trace) => {
         traces.push(trace)
       },
-      toolsClientWorker,
-      responsesClientWorker,
+      workers: { tools: toolsClientWorker, responses: responsesClientWorker },
       useTrigger: () => {},
     })
     await waitForTraces(traces, (s) =>
@@ -190,8 +188,7 @@ describe('useBehavioral router', () => {
       traceListener: (trace) => {
         traces.push(trace)
       },
-      toolsClientWorker,
-      responsesClientWorker,
+      workers: { tools: toolsClientWorker, responses: responsesClientWorker },
       useTrigger: () => {},
     })
     // The stub reports CANCEL receipt through the result channel with a
@@ -235,9 +232,7 @@ describe('useBehavioral router', () => {
       traceListener: (trace) => {
         traces.push(trace)
       },
-      toolsClientWorker,
-      responsesClientWorker,
-      frontierWorker,
+      workers: { tools: toolsClientWorker, responses: responsesClientWorker, frontier: frontierWorker },
       useTrigger: () => {},
     })
     await waitForTraces(traces, (s) => s.some((t) => t.selected.type === WORKER_MESSAGE_KINDS.frontier_request_result))
@@ -247,6 +242,41 @@ describe('useBehavioral router', () => {
     toolsClientWorker.terminate()
     responsesClientWorker.terminate()
     frontierWorker.terminate()
+  })
+
+  test('routes store_requests to the store worker port and re-enters the result', async () => {
+    const traces: Trace[] = []
+    setEnvironmentData(STORE_DB_PATH_KEY, ':memory:')
+    const storeWorker = new Worker(new URL('../../workers/store.worker.ts', import.meta.url))
+    const engineWorker = useBehavioral({
+      threads: [
+        {
+          once: true,
+          label: 'caller',
+          rules: [
+            {
+              request: {
+                type: WORKER_MESSAGE_KINDS.store_request,
+                detail: { id: 's1', op: 'put', input: { collection: 'runs', key: 'r1', value: { turn: 1 } } },
+              },
+            },
+            {
+              waitFor: [{ type: WORKER_MESSAGE_KINDS.store_request_result, detailSchema: idSchema('s1') }],
+            },
+          ],
+        },
+      ],
+      traceListener: (trace) => {
+        traces.push(trace)
+      },
+      workers: { tools: spawnSatellite(), responses: spawnSatellite(), store: storeWorker },
+      useTrigger: () => {},
+    })
+    await waitForTraces(traces, (s) => s.some((t) => t.selected.type === WORKER_MESSAGE_KINDS.store_request_result))
+    const result = selectionsOf(traces).find((t) => t.selected.type === WORKER_MESSAGE_KINDS.store_request_result)
+    expect((result?.selected.detail as { result?: { ok?: boolean } } | undefined)?.result?.ok).toBe(true)
+    engineWorker.terminate()
+    storeWorker.terminate()
   })
 
   test('re-enters a worker_error event when a satellite worker crashes', async () => {
@@ -277,7 +307,7 @@ describe('useBehavioral router', () => {
                   type: WORKER_MESSAGE_KINDS.worker_error,
                   detailSchema: {
                     type: 'object',
-                    properties: { worker: { const: 'tools-client' } },
+                    properties: { worker: { const: 'tools' } },
                     required: ['worker'],
                   },
                 },
@@ -289,13 +319,12 @@ describe('useBehavioral router', () => {
       traceListener: (trace) => {
         traces.push(trace)
       },
-      toolsClientWorker,
-      responsesClientWorker,
+      workers: { tools: toolsClientWorker, responses: responsesClientWorker },
       useTrigger: () => {},
     })
     await waitForTraces(traces, (s) => s.some((t) => t.selected.type === WORKER_MESSAGE_KINDS.worker_error))
     const crash = selectionsOf(traces).find((t) => t.selected.type === WORKER_MESSAGE_KINDS.worker_error)
-    expect((crash?.selected.detail as { worker?: string } | undefined)?.worker).toBe('tools-client')
+    expect((crash?.selected.detail as { worker?: string } | undefined)?.worker).toBe('tools')
     engineWorker.terminate()
     toolsClientWorker.terminate()
     responsesClientWorker.terminate()

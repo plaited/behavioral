@@ -80,6 +80,23 @@ export type FrontierRequestResultEvent = {
   space?: string
 }
 
+/** Store operations — durable, space-scoped persistence for data that must survive invocations. */
+export type StoreOp = 'put' | 'get' | 'delete' | 'query'
+
+export type StoreRequestEvent = {
+  type: typeof WORKER_MESSAGE_KINDS.store_request
+  /** `op` selects the store operation; the backing schema lives inside the worker — schema churn never becomes protocol churn. */
+  detail: { id: string; op: StoreOp; input: JsonObject }
+  space?: string
+}
+
+// No store cancel: ops are short-lived (frontier rule).
+export type StoreRequestResultEvent = {
+  type: typeof WORKER_MESSAGE_KINDS.store_request_result
+  detail: { id: string; result: JsonObject }
+  space?: string
+}
+
 /** Union of every event the router can move between ports. @public */
 export type WorkerEvent =
   | ResponseRequestEvent
@@ -90,6 +107,8 @@ export type WorkerEvent =
   | ToolCancelEvent
   | FrontierRequestEvent
   | FrontierRequestResultEvent
+  | StoreRequestEvent
+  | StoreRequestResultEvent
   | WorkerErrorEvent
 
 const jsonObjectSchema = { type: 'object', required: [], additionalProperties: true } as const
@@ -250,6 +269,45 @@ export const FrontierRequestResultEventSchema: JSONSchemaType<FrontierRequestRes
   additionalProperties: false,
 }
 
+// No store cancel: ops are short-lived (same rule as frontier).
+export const StoreRequestEventSchema: JSONSchemaType<StoreRequestEvent> = {
+  type: 'object',
+  properties: {
+    type: { type: 'string', const: WORKER_MESSAGE_KINDS.store_request },
+    detail: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', minLength: 1 },
+        op: { type: 'string', enum: ['put', 'get', 'delete', 'query'] },
+        input: jsonObjectSchema,
+      },
+      required: ['id', 'op', 'input'],
+      additionalProperties: false,
+    },
+    space: { type: 'string', nullable: true },
+  },
+  required: ['type', 'detail'],
+  additionalProperties: false,
+}
+
+export const StoreRequestResultEventSchema: JSONSchemaType<StoreRequestResultEvent> = {
+  type: 'object',
+  properties: {
+    type: { type: 'string', const: WORKER_MESSAGE_KINDS.store_request_result },
+    detail: {
+      type: 'object',
+      properties: { id: { type: 'string', minLength: 1 }, result: jsonObjectSchema },
+      required: ['id', 'result'],
+      additionalProperties: false,
+    },
+    space: { type: 'string', nullable: true },
+  },
+  required: ['type', 'detail'],
+  additionalProperties: false,
+}
+
 export const validateWorkerErrorEvent = ajv.compile(WorkerErrorEventSchema)
 export const validateFrontierRequestEvent = ajv.compile(FrontierRequestEventSchema)
 export const validateFrontierRequestResultEvent = ajv.compile(FrontierRequestResultEventSchema)
+export const validateStoreRequestEvent = ajv.compile(StoreRequestEventSchema)
+export const validateStoreRequestResultEvent = ajv.compile(StoreRequestResultEventSchema)

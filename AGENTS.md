@@ -74,14 +74,20 @@ and the impact is broad or unclear, expand coverage until the affected surface i
 
 ## Directory Boundaries
 
-**`src/kernel/`** — the irreducible coordination floor: `behavioral()`, threads, the dispatch
-bridge, OAuth. Not removable; without it there is no turn cycle, no spec-event streaming, no tool
-dispatch.
-**`src/tools/`** — the tool fleet (34 tools): stateless `defineTool` units (`src/tools/define-tool.ts`), each
-with AJV `JSONSchemaType` input/output schemas (`discovery`, `html`, `mcp-client`,
+**`src/workers/`** — the satellite worker families, each speaking the behavioral event wire
+(`src/behavioral/use-behavioral.types.ts`): `responses-client` (Open Responses model calls),
+`tools-client` (shell execution), `frontier` (reachability analysis), `store` (durable
+space-scoped persistence). Spawn-by-URL entries end in `.worker.ts`; each family owns its event
+types + input boundary; results echo the request `space`. The router in
+`src/behavioral/use-behavioral.ts` (`useBehavioral` — supersedes the deleted kernel) forwards
+selections verbatim and re-enters worker results as once-threads.
+**`src/tools/`** — the tool fleet (29 tools): stateless `defineTool` units (`src/tools/define-tool.ts`), each
+with AJV `JSONSchemaType` input/output schemas (`html`, `mcp-client`,
 `plugin-client`, `skill-client`, `git`, `typescript`). Dispatched from the CLI via `behavioral tools`;
 agent-facing usage docs live in `skills/behavioral-tools/`.
-**`src/behavioral/`** — the behavioral runtime: types, constants, utils.
+**`src/behavioral/`** — the behavioral runtime: types, constants, utils, the engine, and the
+`useBehavioral` router (`use-behavioral.ts`) — the runtime composition hook wiring the engine
+worker to the satellite families.
 **`src/controller/`** — the browser Controller, delegated listener, swap boundary.
 **`src/cli/`** — the `behavioral` CLI framework (`makeCliRouter`/`parseCli`) and its commands,
 registered in `bin/behavioral.ts`. `tools.ts` is the fleet dispatcher: `behavioral tools

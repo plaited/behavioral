@@ -149,6 +149,153 @@ ingress + a plugin-shipped behavior surface.
 
 ## Decision Log
 
+### 2026-09-19 — `src/tools/discovery.ts` deleted; the catalog becomes store-tenant authoring
+
+- **Q: re-cut discovery onto the store now? A: no — delete it.** The fleet tool
+  was a red zombie (its only import was the deleted kernel, breaking the whole
+  CLI fleet at boot), its writer died with the kernel (reconcile scan), and its
+  persistence role is superseded by the store worker. The catalog *semantics*
+  (kinds ∈ mcp-tool|skill|thread|html, unified rows, search) are consumed by
+  nothing today; they become **values authored in store collections** when
+  autoresearch — the first real consumer — arrives (the 2026-09-17 read-model
+  framing holds; only the implementation moves to the store family). Fleet
+  34 → 29; CLI registrations, skill references, and AGENTS.md synced.
+
+### 2026-09-19 — Store worker: fourth family, envelope-first (schema deferred to the worker)
+
+- **Q: ship the store port before the sqlite schema is final? A: yes — envelope
+  final, payloads loose.** The store is its own worker family like responses and
+  frontier: `store_request` / `store_request_result` events, `detail =
+  { id, op, input }` with **`op ∈ put | get | delete | query`** (enum-constrained
+  at the schema — an op outside the enum dies at the trust boundary), space
+  echo on results, `worker_error` on crash, **no cancel** (ops are short-lived).
+  The strict input grammar, the sqlite schema, migrations, and FTS live inside
+  the worker — **schema churn never becomes protocol churn.** (Grammar notes:
+  `query` must allow an empty filter — collection-wide enumeration — and
+  `delete` is keyed-only; purge/bulk/subscribe are deferred ops until a consumer
+  exists. Engine super-steps are sync and the worker's queue is ordered, so
+  read-modify-write is safe and no atomic-increment op is needed.)
+- **Q: threads persisted to the db? A: no — the 2026-09-17 growth-model decision
+  holds.** Authority stays files+git (`space/threads/`, `space/html/`; git history
+  is the learning log); the store holds **regenerable index + non-authority
+  durable data** — run counters, budget ledgers, the discovery catalog as its
+  first namespace/tenant. The store never becomes the learning surface.
+- **Storage-agnostic rule: only JSON ops cross the wire — no SQL, no expressions.**
+  `query` stays collection-scoped (filter object, never joins — joins happen
+  inside the worker if the catalog ever wants them); values are JSON only. This
+  is what keeps backings swappable per host: CLI = `bun:sqlite` WAL, Tauri =
+  sql.js or a Rust-side engine, browser embed = IndexedDB — same wire, no
+  redesign. Discovery's `src/tools/discovery.ts` re-cut rides along: catalog
+  tables + the dead reconcile scan become this worker's namespace, retiring the
+  deleted-kernel import (the file's only error) and its per-call open/close
+  MINIMAL.
+- **Boundary floor carried forward now, not deferred:** space identity is
+  provisioner-injected, never agent-supplied — no path/dbKey/host fields in any
+  op input; rows are space-scoped at the worker boundary (discovery's rule,
+  generalized).
+- **Landed same day (TDD, uncommitted):** the `workers` map param is settled —
+  `useBehavioral({ threads, traceListener, workers: { tools, responses, frontier?, store? },
+  useTrigger })`, family keys are the crash-event names too. The store family is implemented:
+  `store.worker.ts` (bun:sqlite WAL, one owned connection, version-stamped migrations,
+  space-stamped rows with the root default, per-op `additionalProperties: false` inputs so
+  space/host keys die at the boundary, shallow-field `query` filter with empty-filter
+  enumeration, errors-as-data, `:memory:` via `STORE_DB_PATH_KEY` for hermetic spawns,
+  file-persistence-across-respawn proven incl. WAL recovery) + `store.types.ts` (seeding key,
+  op input/result shapes) + 15 worker tests, 5 vocabulary tests, 1 router round-trip on the
+  real worker. Discovered the hard way: `bun:sqlite` `.get()` returns **null** (not undefined)
+  for no rows.
+- **Core-finalization sequence agreed (navigator + pilot):** (1) `workers`-map
+  param → (2) store worker v1 (KV + catalog tenant, MINIMAL) → (3) thread-authoring
+  surface decisions (raw events vs `src/threads/` factories; id-minting
+  convention; model-input sourcing) → (4) `TURN_LOOP_THREAD` re-cut as the
+  proof artifact — the core is final when the first real program thread runs a
+  full turn on the new wire. Autoresearch threads build after the proof.
+
+### 2026-09-18 — Responses-client family; compaction is a direct-fetch tool; spec-alignment verdicts
+
+- **Renames:** `use-model.ts` → `use-responses-client.ts`, `model.ts` →
+  `responses-client.ts` (files named by role: the client of the Open Responses
+  API). `model.schemas.ts` → back to `open-responses.schemas.ts` (the pilot's
+  rename fixed a stray-`l` typo; schemas are named for the spec, clients for
+  the role). `model.types.ts` keeps its name — the wire-protocol types module
+  (flag: rename to match the family if the drift starts to bite). Test files
+  renamed to match their modules.
+- **Compaction REMOVED (2026-09-18, same session):** the extraction above
+  lasted one session. Verdict chain: `/responses/compact` IS spec (HTTP path
+  in the canonical OpenAPI + compliance suite, not WebSocket-scoped as first
+  believed) and IS deployed (OpenAI first-party — Codex's backbone; xAI;
+  LiteLLM/Vercel/Bifrost gateways) — but NO local inference server supports
+  it (llama.cpp/Ollama/LM Studio ❌; vLLM mainline ❌, PR #56970 open,
+  merge-dirty). This harness targets **local inference**, so the client was
+  dead code against every provisioable endpoint. Decisive rationale:
+  **context management is client-side by architecture** — threads implement
+  RLM (alexzhang13.github.io/blog/2025/rlm/) with our tooling, and
+  distillation/compaction is just an ordinary `/responses` call the thread
+  makes; html tooling stores context/memory/knowledge. Removed:
+  `src/tools/compaction-client.ts` + spec + fixture route + analyzer oracle.
+  Kept: `CompactionItemSchema` in the output item union (spec output
+  vocabulary — servers may emit compaction items in-stream). Re-add trigger
+  (greppable): a local server ships `/responses/compact` (e.g. vLLM PR #56970
+  merging).
+- **Spec-alignment review (canonical schema:
+  github.com/openresponses/openresponses `schema/`):**
+  - **`ReasoningEffort` IS spec** (superseded same session — see the
+    filter-manifest discovery below: the RAW component file
+    `ReasoningEffortEnum.json` reads
+    `none|minimal|low|medium|high|xhigh`, but the published/filtered spec
+    drops `minimal`; the param itself, `reasoning.effort`, remains spec). The
+    prose page's `#reasoning` anchor only describes reasoning *items*, which
+    is why it read as non-spec. Verdict corrected; doc'd with spec provenance,
+    and the type moved to its spec home (`open-responses.schemas.ts`).
+  - **`/responses/compact` IS spec** (`schema/paths/responses.compact.json`;
+  body: `model` required, `input`/`prompt_cache_key` optional).
+    **`prompt_cache_key` IS spec** (CreateResponseBody too).
+  - **Fixed drift:** `OpenResponsesRequestSchema.model` was an object
+    `{provider, modelId}` — non-spec (spec: plain string). Now a string;
+    `provider` is documented as this repo's client-side provisioning
+    vocabulary that never crosses the wire. `CompactionItemSchema` required
+    `status` — spec `CompactionBody` requires only `type|id|encrypted_content`
+    (the prose's "every item has id/type/status" conflicts with the normative
+    schema; schema wins). Status now optional, extras tolerated loosely.
+    Fixture's compaction item got its spec `id`.
+  - **Filter-manifest discovery (corrects the earlier verdict):** the spec is
+    OpenAI's OpenAPI **filtered** — `openapi_filter_manifest.yaml` + additive
+    patches → the PUBLISHED openapi.json at openresponses.org is the normative
+    machine artifact. The published `ReasoningEffortEnum` is
+    `none|low|medium|high|xhigh` — OpenAI's `minimal` is explicitly dropped;
+    `user`/`conversation`/`prompt_cache_retention` are denied from
+    CreateResponseBody. Our enum had `minimal` (non-spec) — fixed.
+  - **Loose-declare + passthrough enum pattern:** `reasoningEffort` is an
+    `anyOf` — first branch declares the spec enum (visible in `--schema`
+    output), second branch is a non-empty passthrough string, so non-conformant
+    / superset endpoints accept their own values (e.g. OpenAI-only `minimal`)
+    through the named field. Rationale: effort support is model-dependent and
+    the endpoint is the authority; the spec blesses superset implementers;
+    errors come back as data. TS idiom: `ReasoningEffort | (string & {})`.
+  - **Arg passthrough landed:** `ModelRespondInput` carries
+    `[key: string]: unknown`; the worker's `buildRespondBody` forwards every
+    non-named key verbatim (named mappings win collisions). Spec params we
+    don't name (`prompt_cache_key`, `temperature`, `previous_response_id`, …)
+    and endpoint extensions flow through without being coded. Args never
+    reconfigure the endpoint (url/apiKey in args are inert body data).
+  - **Analyzer oracle switched** to the published openapi.json snapshot
+    (139KB, specs/open-responses/openapi.json) — the raw repo components
+    (unfiltered OpenAI source) were the wrong oracle and hid the `minimal`
+    filter.
+  - **The audit tooling was session-temp — deleted after the audit** (same
+    session): `specs/` snapshots + `scripts/analyze-open-responses-spec.ts`
+    are gone, never committed. The repo vendors no external specs (same rule
+    as MCP/AgentSkills). The durable record is this log + the spec-provenance
+    comments in `open-responses.schemas.ts` + the tests (they encode the
+    contract). Re-audit on a future spec version = fetch the published
+    openapi.json for that version and diff the field/enum lists — the
+    published-artifact-not-raw-components principle above is the thing to
+    remember.
+  - **Confirmed aligned:** `truncation`, `instructions`, `stream`, `tools`
+    (function subset), `Error {code, message}` (spec Error.json requires
+    exactly those), usage, item status enums, stream events (strict known
+    union + lax unknown-passthrough matches the spec's extension rules).
+
 ### 2026-09-18 — Transforms execute in-engine via sync jq-wasm; `first()` + errors-as-data
 
 - **jq-wasm** (owenthereal v3, real jq 1.8.2 via Emscripten, no native deps, Bun
@@ -1277,6 +1424,16 @@ repo and risks staleness.
 
 ## Open Questions
 
+- **Thread-authoring surface (gates the turn-loop proof).** Raw events vs
+  thin factories in `src/threads/`; id-minting convention (`ueid`, prefix);
+  where model input comes from. Settle by writing the re-cut raw and extracting
+  what repeats (the frontier-grammar lesson: build, then derive the rule).
+- **`src/kernel/threads.ts` → `src/threads/` move.** The one surviving kernel
+  file; `TURN_LOOP_THREAD` speaks dead vocabulary and is the proof artifact's
+  material. Fold with the turn-loop re-cut, or move now and re-cut in place?
+- **Store: sqlite schema evolution policy.** Worker-internal by design; the
+  open question is only the forward-compat gate when a future binary bumps
+  `schema_version` (v1 assumes forward-compat).
 - **Sequencing: frontier-verify vs jq worker bridge.** Two follow-ons from the
   2026-09-18 in-engine transform decision, order pending pilot: (1)
   `frontier.ts` verify/replay must model transform execution (import
