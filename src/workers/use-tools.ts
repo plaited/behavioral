@@ -1,10 +1,10 @@
 /**
- * Host consumer for the shell worker — owns the worker lifecycle, correlates
+ * Host consumer for the tools worker — owns the worker lifecycle, correlates
  * execution ids, and exposes the bounded `execute` surface the kernel will
  * eventually consume.
  *
  * @remarks
- * Temporary home: `createShellExecutor` and `createShellTool` are self-contained
+ * Temporary home: `createToolsExecutor` and `getToolsWorker` are self-contained
  * so they can be lifted into `src/kernel/` without rewiring.
  *
  * The worker is spawned eagerly so a broken worker surfaces at construction
@@ -17,28 +17,28 @@
 import type { JSONSchemaType } from 'ajv'
 import { useTool } from '../tools/use-tool.ts'
 import type {
-  ShellCancel,
-  ShellFormat,
-  ShellLineEvent,
-  ShellOptions,
-  ShellOutbound,
-  ShellRequest,
-  ShellResult,
-} from './shell.types.ts'
+  ToolsCancel,
+  ToolsFormat,
+  ToolsLineEvent,
+  ToolsOptions,
+  ToolsOutbound,
+  ToolsRequest,
+  ToolsResult,
+} from './tools.types.ts'
 
 /** A streamed line as handed to the supervisor seam. */
-export type ShellLineSink = Omit<ShellLineEvent, 'type'>
+export type ToolsLineSink = Omit<ToolsLineEvent, 'type'>
 
 /**
  * Absolute bounds a host caller cannot exceed.
  *
  * @remarks
  * A request may lower a bound freely; raising past the ceiling clamps and the
- * clamp is reported in `ShellResult.clamped`. The model-facing tool schema
+ * clamp is reported in `ToolsResult.clamped`. The model-facing tool schema
  * instead *rejects* out-of-range input at its trust boundary — see
- * `createShellTool`.
+ * `getToolsWorker`.
  */
-export type ShellCeilings = {
+export type ToolsCeilings = {
   timeoutMs: number
   maxLines: number
   maxCharacters: number
@@ -46,7 +46,7 @@ export type ShellCeilings = {
 }
 
 /** Default ceilings. */
-export const DEFAULT_CEILINGS: ShellCeilings = {
+export const DEFAULT_CEILINGS: ToolsCeilings = {
   timeoutMs: 120_000,
   maxLines: 5_000,
   maxCharacters: 200_000,
@@ -60,7 +60,7 @@ const CLAMPED_KEYS = ['timeoutMs', 'maxLines', 'maxCharacters', 'limit'] as cons
 const DESTROY_GRACE_MS = 150
 
 /** An error result carrying no capture — the run died with the executor. */
-const failedResult = ({ id, message }: { id: string; message: string }): ShellResult => ({
+const failedResult = ({ id, message }: { id: string; message: string }): ToolsResult => ({
   id,
   status: 'error',
   exitCode: null,
@@ -77,11 +77,11 @@ const clampOptions = ({
   options,
   ceilings,
 }: {
-  options: ShellOptions
-  ceilings: ShellCeilings
-}): { options: ShellOptions; clamped: string[] } => {
+  options: ToolsOptions
+  ceilings: ToolsCeilings
+}): { options: ToolsOptions; clamped: string[] } => {
   const clamped: string[] = []
-  const applied: ShellOptions = { ...options }
+  const applied: ToolsOptions = { ...options }
   for (const key of CLAMPED_KEYS) {
     const given = options[key]
     if (given !== undefined && given > ceilings[key]) {
@@ -93,7 +93,7 @@ const clampOptions = ({
 }
 
 /** Executor configuration. */
-export type ShellExecutorConfig = {
+export type ToolsExecutorConfig = {
   /** Default working directory for every execution. */
   cwd?: string
   /** Worker entry override — tests and embedders may repoint it. */
@@ -106,18 +106,17 @@ export type ShellExecutorConfig = {
    * This is where a b-thread guard's intent becomes an action today: a listener
    * can `cancel(id)` on a quota, a stall signature, or a byte budget. MINIMAL:
    * threads cannot set numeric bounds yet — merging a selected event's `detail`
-   * into tool options needs kernel ingress in `src/kernel/dispatch.ts`, which
-   * this slice deliberately does not touch.
+   * into tool options needs kernel ingress (the recoded kernel, not yet built).
    */
-  onLine?: (event: ShellLineSink) => void
+  onLine?: (event: ToolsLineSink) => void
   /** Per-installation ceiling overrides; defaults favor a small local model. */
-  ceilings?: Partial<ShellCeilings>
+  ceilings?: Partial<ToolsCeilings>
 }
 
-/** Host-side surface over one shell worker. */
-export type ShellExecutor = {
+/** Host-side surface over one tools worker. */
+export type ToolsExecutor = {
   /** Run one script; resolves a bounded result and never rejects. */
-  execute: (script: string, options?: ShellOptions) => Promise<ShellResult>
+  execute: (script: string, options?: ToolsOptions) => Promise<ToolsResult>
   /** Stop one running execution by correlation id. */
   cancel: (id: string) => void
   /** Terminate the worker. */
@@ -125,14 +124,14 @@ export type ShellExecutor = {
 }
 
 /**
- * Create an executor over a freshly spawned shell worker.
+ * Create an executor over a freshly spawned tools worker.
  *
  * @param config Default `cwd` and an optional worker entry override.
  */
-export const createShellExecutor = (config: ShellExecutorConfig = {}): ShellExecutor => {
-  const worker = new Worker(config.workerUrl ?? new URL('./shell.ts', import.meta.url))
-  const ceilings: ShellCeilings = { ...DEFAULT_CEILINGS, ...config.ceilings }
-  const pending = new Map<string, { settle: (result: ShellResult) => void; clamped?: string[] }>()
+export const createToolsExecutor = (config: ToolsExecutorConfig = {}): ToolsExecutor => {
+  const worker = new Worker(config.workerUrl ?? new URL('./tools.ts', import.meta.url))
+  const ceilings: ToolsCeilings = { ...DEFAULT_CEILINGS, ...config.ceilings }
+  const pending = new Map<string, { settle: (result: ToolsResult) => void; clamped?: string[] }>()
   let destroying = false
   let destroyWatchdog: ReturnType<typeof setTimeout> | undefined
   let dead: string | undefined
@@ -149,7 +148,7 @@ export const createShellExecutor = (config: ShellExecutorConfig = {}): ShellExec
   }
 
   worker.onmessage = (event: MessageEvent): void => {
-    const message = event.data as ShellOutbound
+    const message = event.data as ToolsOutbound
     if (message.type === 'LINE') {
       config.onLine?.({
         id: message.id,
@@ -170,22 +169,22 @@ export const createShellExecutor = (config: ShellExecutorConfig = {}): ShellExec
     }
   }
 
-  const execute = (script: string, options: ShellOptions = {}): Promise<ShellResult> =>
-    new Promise<ShellResult>((resolve) => {
+  const execute = (script: string, options: ToolsOptions = {}): Promise<ToolsResult> =>
+    new Promise<ToolsResult>((resolve) => {
       if (dead !== undefined) {
         resolve(failedResult({ id: crypto.randomUUID(), message: `worker_error: ${dead}` }))
         return
       }
       const id = crypto.randomUUID()
-      const merged: ShellOptions = { ...(config.cwd === undefined ? {} : { cwd: config.cwd }), ...options }
+      const merged: ToolsOptions = { ...(config.cwd === undefined ? {} : { cwd: config.cwd }), ...options }
       const { options: bounded, clamped } = clampOptions({ options: merged, ceilings })
       pending.set(id, { settle: resolve, ...(clamped.length === 0 ? {} : { clamped }) })
-      const request: ShellRequest = { type: 'EXECUTE', id, script, options: bounded }
+      const request: ToolsRequest = { type: 'EXECUTE', id, script, options: bounded }
       worker.postMessage(request)
     })
 
   const cancel = (id: string): void => {
-    const message: ShellCancel = { type: 'CANCEL', id }
+    const message: ToolsCancel = { type: 'CANCEL', id }
     worker.postMessage(message)
   }
 
@@ -217,14 +216,14 @@ export const createShellExecutor = (config: ShellExecutorConfig = {}): ShellExec
 // ---------------------------------------------------------------------------
 
 /** The §5 tool input — the entire model-facing surface. */
-export type ShellToolInput = {
+export type ToolsToolInput = {
   script: string
-  format?: ShellFormat
+  format?: ToolsFormat
   offset?: number
   limit?: number
 }
 
-export const ShellToolInputSchema: JSONSchemaType<ShellToolInput> = {
+export const ToolsToolInputSchema: JSONSchemaType<ToolsToolInput> = {
   type: 'object',
   properties: {
     script: {
@@ -259,7 +258,7 @@ export const ShellToolInputSchema: JSONSchemaType<ShellToolInput> = {
 
 // `jsonData` is an arbitrary JSON value, which JSONSchemaType cannot express —
 // hand-written and cast per the mcp-client precedent.
-export const ShellToolOutputSchema = {
+export const ToolsToolOutputSchema = {
   type: 'object',
   properties: {
     id: { type: 'string' },
@@ -278,33 +277,33 @@ export const ShellToolOutputSchema = {
   },
   required: ['id', 'status', 'exitCode', 'signal', 'totalLines', 'hasMore', 'stderr', 'durationMs'],
   additionalProperties: false,
-} as unknown as JSONSchemaType<ShellResult>
+} as unknown as JSONSchemaType<ToolsResult>
 
 /** The one tool the agent perceives (spec §5). */
-export const SHELL_TOOL_NAME = 'execute_shell'
+export const TOOLS_TOOL_NAME = 'execute_shell'
 
 /**
  * Bind the §5 tool to an executor.
  *
  * @remarks
  * The schema is the trust boundary: model input is rejected here, while host
- * callers clamp instead (see {@link createShellExecutor}). Numeric bounds the
+ * callers clamp instead (see {@link createToolsExecutor}). Numeric bounds the
  * model cannot set — `timeoutMs`, `maxLines`, `maxCharacters` — are the
  * executor's defaults; a b-thread guard can only `cancel(id)` through the
  * `onLine` seam until kernel ingress for event detail exists.
  */
-export const getShellWorker = (executor: ShellExecutor) =>
+export const getToolsWorker = (executor: ToolsExecutor) =>
   useTool(
     {
-      name: SHELL_TOOL_NAME,
+      name: TOOLS_TOOL_NAME,
       description:
         "Execute a shell script, command pipeline, or TypeScript fragment (`bun -e '...'`). " +
         "Output is bounded: 'paged' (default) returns a window of stdout lines with offset/limit plus " +
         "totalLines/hasMore; 'json' parses stdout as JSON; 'raw' returns tail-bounded text. " +
         'Non-zero exits are data (exitCode). Flooding, stuck, or over-budget commands are group-killed and ' +
         "reported as status 'line_quota' | 'timeout' | 'canceled'.",
-      inputSchema: ShellToolInputSchema,
-      outputSchema: ShellToolOutputSchema,
+      inputSchema: ToolsToolInputSchema,
+      outputSchema: ToolsToolOutputSchema,
     },
     (input) =>
       executor.execute(input.script, {

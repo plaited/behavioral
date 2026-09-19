@@ -1,10 +1,10 @@
 /**
- * Shell worker — executes one script per request in a cancellable `bash`
+ * Tools worker — executes one script per request in a cancellable `bash`
  * subprocess, streams stdout/stderr lines to the host as they arrive, and
  * returns a single bounded terminal result.
  *
  * @remarks
- * Spawned by URL from `use-shell.ts` (`new Worker(new URL('./shell.ts', ...))`)
+ * Spawned by URL from `use-tools.ts` (`new Worker(new URL('./tools.ts', ...))`)
  * and imported by nobody, so it needs no main-vs-worker detection: Bun exposes
  * `self` and `self.postMessage` on the main thread too, and `self.importScripts`
  * is undefined in both, so every ambient discriminator lies.
@@ -21,14 +21,14 @@
  */
 
 import type {
-  ShellInbound,
-  ShellLineEvent,
-  ShellRequest,
-  ShellResult,
-  ShellResultEvent,
-  ShellStatus,
-  ShellStream,
-} from './shell.types.ts'
+  ToolsInbound,
+  ToolsLineEvent,
+  ToolsRequest,
+  ToolsResult,
+  ToolsResultEvent,
+  ToolsStatus,
+  ToolsStream,
+} from './tools.types.ts'
 
 // ---------------------------------------------------------------------------
 // Defaults
@@ -170,16 +170,16 @@ const postLine = ({
 }: {
   id: string
   lineNumber: number
-  stream: ShellStream
+  stream: ToolsStream
   line: string
 }): void => {
-  const event: ShellLineEvent = { type: 'LINE', id, lineNumber, stream, line }
+  const event: ToolsLineEvent = { type: 'LINE', id, lineNumber, stream, line }
   self.postMessage(event)
 }
 
 /** Post the single terminal event for an execution. */
-const postResult = ({ id, result }: { id: string; result: ShellResult }): void => {
-  const event: ShellResultEvent = { type: 'RESULT', id, result }
+const postResult = ({ id, result }: { id: string; result: ToolsResult }): void => {
+  const event: ToolsResultEvent = { type: 'RESULT', id, result }
   self.postMessage(event)
 }
 
@@ -198,7 +198,7 @@ const JSON_SNIPPET_CHARS = 200
  * `offset`/`limit`, `raw`/`stderr` by tail-truncation, `json` by the byte
  * quota's group kill, and the whole run by `maxLines` and the deadline.
  */
-const runScript = async ({ request }: { request: ShellRequest }): Promise<ShellResult> => {
+const runScript = async ({ request }: { request: ToolsRequest }): Promise<ToolsResult> => {
   const { id, script, options } = request
   const started = performance.now()
   const format = options.format ?? 'paged'
@@ -313,7 +313,7 @@ const runScript = async ({ request }: { request: ShellRequest }): Promise<ShellR
     // A stopped run reports what it managed to produce: the streams end when the
     // group dies, so the partial window is already in hand. `byte_quota` is only
     // raised on the json path, which returns its own error before using this.
-    const stopped: ShellStatus =
+    const stopped: ToolsStatus =
       execution.stopReason === null
         ? 'completed'
         : execution.stopReason === 'byte_quota'
@@ -377,7 +377,7 @@ const runScript = async ({ request }: { request: ShellRequest }): Promise<ShellR
 // ---------------------------------------------------------------------------
 
 /** An error result carrying no capture — the run never produced a process. */
-const errorResult = ({ id, message }: { id: string; message: string }): ShellResult => ({
+const errorResult = ({ id, message }: { id: string; message: string }): ToolsResult => ({
   id,
   status: 'error',
   exitCode: null,
@@ -390,7 +390,7 @@ const errorResult = ({ id, message }: { id: string; message: string }): ShellRes
 })
 
 /** Route one inbound message. */
-const handleInbound = async (message: ShellInbound): Promise<void> => {
+const handleInbound = async (message: ToolsInbound): Promise<void> => {
   if (message.type === 'CANCEL') {
     const execution = active.get(message.id)
     if (execution !== undefined) stopExecution({ execution, reason: 'canceled' })
@@ -414,8 +414,8 @@ const handleInbound = async (message: ShellInbound): Promise<void> => {
 
 // The wire payload is produced by our own host code, so it is typed by
 // assertion rather than re-validated here — model input is validated once, at
-// the tool boundary (see `use-shell.ts`). MINIMAL: add an AJV wire validator if
+// the tool boundary (see `use-tools.ts`). MINIMAL: add an AJV wire validator if
 // the worker ever accepts messages from outside this process.
 self.onmessage = (event: MessageEvent): void => {
-  void handleInbound(event.data as ShellInbound)
+  void handleInbound(event.data as ToolsInbound)
 }

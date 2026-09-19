@@ -1,5 +1,5 @@
 /**
- * Shell tool tests — the §5 model-facing surface over the executor.
+ * Tools tool tests — the §5 model-facing surface over the executor.
  *
  * @remarks
  * The tool schema is the trust boundary: it is the only place model-supplied
@@ -11,12 +11,12 @@
 
 import { describe, expect, test } from 'bun:test'
 import { ajv } from '../../tools/use-tool.ts'
-import { createShellExecutor, getShellWorker, ShellToolInputSchema, ShellToolOutputSchema } from '../use-shell.ts'
+import { createToolsExecutor, getToolsWorker, ToolsToolInputSchema, ToolsToolOutputSchema } from '../use-tools.ts'
 
-const validateInput = ajv.compile(ShellToolInputSchema)
-const validateOutput = ajv.compile(ShellToolOutputSchema)
+const validateInput = ajv.compile(ToolsToolInputSchema)
+const validateOutput = ajv.compile(ToolsToolOutputSchema)
 
-describe('shell tool — schema contract', () => {
+describe('tools worker — schema contract', () => {
   test('accepts script alone and the §5 defaults', () => {
     expect(validateInput({ script: 'ls' })).toBe(true)
     expect(validateInput({ script: 'ls', format: 'paged', offset: 0, limit: 50 })).toBe(true)
@@ -32,15 +32,15 @@ describe('shell tool — schema contract', () => {
   })
 })
 
-describe('shell tool — call-through', () => {
+describe('tools worker — call-through', () => {
   test('runs a script through the executor and the result satisfies the output schema', async () => {
-    const executor = createShellExecutor()
+    const executor = createToolsExecutor()
     try {
-      const shell = getShellWorker(executor)
+      const tool = getToolsWorker(executor)
 
-      expect(shell.name).toBe('execute_shell')
+      expect(tool.name).toBe('execute_shell')
 
-      const result = await shell({ script: 'seq 1 3' })
+      const result = await tool({ script: 'seq 1 3' })
       expect(result.status).toBe('completed')
       expect(result.lines).toEqual(['1', '2', '3'])
       expect(validateOutput(result)).toBe(true)
@@ -50,11 +50,11 @@ describe('shell tool — call-through', () => {
   })
 
   test('a json run also satisfies the output schema', async () => {
-    const executor = createShellExecutor()
+    const executor = createToolsExecutor()
     try {
-      const shell = getShellWorker(executor)
+      const tool = getToolsWorker(executor)
 
-      const result = await shell({ script: `echo '{"ok":true}'`, format: 'json' })
+      const result = await tool({ script: `echo '{"ok":true}'`, format: 'json' })
       expect(result.status).toBe('completed')
       expect(result.jsonData).toEqual({ ok: true })
       expect(validateOutput(result)).toBe(true)

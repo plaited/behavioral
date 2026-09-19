@@ -1,5 +1,5 @@
 /**
- * Shell executor integration tests — exercised through the real worker
+ * Tools executor integration tests — exercised through the real worker
  * boundary: a real Bun `Worker` running a real `bash` subprocess.
  *
  * @remarks
@@ -14,7 +14,7 @@
 import { describe, expect, test } from 'bun:test'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createShellExecutor } from '../use-shell.ts'
+import { createToolsExecutor } from '../use-tools.ts'
 
 /** Pids whose command line matches `pattern` — used to prove a killed group is gone. */
 const matching = async (pattern: string): Promise<string[]> =>
@@ -34,13 +34,13 @@ const killMatching = async (pattern: string): Promise<void> => {
   }
 }
 
-describe('shell executor — cancellation', () => {
+describe('tools executor — cancellation', () => {
   test('cancel reaps the process group and leaves the worker usable', async () => {
-    const token = `SHELL_CANCEL_${crypto.randomUUID().replace(/-/g, '')}`
-    let executor: ReturnType<typeof createShellExecutor> | undefined
+    const token = `TOOLS_CANCEL_${crypto.randomUUID().replace(/-/g, '')}`
+    let executor: ReturnType<typeof createToolsExecutor> | undefined
     let target: string | undefined
     try {
-      executor = createShellExecutor({
+      executor = createToolsExecutor({
         onLine: (event) => {
           if (event.line.includes(token) && target === undefined) {
             target = event.id
@@ -72,9 +72,9 @@ describe('shell executor — cancellation', () => {
   })
 })
 
-describe('shell executor — output streams', () => {
+describe('tools executor — output streams', () => {
   test('stderr is captured separately from stdout', async () => {
-    const executor = createShellExecutor()
+    const executor = createToolsExecutor()
     try {
       const result = await executor.execute('echo out; echo err >&2')
 
@@ -87,7 +87,7 @@ describe('shell executor — output streams', () => {
   })
 
   test('ANSI escapes are stripped from captured lines', async () => {
-    const executor = createShellExecutor()
+    const executor = createToolsExecutor()
     try {
       const result = await executor.execute("printf '\\033[31mred\\033[0m\\n'")
 
@@ -98,7 +98,7 @@ describe('shell executor — output streams', () => {
   })
 
   test('stderr is tail-bounded by maxCharacters with a truncation notice', async () => {
-    const executor = createShellExecutor()
+    const executor = createToolsExecutor()
     try {
       const result = await executor.execute('seq 1 2000 >&2', { maxCharacters: 100, maxLines: 5000 })
 
@@ -112,9 +112,9 @@ describe('shell executor — output streams', () => {
   })
 })
 
-describe('shell executor — json output', () => {
+describe('tools executor — json output', () => {
   test('valid JSON stdout is parsed into jsonData', async () => {
-    const executor = createShellExecutor()
+    const executor = createToolsExecutor()
     try {
       const result = await executor.execute(`echo '{"a":1,"b":[2,3]}'`, { format: 'json' })
 
@@ -126,7 +126,7 @@ describe('shell executor — json output', () => {
   })
 
   test('json stdout beyond maxCharacters is stopped and reported, not parsed', async () => {
-    const executor = createShellExecutor()
+    const executor = createToolsExecutor()
     try {
       const result = await executor.execute('seq 1 2000', { format: 'json', maxCharacters: 100, maxLines: 5000 })
 
@@ -138,7 +138,7 @@ describe('shell executor — json output', () => {
   })
 
   test('invalid JSON stdout is an error with a bounded snippet', async () => {
-    const executor = createShellExecutor()
+    const executor = createToolsExecutor()
     try {
       const result = await executor.execute('echo not-json', { format: 'json' })
 
@@ -150,9 +150,9 @@ describe('shell executor — json output', () => {
   })
 })
 
-describe('shell executor — raw output', () => {
+describe('tools executor — raw output', () => {
   test('raw keeps the tail bounded by maxCharacters with a truncation notice', async () => {
-    const executor = createShellExecutor()
+    const executor = createToolsExecutor()
     try {
       const result = await executor.execute('seq 1 100', { format: 'raw', maxCharacters: 24 })
 
@@ -167,10 +167,10 @@ describe('shell executor — raw output', () => {
   })
 })
 
-describe('shell executor — onLine seam', () => {
+describe('tools executor — onLine seam', () => {
   test('lines stream to onLine with their stream and a monotonic number', async () => {
     const seen: { lineNumber: number; stream: string; line: string }[] = []
-    const executor = createShellExecutor({
+    const executor = createToolsExecutor({
       onLine: (event) => {
         seen.push({ lineNumber: event.lineNumber, stream: event.stream, line: event.line })
       },
@@ -188,10 +188,10 @@ describe('shell executor — onLine seam', () => {
   })
 })
 
-describe('shell executor — deadline', () => {
+describe('tools executor — deadline', () => {
   test('an expired deadline group-kills the command and reports timeout', async () => {
-    const token = `SHELL_TIMEOUT_${crypto.randomUUID().replace(/-/g, '')}`
-    const executor = createShellExecutor()
+    const token = `TOOLS_TIMEOUT_${crypto.randomUUID().replace(/-/g, '')}`
+    const executor = createToolsExecutor()
     try {
       const pending = executor.execute(`echo ${token}; sleep 31416`, { timeoutMs: 300 })
       const result = await Promise.race([pending, Bun.sleep(2_000).then(() => undefined)])
@@ -208,10 +208,10 @@ describe('shell executor — deadline', () => {
   })
 })
 
-describe('shell executor — line quota', () => {
+describe('tools executor — line quota', () => {
   test('the line cap group-kills a flooding command at maxLines', async () => {
-    const token = `SHELL_QUOTA_${crypto.randomUUID().replace(/-/g, '')}`
-    const executor = createShellExecutor()
+    const token = `TOOLS_QUOTA_${crypto.randomUUID().replace(/-/g, '')}`
+    const executor = createToolsExecutor()
     try {
       const pending = executor.execute(`echo ${token}; while true; do echo flood; done`, { maxLines: 20 })
       const result = await Promise.race([pending, Bun.sleep(2_000).then(() => undefined)])
@@ -227,9 +227,9 @@ describe('shell executor — line quota', () => {
   })
 })
 
-describe('shell executor — ceilings', () => {
+describe('tools executor — ceilings', () => {
   test('over-ceiling knobs are clamped and the clamp is reported', async () => {
-    const executor = createShellExecutor()
+    const executor = createToolsExecutor()
     try {
       const result = await executor.execute('echo ok', { timeoutMs: 999_999, maxLines: 9_999 })
 
@@ -241,7 +241,7 @@ describe('shell executor — ceilings', () => {
   })
 
   test('ceilings are executor config — a lowered ceiling clamps too', async () => {
-    const executor = createShellExecutor({ ceilings: { timeoutMs: 250 } })
+    const executor = createToolsExecutor({ ceilings: { timeoutMs: 250 } })
     try {
       const result = await executor.execute('echo ok', { timeoutMs: 600 })
 
@@ -252,11 +252,11 @@ describe('shell executor — ceilings', () => {
   })
 })
 
-describe('shell executor — failures', () => {
+describe('tools executor — failures', () => {
   test('a spawn failure resolves as error data and never rejects', async () => {
-    const executor = createShellExecutor()
+    const executor = createToolsExecutor()
     try {
-      const pending = executor.execute('echo ok', { cwd: '/nonexistent-shell-spec-dir' })
+      const pending = executor.execute('echo ok', { cwd: '/nonexistent-tools-spec-dir' })
       const result = await Promise.race([pending, Bun.sleep(2_000).then(() => undefined)])
 
       expect(result).toBeDefined()
@@ -268,9 +268,9 @@ describe('shell executor — failures', () => {
   })
 
   test('a crashed worker resolves in-flight and future work as error data', async () => {
-    const crashPath = join(tmpdir(), `shell-crash-${crypto.randomUUID()}.ts`)
+    const crashPath = join(tmpdir(), `tools-crash-${crypto.randomUUID()}.ts`)
     await Bun.write(crashPath, 'throw new Error("boom")')
-    const executor = createShellExecutor({ workerUrl: crashPath })
+    const executor = createToolsExecutor({ workerUrl: crashPath })
     try {
       const first = await Promise.race([executor.execute('echo never'), Bun.sleep(2_000).then(() => undefined)])
       expect(first).toBeDefined()
@@ -286,9 +286,9 @@ describe('shell executor — failures', () => {
   })
 })
 
-describe('shell executor — output bounds', () => {
+describe('tools executor — output bounds', () => {
   test('a line larger than maxCharacters is flushed in bounded pieces', async () => {
-    const executor = createShellExecutor()
+    const executor = createToolsExecutor()
     try {
       // One 10,000-character line with no newline inside it.
       const result = await executor.execute(`awk 'BEGIN{for(i=0;i<1000;i++)printf "xxxxxxxxxx";print ""}'`, {
@@ -305,10 +305,10 @@ describe('shell executor — output bounds', () => {
   })
 })
 
-describe('shell executor — teardown', () => {
+describe('tools executor — teardown', () => {
   test('destroy cancels in-flight work, resolves it, and reaps its processes', async () => {
-    const token = `SHELL_DESTROY_${crypto.randomUUID().replace(/-/g, '')}`
-    const executor = createShellExecutor()
+    const token = `TOOLS_DESTROY_${crypto.randomUUID().replace(/-/g, '')}`
+    const executor = createToolsExecutor()
     try {
       const pending = executor.execute(`echo ${token}; sleep 31418`)
       await Bun.sleep(200)
@@ -326,9 +326,9 @@ describe('shell executor — teardown', () => {
   })
 })
 
-describe('shell executor — stdin', () => {
+describe('tools executor — stdin', () => {
   test('host-supplied stdin reaches the command', async () => {
-    const executor = createShellExecutor()
+    const executor = createToolsExecutor()
     try {
       const result = await executor.execute('cat', { stdin: 'hello-stdin' })
 
@@ -340,9 +340,9 @@ describe('shell executor — stdin', () => {
   })
 })
 
-describe('shell executor — exit status', () => {
+describe('tools executor — exit status', () => {
   test('a non-zero exit is completed data with the real exit code', async () => {
-    const executor = createShellExecutor()
+    const executor = createToolsExecutor()
     try {
       const result = await executor.execute('exit 3')
 
@@ -354,9 +354,9 @@ describe('shell executor — exit status', () => {
   })
 })
 
-describe('shell executor — paged output', () => {
+describe('tools executor — paged output', () => {
   test('defaults return every line with totalLines and hasMore false', async () => {
-    const executor = createShellExecutor()
+    const executor = createToolsExecutor()
     try {
       const result = await executor.execute('seq 1 10')
 
@@ -371,7 +371,7 @@ describe('shell executor — paged output', () => {
   })
 
   test('offset skips lines and limit bounds the window', async () => {
-    const executor = createShellExecutor()
+    const executor = createToolsExecutor()
     try {
       const result = await executor.execute('seq 1 10', { offset: 5, limit: 3 })
 
@@ -384,7 +384,7 @@ describe('shell executor — paged output', () => {
   })
 
   test('a window that ends exactly at the last line reports hasMore false', async () => {
-    const executor = createShellExecutor()
+    const executor = createToolsExecutor()
     try {
       const result = await executor.execute('seq 1 10', { offset: 7, limit: 3 })
 
@@ -397,7 +397,7 @@ describe('shell executor — paged output', () => {
   })
 
   test('an offset past the last line returns an empty window', async () => {
-    const executor = createShellExecutor()
+    const executor = createToolsExecutor()
     try {
       const result = await executor.execute('seq 1 10', { offset: 20, limit: 5 })
 
