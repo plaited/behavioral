@@ -1,3 +1,4 @@
+import { deepEqual } from '../utils.ts'
 import { FRONTIER_STATUS, IDIOMS, TRACE_MESSAGE_KINDS } from './behavioral.constants.ts'
 import type {
   BPEvent,
@@ -110,7 +111,7 @@ export const advanceRunningToPending = (running: Set<RunningBid>, pending: Set<P
 const eventMatchesCandidate = (request: BPEvent, selectedEvent: CandidateBid) => {
   if (selectedEvent.type !== request.type) return false
   if (selectedEvent.space && selectedEvent.space !== request.space) return false
-  return Bun.deepEquals(request.detail, selectedEvent.detail)
+  return deepEqual(request.detail, selectedEvent.detail)
 }
 
 export const resumePendingThreadsForSelectedEvent = ({
