@@ -1,5 +1,5 @@
 /**
- * Host consumer for the tools worker — owns the worker lifecycle, correlates
+ * Host consumer for the tools-client worker — owns the worker lifecycle, correlates
  * execution ids, and exposes the bounded `execute` surface the kernel will
  * eventually consume.
  *
@@ -24,7 +24,7 @@ import type {
   ToolsOutbound,
   ToolsRequest,
   ToolsResult,
-} from './tools.types.ts'
+} from './tools-client.types.ts'
 
 /** A streamed line as handed to the supervisor seam. */
 export type ToolsLineSink = Omit<ToolsLineEvent, 'type'>
@@ -113,7 +113,7 @@ export type ToolsExecutorConfig = {
   ceilings?: Partial<ToolsCeilings>
 }
 
-/** Host-side surface over one tools worker. */
+/** Host-side surface over one tools-client worker. */
 export type ToolsExecutor = {
   /** Run one script; resolves a bounded result and never rejects. */
   execute: (script: string, options?: ToolsOptions) => Promise<ToolsResult>
@@ -124,12 +124,12 @@ export type ToolsExecutor = {
 }
 
 /**
- * Create an executor over a freshly spawned tools worker.
+ * Create an executor over a freshly spawned tools-client worker.
  *
  * @param config Default `cwd` and an optional worker entry override.
  */
 export const createToolsExecutor = (config: ToolsExecutorConfig = {}): ToolsExecutor => {
-  const worker = new Worker(config.workerUrl ?? new URL('./tools.worker.ts', import.meta.url))
+  const worker = new Worker(config.workerUrl ?? new URL('./tools-client.worker.ts', import.meta.url))
   const ceilings: ToolsCeilings = { ...DEFAULT_CEILINGS, ...config.ceilings }
   const pending = new Map<string, { settle: (result: ToolsResult) => void; clamped?: string[] }>()
   let destroying = false

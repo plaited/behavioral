@@ -16,7 +16,7 @@ import { createToolsExecutor, getToolsWorker, ToolsToolInputSchema, ToolsToolOut
 const validateInput = ajv.compile(ToolsToolInputSchema)
 const validateOutput = ajv.compile(ToolsToolOutputSchema)
 
-describe('tools worker — schema contract', () => {
+describe('tools-client worker — schema contract', () => {
   test('accepts script alone and the §5 defaults', () => {
     expect(validateInput({ script: 'ls' })).toBe(true)
     expect(validateInput({ script: 'ls', format: 'paged', offset: 0, limit: 50 })).toBe(true)
@@ -32,7 +32,7 @@ describe('tools worker — schema contract', () => {
   })
 })
 
-describe('tools worker — call-through', () => {
+describe('tools-client worker — call-through', () => {
   test('runs a script through the executor and the result satisfies the output schema', async () => {
     const executor = createToolsExecutor()
     try {

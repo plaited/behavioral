@@ -3,7 +3,7 @@
  *
  * Two message kinds, both of which evaluate:
  * - `addThreads` — provision each thread, then `step()`. The trailing step is
- *   the re-entry contract: host async results (model/tools workers) come back
+ *   the re-entry contract: host async results (model/tools-client workers) come back
  *   as response threads, and adding them resumes the cascade. Boot uses the
  *   same kind: provisioned threads that only `waitFor` stay quiet until
  *   `trigger`; threads that `request` self-start the program.

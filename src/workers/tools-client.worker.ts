@@ -1,10 +1,10 @@
 /**
- * Tools worker — executes one script per request in a cancellable `bash`
+ * Tools-client worker — executes one script per request in a cancellable `bash`
  * subprocess, streams stdout/stderr lines to the host as they arrive, and
  * returns a single bounded terminal result.
  *
  * @remarks
- * Spawned by URL from `use-tools.ts` (`new Worker(new URL('./tools.worker.ts', ...))`)
+ * Spawned by URL from `use-tools.ts` (`new Worker(new URL('./tools-client.worker.ts', ...))`)
  * and imported by nobody, so it needs no main-vs-worker detection: Bun exposes
  * `self` and `self.postMessage` on the main thread too, and `self.importScripts`
  * is undefined in both, so every ambient discriminator lies.
@@ -28,7 +28,7 @@ import type {
   ToolsResultEvent,
   ToolsStatus,
   ToolsStream,
-} from './tools.types.ts'
+} from './tools-client.types.ts'
 
 // ---------------------------------------------------------------------------
 // Defaults

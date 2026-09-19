@@ -1,10 +1,10 @@
 /**
- * Wire and option types shared by the tools worker (`tools.ts`) and its host
+ * Wire and option types shared by the tools-client worker (`tools-client.worker.ts`) and its host
  * consumer (`use-tools.ts`).
  *
  * @remarks
  * Types only — no runtime values, so importing this module has no side effects
- * on either side of the worker boundary. `tools.ts` mounts `self.onmessage` at
+ * on either side of the worker boundary. `tools-client.worker.ts` mounts `self.onmessage` at
  * top level, so the host must never import it for types; both sides import
  * here instead.
  *
