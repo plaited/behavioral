@@ -25,16 +25,6 @@
 
 import { getEnvironmentData } from 'node:worker_threads'
 import {
-  MODEL_ENDPOINTS_KEY,
-  type ModelDeltaEvent,
-  type ModelEndpointConfig,
-  type ModelEndpoints,
-  type ModelInbound,
-  type ModelRespondInput,
-  type ModelRespondOutput,
-  type ModelResultEvent,
-} from './model.types.ts'
-import {
   ErrorSchema,
   type KnownStreamEvent,
   KnownStreamEventSchema,
@@ -47,6 +37,16 @@ import {
   type Usage,
   UsageSchema,
 } from './open-responses.schemas.ts'
+import {
+  MODEL_ENDPOINTS_KEY,
+  type ModelDeltaEvent,
+  type ModelEndpointConfig,
+  type ModelEndpoints,
+  type ModelInbound,
+  type ModelRespondInput,
+  type ModelRespondOutput,
+  type ModelResultEvent,
+} from './open-responses.types.ts'
 
 // ---------------------------------------------------------------------------
 // Endpoint config (environment data — seeded by the host before spawn)
