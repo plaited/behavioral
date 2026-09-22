@@ -7,17 +7,12 @@ runs: *can it deadlock?* and *can it spin forever without making progress?*
 
 ## Public surface
 
-Frontier analysis is three `defineTool` units that live in-repo at
-`src/tools/frontier.ts`. The public surface is **CLI-only** — the fleet
-dispatcher (`behavioral tools '{"tool":"frontier-…","input":{…}}'`) wraps
-every tool, and `behavioral tools --schema input|output --tool <name>`
-exposes the authoritative contracts. There is no `@behavioral/sh/tools`
-package export.
-
-The raw algorithm functions (`replayToFrontierRaw`, `exploreFrontiersRaw`,
-`verifyFrontiersRaw`) and the graph internals (`frontierStateKey`,
-`findStronglyConnectedComponents`, `findLivelocks`, `StateNode`) are
-**module-private** — the three tools are the only public surface.
+Frontier analysis is a **worker family**: `src/workers/frontier.worker.ts`,
+speaking the behavioral event wire — `frontier_request { id, op: replay |
+explore | verify, input }` in, one `frontier_request_result { id, result }`
+out. Mount it via the `useWorkers` map (`frontier: new Worker(...)`); threads
+request it like any satellite. Ops are short-lived (no cancel event). The
+worker's event schemas live in `src/workers/workers.types.ts`.
 
 Threads are JSON objects: `{ label: string, rules: Idioms[], once?: true }`.
 Each idiom is one sync point with `request` (propose an event), `waitFor`
@@ -25,16 +20,13 @@ Each idiom is one sync point with `request` (propose an event), `waitFor`
 (terminate the thread on an event). `detailSchema` on listeners is JSON
 Schema, compiled at registration.
 
-## The tool surface
+## The op surface
 
-The per-tool I/O contracts (inputs, outputs, examples, dispatch flags) live
-in the **behavioral-tools** skill — see its
-[frontier](../../behavioral-tools/references/frontier.md) reference. That is the
-single source for tool shapes; discover the authoritative field lists with
-`behavioral tools --schema input|output --tool <name>`.
-
-The division of concern: this reference owns *what frontier analysis is and
-how to reason with it* (below); the tools skill owns *how to call it*.
+The three ops carry the former tools' contracts: `replay` (re-run to a
+frontier), `explore` (enumerate reachable frontiers), `verify` (deadlock/
+livelock checks). Input/output shapes validate at the worker's boundary;
+the wire payloads are loose JsonObject with their strict schema home in the
+frontier worker family.
 
 ## The `progress` spec
 

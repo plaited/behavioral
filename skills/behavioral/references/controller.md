@@ -65,31 +65,21 @@ User interactions and page lifecycle emit messages back to the agent:
 The agent — running a behavioral program — is the source of truth for what
 the page shows; the Controller is the DOM applier.
 
-## Stateless html tools (SSR)
+## Server-side html (the floors + classifier story)
 
-There is **no `Renderer` class** — SSR is stateless html-in / html-out tools:
-five `defineTool` units in `src/tools/html.ts` (`html-render`,
-`html-update-attributes`, `html-scale-check`, `html-validate-and-escape`,
-`html-validate-attribute-value`) applying the same `render`/`attrs`
-vocabulary to an HTML **string** in a Bun process. Their per-tool I/O
-contracts, examples, and gotchas live in the **behavioral-tools** skill — see
-its [html](../../behavioral-tools/references/html.md) reference; discover the
-authoritative field lists with `behavioral tools --schema input|output --tool
-<name>`.
+The compiled SSR html tools are **retired** (HTMLRewriter was Bun-only, dead
+in both target hosts; the ICL conversion removed the fleet). What survives:
 
-The two things to know here, because they are *conceptual* rather than
-surface details:
-
-1. **The document is the state.** The tools are stateless — each call takes
-   the current document as `html` input and returns the new document as `html`
-   output. Thread the output back in; feeding the stale original discards
-   every prior mutation.
-2. **Payloads are validated before selector match.** A schema-invalid or
-   XSS-laden fragment returns the original document unchanged with
-   violations-as-data, even when no `[b-target]` element matches. Zero
-   matches, on valid input, is a no-op — not an error. (The live-DOM
-   Controller *does* throw `ElementNotFoundError` mid-iteration; that
-   asymmetry is a live-DOM concern only.)
+- **Deterministic floors** — `isInvalidTrigger` / `detectXssVectors`
+  (`src/controller/controller.utils.ts`): hardcoded invariants (empty
+  b-trigger = invalid, the semicolon grammar, on*/scheme vectors) that run
+  in every host, browser included, with no ajv/css-tree in the bundle.
+- **Schemas as data** — `src/controller/html.schemas.ts` + `css.schemas.ts`:
+  pure JSON-schema data (the classifier's context, not compiled validators).
+- **The classifier ceiling** — the System One/Jev gate story:
+  [prompts/html-classifier-gate.md](../../../prompts/html-classifier-gate.md)
+  — probabilistic admission over the schema context, with the floors as the
+  deterministic backstop. Probabilistic gates never own security invariants.
 
 ## When to use which
 

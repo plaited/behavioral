@@ -83,10 +83,10 @@ selections verbatim and re-enters worker results as once-threads), and the satel
 (reachability analysis), `store` (durable space-scoped persistence). Spawn-by-URL entries end in
 `.worker.ts`; each family owns its event types + input boundary; results echo the request
 `space`.
-**`src/tools/`** — the tool fleet (13 tools): stateless `defineTool` units (`src/tools/define-tool.ts`), each
-with AJV `JSONSchemaType` input/output schemas (`mcp-client`,
-`plugin-client`, `skill-client`). Dispatched from the CLI via `behavioral tools`;
-agent-facing usage docs live in `skills/behavioral-tools/`.
+**`src/tools/`** — deleted (fleet 0): the ICL conversion retired the CLI tool
+fleet. mcp-client is the mcp worker family (`src/workers/mcp-client.worker.ts`);
+skill/plugin operations are threads + recipes + store (`src/threads/`), taught
+by `skills/skill-conventions/`.
 **`src/behavioral/`** — the pure language layer: types, constants, utils, the interpreter core
 (`behavioral.ts`), and its internal jq subprocess (`jq.worker.ts` — engine-internal, wire-external;
 nothing outside behavioral/ speaks its wire). Zero process entries that speak the worker wire —
@@ -96,9 +96,8 @@ Transport, plus `controller.utils.ts` (DelegatedListener, swapBoundary, the dete
 `isInvalidTrigger`/`detectXssVectors`) and render-time scale error-back. The controller owns no
 AJV; its floors are hardcoded invariants (on*, malformed b-trigger, scale mismatch).
 **`src/cli/`** — the `behavioral` CLI framework (`makeCliRouter`/`parseCli`) and its commands,
-registered in `bin/behavioral.ts`. `tools.ts` is the fleet dispatcher: `behavioral tools
-'{"tool":"<name>","input":{...}}'` invokes any fleet tool by name; bare `--schema` prints the
-fleet index and `--schema <input|output> --tool <name>` resolves a tool schema.
+registered in `bin/behavioral.ts`. The `behavioral tools` fleet dispatcher is retired with the
+fleet (0 tools); turn/config commands land here as the composition rulings build out.
 **`src/utils/`** — shared pure utilities.
 **`tasks/`** — Harbor skill-authoring task specs (challenge content; not shipped, not a plugin).
 **`scripts/`** — repo setup and package-maintenance shell glue.
@@ -107,8 +106,7 @@ fleet index and `--schema <input|output> --tool <name>` resolves a tool schema.
 
 **CLI features** — a `makeCli` JSON-in/JSON-out command is exported through its `src/cli/<feature>.ts`
 module and registered in `bin/behavioral.ts`. Invoke as `behavioral <command> '<json>'`; each
-command supports `--schema <input|output>`, `--dry-run`, `--help` (fleet commands additionally
-support bare `--schema` and `--tool <name>` schema addressing).
+command supports `--schema <input|output>`, `--dry-run`, `--help`.
 
 ## GitHub CLI
 
@@ -174,23 +172,25 @@ Expand test coverage when the impact is broad, shared, or uncertain.
 
 **Type over interface** — `type User = {` not `interface User {`
 **No any** — use `unknown` with type guards. At external boundaries (file/network/IPC/event-detail
-payloads), validate with AJV: define a `JSONSchemaType<T>` and compile with `ajv.compile` (see
-`defineTool` in `src/tools/define-tool.ts`). Trust the validated value downstream.
+payloads), validate with AJV: define a `JSONSchemaType<T>` and compile with `ajv.compile` (the shared
+instance in `src/behavioral/behavioral.types.ts`; thread `detailSchema` gates and worker-family
+input boundaries are the pattern homes). Trust the validated value downstream.
 **PascalCase types** — schemas get `Schema` suffix.
-**Schemas are AJV, not Zod, on the tools surface.** Define tool input/output as `JSONSchemaType<T>`
-and let `defineTool` compile both with the shared `ajv` instance (`src/tools/define-tool.ts`). Prefer
-structural schemas (`oneOf` branches, strict `additionalProperties: false` at every level) so
-constraints are explicit and JSON-schema replay contracts stay aligned. Do not hand-maintain a
-parallel Zod shape alongside an AJV one.
-**No cross-module schema drift.** When a CLI command returns a shape produced by another module
-(kernel, tools), the output schema must derive from or reference that module's exported schema —
+**Schemas are AJV, not Zod.** Define wire shapes as `JSONSchemaType<T>` and compile with the shared
+`ajv` instance. Prefer structural schemas (`oneOf` branches, strict `additionalProperties: false` at
+every level) so constraints are explicit and JSON-schema replay contracts stay aligned. Do not
+hand-maintain a parallel Zod shape alongside an AJV one. Schema-data is exported for reuse (the
+catalog/manifest/recipe contracts in `src/threads/`).
+**No cross-module schema drift.** When a CLI command returns a shape produced by another module,
+the output schema must derive from or reference that module's exported schema —
 not be hand-mirrored. Failure mode: a module's output type changes; a downstream CLI/tool schema
 silently rejects the new field (`additionalProperties: false` bites). Fix: one JSON-schema home for
-the shape (e.g. `TurnResultSchema` in `src/kernel/`), consumed downstream via `.schema`.
+the shape (e.g. a worker family's event schema in `src/workers/workers.types.ts`), consumed
+downstream via `.schema` or export.
 **CLI schema reflection uses AJV.** The `makeCliRouter`/`parseCli` framework in `src/cli/cli.ts`
 reflects command schemas via `--schema input|output` — schemas are `JSONSchemaType<T>` objects,
 so reflection is `JSON.stringify(schema)`. The CLI AJV instance (`useDefaults: true`) matches
-Zod's `.default()` behavior; otherwise it is identical to the shared tools AJV.
+Zod's `.default()` behavior; otherwise it is identical to the shared AJV.
 **Arrow functions** — `const fn = () =>` over `function fn()`.
 **Object params >2 args** — `fn({ a, b, c }: { ... })`.
 **Private fields** — `#field` (ES2022) not `private field`.

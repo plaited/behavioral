@@ -200,9 +200,8 @@ export const detectXssVectors: DetectXssViolations = (root) => {
  * input, no declarations, a declaration without a `:`, an empty key or value,
  * or a duplicate key.
  *
- * Mirrors `validatePTrigger` (src/tools/html.schemas.ts) with the opposite
- * polarity. Kept local so the browser controller bundle does not pull in ajv
- * and css-tree through html.schemas.ts.
+ * Kept local (not derived from the html.schemas.ts data) so the browser
+ * controller bundle pulls in no ajv/css-tree.
  */
 export const isInvalidTrigger = (data: unknown): boolean => {
   if (!isTypeOf<string>(data, 'string')) return true

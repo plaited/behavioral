@@ -35,9 +35,9 @@ in the behavioral repo itself. Specifically:
   on Structural IA, CSS custom properties, and `@scope`/`:host()`/`::part()`
   modes.
 
-The `behavioral` CLI ships `init`, `turn`, and the `behavioral tools`
-fleet dispatcher (registered in `bin/behavioral.ts`). Run
-`behavioral <command> --help` for usage.
+The `behavioral` CLI is the entry (`bin/behavioral.ts`). The tools-fleet
+dispatcher is retired with the ICL conversion; run `behavioral --help` for
+the current command surface.
 
 ## Route table
 
