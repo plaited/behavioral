@@ -149,14 +149,47 @@ ingress + a plugin-shipped behavior surface.
 
 ## Decision Log
 
-<!-- ACTIVE WORKSTREAM (2026-09-21): the mcp worker conversion — fully ruled in
-     the five entries below (own wire family mcp_request/result/cancel; threads
-     shrink to the 4-rule cross-turn replay spine; broker env-data binding +
-     keychain floor at worker module scope, per-call input credentials retired;
-     mcp-client.worker.ts + mcp-client.types.ts per family grammar). Sequence:
-     commit green worktree first (defineTool refactor → mcp threads + AuthCtx
-     seam), then wire home → worker family red-first → thread spine recut →
-     deletion sweep. Fleet 13 → 6 CLI-surface tools with this move. -->
+<!-- LANDED 2026-09-21 (c8e50827): the mcp worker conversion — see the entry below.
+     Fleet 13 → 6. Remaining: plugin-client + skill-client deletion via ICL. -->
+
+### 2026-09-21 — landed: the mcp worker conversion (commits 9530a83f…c8e50827)
+
+- **Sequence honored (Q5/A):** defineTool bind-late refactor (9530a83f) →
+  mcp threads + ctx.auth seam as-authored (fd490852) → docs (a1da52ef) →
+  the conversion (c8e50827). Superseded-but-landed patterns stay in history.
+- **Landed per the five rulings:** own wire family (mcp_request/result/cancel
+  in workers.constants/types; router routes both request and cancel);
+  mcp-client.worker.ts + mcp-client.types.ts per family grammar; typed
+  authorization_required results echoing the originating request (the
+  replay spine's carrier — the store never saw the request); broker
+  env-data (MCP_BROKER_URL + MCP_BROKER_BOOT_SECRET, MINIMAL: contract
+  unpinned until the broker slice) + keychain floor (tokensKey exported —
+  floor reads StoredOAuthTokens blobs per server); per-call input
+  credentials retired (no auth/headers fields on op inputs); threads =
+  the 4-rule spine (auth-capture only on auth-required, auth-surfacer,
+  auth-retry, replayer; result-cleaner dead; honest {op, input} capture
+  shape, no mcpCall hack); the 7 tools + spec deleted; FLEET_BINDERS → 6;
+  useWorkers map gains the optional mcp family; the mcp-server fixture
+  rehomed to src/workers/tests/ (loopback Bun.serve wrap — real HTTP
+  round-trips, no fetch-swapping seam in the worker).
+- **Tests:** worker spec 6/6 (round-trip, invalid-input errors-as-data, 401 →
+  typed auth + request echo, cancel, timeout, space echo); thread spec 5/5
+  against the real engine; useWorkers gains a full engine→router→worker→
+  loopback round-trip; tools CLI spec re-pinned to fleet 6. Honest TDD note:
+  the router/useWorkers test and the thread-spine negative tests landed
+  against existing implementation (verification-first for those steps —
+  the worker itself was red-first per test).
+- **TOOLCHAIN FINDING (surfaced, not fixed):** the recorded "tsc = 1 known-red"
+  baseline DOES NOT REPRODUCE — pinned TS 7.0.2 reports 215 errors at HEAD
+  (every ajv.compile callsite is TS2349: the TS7 compiler does not treat
+  ajv's ValidateFunction call-signature as callable; store/frontier workers
+  carry identical errors at HEAD). The conversion added only that ambient
+  class, plus zero avoidable new kinds (the one real new error — message:
+  unknown narrowing — was cast away). Pilot call: sweep-fix vs TS version
+  pin vs document-as-known-broken; not decided.
+- **Parked RED spec still untracked:** src/threads/tests/skill-client.spec.ts
+  (frontmatter-validation slice) — imports a not-yet-authored thread library;
+  rides the pilot's review.
 
 ### 2026-09-21 — ruled: commit the green worktree first, then recut (Q5/A)
 
