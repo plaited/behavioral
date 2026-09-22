@@ -154,6 +154,49 @@ ingress + a plugin-shipped behavior surface.
      the conventions skill, docs sweep. Remaining: the deletion sweep (fleet 6 → 0)
      and the governor thread (plugin admission). -->
 
+### 2026-09-21 — verified + ruled: bun-direct execution — the shell worker drops bash; temp-file for large payloads
+
+- **THE PILOT'S CONCEPT, VERIFIED EMPIRICALLY (10 tests + 4 chain/temp tests,
+  installed Bun 1.3.14, macOS):** every worker spawn launches BUN, not bash.
+  Recipes (TS scripts) go bun-direct — `Bun.spawn(['bun','run','-'], {stdin:
+  script})`. Arbitrary commands go through BUN SHELL inside a constant
+  wrapper script (stdin = the wrapper, command via env, `${{raw: cmd}}`
+  passthrough, `.nothrow()` + `process.exit(result.exitCode)` for exit-code
+  fidelity — the naive form throws ShellError and loses the code).
+- **The five load-bearing facts, all verified:** (1) `await $` unpiped
+  output STREAMS live through the process boundary (1/sec producer, first
+  line at 12ms — the docs' "returns Buffers" describes redirected reads
+  only); (2) GROUP-KILL SURVIVES THE WRAPPER — grandchild processes inherit
+  the wrapper's PGID (detached spawn), one `kill(-pid, SIGTERM)` reaps the
+  whole tree, the worker's kill code unchanged; (3) exit codes exact via
+  nothrow; (4) dialect intact (pipes, &&/||, $(…), redirects, multiline);
+  (5) overhead ~6ms/execution — negligible.
+- **CHAIN METHODS (pilot's design constraint):** `.cwd()`/`.env()` thread
+  through the wrapper; `.env()` MERGES over parent env (PATH survives,
+  override-capable); spawn-level env reaches commands unchanged — so the
+  worker's current spawn-level env merge carries through as-is and options
+  stay executor-agnostic DATA on the wire. `.timeout()` does NOT exist on
+  1.3.14 — the worker's own deadline + group-kill remains sole containment
+  (deliberate: it kills trees, not just processes).
+- **TEMP-FILE PAYLOAD CHANNEL RULED IN (pilot):** documented-parts recipe —
+  `os.tmpdir()` + `Bun.write()` + `Bun.file(path).delete()`; the wrapper
+  redirects `cmd < ${Bun.file(EXEC_STDIN_PATH)}` when a payload exceeds the
+  env channel. Verified: 300KB end-to-end, exact byte count, clean delete.
+  Small payloads stay on env (EXEC_CMD/EXEC_STDIN); env-carried text hits
+  ~256KB/macOS limits. Threshold + cleanup-on-kill deferred to the cut.
+- **Consequences:** the PowerShell/Windows interpreter question DISSOLVES
+  (Bun Shell is cross-platform, bash-like, native on win32 — PS-the-language
+  was never the requirement); the dependency graph shrinks to bun alone;
+  the `bash -lc` login-PATH resolution dies (wrapper inherits the worker's
+  process env — tools with PATH only in .bash_profile need a one-time
+  login-PATH merge at worker boot, decided when it bites); the input wire
+  needs op-shape ('run' = stdin TS script vs 'shell' = Bun Shell command —
+  'bun run -' as a shell COMMAND would block on the consumed stdin, the
+  two flavors are indistinguishable post-hoc today).
+- **Input shape ruling pending:** op-discriminated input mirrors McpOp
+  (run | shell); stdin payload channel per flavor (env vs temp-file by
+  size).
+
 ### 2026-09-21 — landed: the links contract pair + the conventions skill (the ICL slice completes)
 
 - **The skill-links threads (8d56f6dd):** extract-links + validate-links as
