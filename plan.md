@@ -154,6 +154,23 @@ ingress + a plugin-shipped behavior surface.
      the conventions skill, docs sweep. Remaining: the deletion sweep (fleet 6 → 0)
      and the governor thread (plugin admission). -->
 
+### 2026-09-21 — ruled: the shell slice — name, wire, cleanup, atomicity (Q1/A, Q2, Q3)
+
+- **Q1/A — the family is `shell`, kinds renamed to family grammar:**
+  `shell_request` / `shell_request_result` / `shell_cancel`. "Tool" lies at
+  fleet 0; grammar completes (`*_request`/`*_result` everywhere); "tool call"
+  becomes free for the model-facing dispatch-bridge layer. `detail.tool`
+  becomes an optional trace `label`.
+- **Q2 — temp-file deletion is SENSIBLE, ALWAYS:** best-effort delete of
+  every payload temp file in the worker's after-path — the `finally` runs on
+  completion AND on kill (timeout/cancel/line-quota), so no orphan files
+  survive any exit; `allSettled`, errors swallowed (tmpdir is the last
+  resort, never the plan).
+- **Q3 — ONE ATOMIC COMMIT:** wire kinds, worker/types rename, op-shaped
+  input, executor conversion, thread-library re-voicing, spec/fixture sweep
+  — the 19-file surface moves together or not at all (threads can't emit
+  shell_request against a tool_call worker).
+
 ### 2026-09-21 — verified + ruled: bun-direct execution — the shell worker drops bash; temp-file for large payloads
 
 - **THE PILOT'S CONCEPT, VERIFIED EMPIRICALLY (10 tests + 4 chain/temp tests,
