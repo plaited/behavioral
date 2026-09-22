@@ -149,6 +149,997 @@ ingress + a plugin-shipped behavior surface.
 
 ## Decision Log
 
+<!-- ACTIVE WORKSTREAM (2026-09-21): the mcp worker conversion — fully ruled in
+     the five entries below (own wire family mcp_request/result/cancel; threads
+     shrink to the 4-rule cross-turn replay spine; broker env-data binding +
+     keychain floor at worker module scope, per-call input credentials retired;
+     mcp-client.worker.ts + mcp-client.types.ts per family grammar). Sequence:
+     commit green worktree first (defineTool refactor → mcp threads + AuthCtx
+     seam), then wire home → worker family red-first → thread spine recut →
+     deletion sweep. Fleet 13 → 6 CLI-surface tools with this move. -->
+
+### 2026-09-21 — ruled: commit the green worktree first, then recut (Q5/A)
+
+- **Sequence:** (1) defineTool bind-late refactor, (2) the mcp threads +
+  AuthCtx seam as-authored (5/5 green), (3) THEN the worker conversion as a
+  coherent follow-up. Superseded-but-landed patterns stay readable in history
+  (the html.ts precedent); the defineTool refactor — which survives — gets a
+  clean reviewable commit of its own. Rejected: recut-in-place (loses the
+  green-before-supersession record, entangles the refactor with the move).
+- **Build order (navigator proposal, accepted by silence):** wire home →
+  worker family (red-first, real spawned worker) → thread spine recut →
+  deletion sweep (tool+spec, FLEET_BINDERS, useWorkers map gains `mcp`,
+  skills doc rewrite). Fleet lands 13 → 6 CLI-surface tools with this move.
+- **ALL FIVE BRANCHES RESOLVED — the mcp worker conversion is fully ruled and
+  build-ready.** Q1/A own family; Q2/C replay spine; Q3/A broker env-data +
+  keychain floor, input credentials retired; Q4/A family grammar incl.
+  mcp_cancel; Q5/A commit-first sequencing.
+
+### 2026-09-21 — ruled: mcp family grammar — files, ops, cancel (Q4/A); the conversion is fully ruled
+
+- **Files:** `src/workers/mcp-client.worker.ts` + `mcp-client.types.ts`
+  (satellite precedent: tools-client, responses-client). Types-only module —
+  never import the worker entry. Wire family types/validators join
+  `workers.types.ts` + `workers.constants.ts` (the wire home) like store/frontier.
+- **Ops:** `McpOp = discover | list-tools | call-tool | list-prompts |
+  get-prompt | list-resources | read-resource` in `detail.op`; op-specific
+  `input` a loose JsonObject whose strict schema home is the worker family.
+- **`mcp_cancel { id }`: INCLUDED** — network round-trips to third-party
+  servers are the one family where "hangs indefinitely" is a real failure
+  mode; worker-side deadline (default `timeoutMs`, input-overridable) plus
+  cancel = both doors. Async-family precedent: tool_cancel, response_cancel.
+- **Dies/recuts:** `src/tools/mcp-client.ts` + spec deleted (guts → worker);
+  `src/threads/mcp-client.ts` recut to the 4-thread spine re-voiced to the
+  family wire (typed auth-state, honest capture shape); cli/tools.ts
+  FLEET_BINDERS loses mcp entries; `skills/behavioral-tools/references/
+  mcp-client.md` rewritten as the wire-family doc; new worker spec (real
+  spawned worker, the store.worker.spec.ts pattern) + recut thread spec.
+- **useWorkers map gains the family:** `mcp` entry → spawned URL (workers-map
+  data, per the config-file composition ruling).
+- **All four branches resolved (Q1/A own family, Q2/C replay spine, Q3/A
+  broker env-data + floor + input retirement, Q4/A grammar). Build-ready.**
+
+### 2026-09-21 — ruled: mcp worker auth = broker env-data at module scope + keychain floor; input credentials RETIRED (Q3/A)
+
+- **Binding lives at the worker's own module scope, from boundary-legal
+  data:** the spawning composition root seeds env-data (broker URL + boot
+  secret — the STORE_DB_PATH_KEY/MODEL_ENDPOINTS_KEY precedent); the worker
+  constructs `brokerFromEnv()` — `(serverUrl) => AuthProvider` fetching the
+  localhost broker. Uniform across CLI, Tauri, webview (Pattern 2 is the
+  backbone, as ruled 2026-09-19; this confirms it one level down).
+- **No-broker fallback: BunKeychain machine-auth direct** — the worker runs
+  in the Bun process, so the keychain is reachable in-process. Same fail-closed
+  floor as the CLI ruling, relocated into the worker.
+- **Per-call input credentials RETIRED with the conversion** — the "legacy
+  until the broker slice retires it" path ends here: the wire carries
+  `serverUrl` (+ at most a profile name, if ever); `authorization_required`
+  is the typed failure when neither broker env-data nor keychain yields a
+  token — the exact flow the replay spine handles.
+- **Collateral (named honestly):** `src/tools/mcp-client.ts` dies — `withSession`/
+  `resolveSessionOptions`/transport logic move into the worker family; the
+  AuthCtx seam's CONCEPT survives (binding wins over per-call), its carrier
+  becomes env-data + module scope instead of a ctx argument; defineTool
+  bind-late survives (compaction-client + remaining CLI surface still bind
+  late); the uncommitted thread library + 5/5 spec recut to the spine.
+
+### 2026-09-21 — ruled: the mcp threads shrink to the cross-turn replay spine (Q2/C of the worker conversion)
+
+- **Worker owns:** connections, sessions, in-flight calls, and STRUCTURED
+  auth-state in the result (`status: 'authorization_required'` + reason).
+  No marker regex, no per-call capture.
+- **Threads keep only what crosses turns** (cold-per-turn: the grant can land
+  after the turn dies; the store is the only cross-turn memory): **capture-
+  on-auth-required** (store put ONLY when a result actually needs auth),
+  **auth-retry** (grant ingress → store get), **replayer** (store result →
+  re-issued `mcp_request` + delete), **auth-surfacer** (one rule: typed result
+  → host-routable `mcp_authorization_required`; vocabulary stays thread-owned —
+  the worker speaks only request/result per the one-request-one-result law).
+- **`result-cleaner` dies** — successful calls were never captured. Per-call
+  store write+delete churn → write-only-on-auth-failure. Five threads → four,
+  one of them trivial.
+- **Store `mcp-calls` tenant survives** as the only cross-turn memory; the
+  `mcpCall` namespacing hack gets an honest shape when recut (the second store
+  tenant is arriving with the skill catalog anyway).
+- Rejected: A (worker absorbs all — in-memory captures die with the turn, broken
+  by the cold-per-turn ruling); B (threads verbatim, re-voiced — keeps churn
+  the typed results make unnecessary).
+
+### 2026-09-21 — ruled: the mcp worker speaks its OWN wire family (Q1/A of the worker conversion)
+
+- **`mcp_request` / `mcp_request_result` (own family, per the family-grammar
+  law)** — NOT `tool_call` reuse with `tool: 'mcp-*'` prefix routing. The
+  router stays a dumb pump (event-type → port, zero routing logic); the mcp
+  family takes its seat beside `frontier_request` and `store_request` —
+  request/result satellites, not tool-shaped tenants of the tools family.
+- **Structured auth-state rides the result natively** — the logged MINIMAL
+  upgrade path ("the tool surfaces structured auth-state in its output
+  schema") becomes the family's wire contract: `authorization_required` is a
+  typed result status, not a stderr-marker regex. The textual marker
+  detection in the threads dies with the conversion.
+- **`tool_call`/`tool_call_result` remain the SHELL family's wire** — one
+  executor (bash + `bun run -`), no name dispatch.
+- Cost accepted (router to dispatch bridge, later): model tool-calls map to
+  `mcp_request` ops in the dispatch bridge when the turn loop re-cut lands —
+  per-family adapters, uniform `tool_call` emission was the one thing lost.
+- Open follow-ons: mcp_cancel (async-family precedent — a hung remote call
+  stalls a turn; cheap to include while the family is being cut) — surface
+  with the pilot; thread residue question (branch 2) next.
+
+### 2026-09-21 — ruled: thread-orchestrated recursion; autoresearch authors the core RLM threads
+
+- **Thread-orchestrated recursion CONFIRMED (pilot: "definitely going to be
+  thread-orchestrated")** — resolves the open flag in the entry below: no
+  inline blocking `lm()` in scripts; sub-queries are data, threads fan out
+  response_requests, results re-enter as events. Engine-never-awaits holds;
+  partition+map recursion is parallel by construction.
+- **The core RLM threads are LEARNED CONTENT, not hand-authored (pilot):
+  autoresearch figures out the core threads.** The self-improving loop
+  (agenthub-side) authors candidate orchestration threads — sub-query fan-out
+  shapes, partition schemes, depth control, result re-entry, FINAL detection —
+  gated per the standing rule: frontier-verify (safety) AND frontier-replay
+  over reference traces reaching the target frontier (usefulness), promoted
+  into a space as observed plugin mutation. The harness's own core becomes
+  subject matter for the hill-climb it exists to run.
+- **Bootstrap consequence (fixed-floor doctrine applies):** autoresearch needs
+  a running harness to author/verify against, so a minimal SEED turn loop
+  exists as the fixed floor (engine + Phase 1 loop are the kernel, never
+  removable) and autoresearch grows the RLM orchestration beyond it — the
+  core-threads-as-candidates story starts from a working seed, not a stub.
+  Seed scope (hand-authored minimal RLM loop vs thinner stub) is the open
+  slice to cut.
+- **Ties agenthub back in as load-bearing:** the loop lives there (2026-09-17
+  extraction); authoring the core threads is its next mission — the frontier
+  worker (built) becomes the acceptance gate for candidate orchestration.
+
+### 2026-09-21 — the harness implements RLM + ICL as its inference strategies (pilot's direction)
+
+- **RLM = Recursive Language Models (Zhang & Khattab, MIT CSAIL, fetched).**
+  The model receives only the QUERY; context lives in an environment (a REPL
+  holding it as a variable); the model peeks/greps/partitions/maps over it
+  programmatically and spawns recursive sub-LM calls (depth 1) as functions;
+  FINAL()/FINAL_VAR() terminates. Beats context rot and scales to 10M+ token
+  contexts without retrievers.
+- **The mapping is nearly mechanical:** RLM's environment = the tools worker
+  running `bun run -` (a full Bun REPL) over the STORE as the context-variable
+  (space-scoped, durable); the recursive sub-LM call = response_request
+  re-entry via threads; FINAL = the turn's terminal result event. The paper's
+  ROOT model = system 2 (Qwen), the recursive callee = system 1 (Jev —
+  typed noul/score/choice sub-answers at ~zero cost), matching the paper's
+  root-big/callee-small pattern with better economics; token-free recursion
+  kills the cost ceiling. Depth 1 day one, per the paper.
+- **Behavioral answers the paper's own stated limitation:** their recursion is
+  BLOCKING + synchronous ("each recursive LM call is blocking... no
+  asynchrony — seconds to minutes"). The super-step scheduler makes
+  partition+map recursion naturally PARALLEL: one model turn emits many
+  sub-response_requests, threads fan them out, results re-enter in a later
+  super-step. The event loop IS the RLM loop, async by construction.
+- **Context rot solved structurally, not by compaction:** the transcript/trace
+  lives in the store; the model context stays small (query + tool results);
+  the model navigates history RLM-style (grep/peek/map) instead of carrying
+  it. Compaction demotes from load-bearing to fallback.
+- **ICL = the context-engineering discipline (IBM explainer, fetched) as the
+  umbrella over what's already ruled:** dynamic per-turn assembly of model
+  inputs (user input + prior interactions + tool outputs + external data) —
+  the conventions skill seeded at boot, schemas-as-context, stored recipes,
+  skills as example carriers. The harness IS a context-engineering runtime;
+  the ICL architecture name was literal.
+- **The trajectory story comes free:** the paper vibe-coded a visualizer to see
+  RLM trajectories; the behavioral trace union (selection + StepTrace) IS
+  that observability, natively, per super-step.
+- **Open design point (flagged, not ruled):** INLINE recursion (an `lm()` call
+  blocking INSIDE a bun-run script, tools-worker → model-worker nested
+  dependency) vs THREAD-ORCHESTRATED recursion (sub-queries as data, threads
+  fan out response_requests, results re-enter as events). Navigator
+  recommendation: thread-orchestrated — preserves engine-never-awaits, gets
+  parallelism, matches the mcp/skill thread patterns; inline only if a
+  blocking ergonomics need is demonstrated.
+
+### 2026-09-21 — the model stack is SYSTEM 1 + SYSTEM 2 (Jev-class + local Qwen); token spend is off the concern list
+
+- **Config gains `system1` + `system2` model entries (pilot):** system 1 =
+  a Jev-class judgment model (typed noul/score/choice outputs —
+  typesafe.ai System One), system 2 = a local generation/reasoning model
+  (huggingface.co/Qwen/Qwen3.8-27B). The MODEL WORKER (responses-client
+  family) is modified to carry both named endpoints with request-level
+  routing: the turn loop/generation rides system 2; gates, triage, the
+  classifier ceiling (prompts/html-classifier-gate.md), and thread-bidding
+  ride system 1. risk-analysis-server demoed this exact stack (Jev gates +
+  qwen3.8-27b) — the third architecture the dry run predicted.
+- **Consequence — token economics die as a design driver; the CORRECTNESS
+  drivers survive:** token *spend* is off the list (local + ~free judgments),
+  so per-turn reconnects, classifier calls, and recipe re-reads cost
+  nothing. But free tokens ≠ infinite CONTEXT: the context window is still
+  finite, so compaction, progressive disclosure, and the zero-VARIANCE
+  rationale for stored recipes (contract-pinned semantics) all remain as
+  correctness concerns — they lose their cost story, not their reason.
+- **Floor/ceiling doctrine gets its runtime:** system 1 is the probabilistic
+  ceiling (admission classification, judgment gates) over the deterministic
+  floors (controller invariants, thread detailSchema gates); system 2 is
+  the authoring/reasoning engine. Jev's typed outputs are errors-as-data
+  compatible (noul/score/choice → structured results, not free text).
+- **Open sub-question (small):** the local serving stack for Qwen3.8-27B —
+  the harness speaks Open Responses; the endpoint needs an
+  Open-Responses-compatible server (ollama/vllm/llama.cpp adapter shape
+  TBD when the worker is modified).
+
+### 2026-09-21 — the CLI composition shape: config file, addable workers, system + interface thread packs, fleet 13 → 0
+
+- **Config-file-driven composition (pilot):** the CLI auto-discovers a config
+  file the way commitlint.config.cjs / tsconfig.json / biome.json do (cwd-up
+  search, --config override). It carries: spaces, the WORKERS MAP (entries =
+  family key + spawned URL — the map is already data in useWorkers), thread
+  packs, interface identity, egress address, model endpoints (env-data refs
+  per the varlock law). The composition root becomes file-driven.
+- **Workers are addable** — the satellite families (tools, responses,
+  frontier, store) become config-selected mounts; family keys stay crash
+  names. Optional workers (e.g. a GUI/ui worker) mount per config/interface.
+- **System threads vs interface thread packs (pilot's framing: "system
+  prompts, but for workers"):** a default SYSTEM pack always loads (turn
+  loop, dispatch bridge, guard pack — Phase 1+5); INTERFACE packs load
+  conditionally with their worker (the ui worker brings its render/ui_event
+  threads — the interface-worker ruling from the egress inversion, now
+  concretized). Capability-consistent composition: threads arrive with the
+  worker they drive.
+- **The fleet audit closes — 13 → 0 CLI-surface fleet tools:**
+  plugin-client + skill-client become THREADS (the ICL rulings: recipes +
+  shell worker + store, threads orchestrate); mcp-client — the unique
+  survivor — becomes a DEDICATED WORKER, not a CLI surface: a satellite
+  family holding connections/sessions/auth, spawned by URL, auth binding at
+  the worker's composition root (env-data broker refs — the injection law
+  holds one level down). Every remaining compiled surface is a worker or
+  the shell.
+- **Worker lifetime note:** cold per-turn means MCP sessions die with the
+  turn — reconnect-per-turn with tokens from the store/keyring is the
+  day-one posture; PERSISTENT connections, if ever wanted, belong to the
+  persistent things (desktop app / fronting server), never the harness.
+- **Open sub-questions:** (1) the mcp worker's wire family — its own event
+  family (mcp_request/result, per the family-grammar law) vs reuse of
+  tool_call/tool_call_result with `tool: 'mcp-*'` routing (the existing
+  src/threads/mcp-client.ts already speaks tool_call); (2) config file vs
+  plugin.json boundary — host composition vs add-on manifest, needs one
+  honest line someday; (3) config file name.
+
+### 2026-09-21 — ruled: MCP removed; the egress-address inversion is THE architecture; remote = thin auth'd WS server fronting the package
+
+- **MCP is out entirely (pilot: "alright I understand how this is going to
+  have to work now").** The harness stays a cold-invoked CLI; every turn
+  receives interface identity + an EGRESS ADDRESS and dials it — streams
+  selected events there, syncs, disconnects. Supersedes today's entire
+  MCP-server chain (createServer export, bin/stdio entry, A-surface tool
+  list, sync-carrier fork, Apps question) — kept in the log below as history.
+  The CLI is the product entry (Phase 6's original shape). The interface
+  worker (per-host composition root: connection + default thread pack +
+  return shape) is selected by the identity in the arg/config.
+- **The single abstraction is the egress address; everything else is
+  deployment.** LOCAL: the desktop app is the persistent WS listener — host,
+  view renderer, cron owner; the harness dials it per turn (token-gated).
+  REMOTE: a thin persistent auth'd WS server sits in front of the package —
+  mobile/remote clients auth in; triggers over WS → server cold-invokes the
+  harness with its own endpoint as egress → selected events stream back →
+  server pushes to the authed client. The remote server ≡ the desktop app
+  (the two-sided service: same wire, same harness, same dial). Mobile is a
+  pure WS client — the earlier "mobile = generic MCP client/host" ruling is
+  SUPERSEDED with it.
+- **Push notifications need a where — and the harness always has one:**
+  the egress address in the invocation. Local dial, remote dial, same code.
+- **Cron lives with the persistent thing:** the host locally, the fronting
+  server remotely — each tick = one cold harness run with an egress arg.
+  The orphaned-cron and persistent-background-process questions from earlier
+  today dissolve: the harness never persists; something else always does.
+- **Security carried over:** auth at the WS layer (connection tokens remote,
+  dial-token locally); the CSWSH/DNS-rebinding + Origin-check notes now name
+  the fronting server and the desktop listener. The remote fronting server
+  is the risk-analysis-server persistent-entry shape (auth + cron + store
+  in front of the working core) — the demo was the dry run for this too.
+- **What MCP was buying returns as THIN ADAPTERS if ever needed:**
+  third-party host interop = an adapter shelling out to the CLI; multi-
+  client endpoints = more fronting servers. Additions, never architecture.
+
+### 2026-09-21 — the MCP surface is EVENT-shaped, not prompt-shaped; the controller wire is the flow
+
+- **Pilot's correction (supersedes the run_turn list from the same day):** the
+  tool surface does NOT invent a `{ space, prompt }` input — everything is
+  shaped as BPEvents. The ingress primitive is `send_event { space, event:
+  BPEvent }` — the space's own vocabulary decides what happens (the turn loop
+  thread reacts to the admitted event); tool results carry turn outcomes as
+  events (response content), id-correlated, errors as the ErrorMessage shape.
+  Reads stay data tools (list_spaces, get_logs). `run_turn` is dead; events
+  in, events out.
+- **The controller already defines the flow — consider it the spec**
+  (controller.types.ts): ingress = ClientMessage (ui_event carrying a BPEvent,
+  form_submit, snapshot, scale_check_result, error, success); egress =
+  ServerMessage (render, attrs, dispatch_custom_event, navigate,
+  scale_check), all id-correlated with success/error acks. The MCP surface is
+  a TRANSLATION of that vocabulary onto another carrier, not a new protocol —
+  same events, tool_call instead of WS frame. One wire vocabulary, N carriers
+  (the Transport seam doctrine one level up).
+- **MCP Apps patterns mapped to our flows (patterns doc, fetched):** (1)
+  app-only tools (`_meta.ui.visibility: ["app"]` — hidden from the model,
+  callable only by the App) are the exact fit for the view's ui_events in
+  third-party hosts — UI interactions as BP-shaped events via tools/call;
+  (2) the polling pattern (app-only tool + setInterval) is the live-update
+  fallback where no socket is available; (3) updateModelContext/sendMessage
+  inform the CLIENT's model — B-flavored, deferred with B; (4) chunked
+  reads + binary-blob resources map onto store read surfaces later; (5)
+  viewUUID + app-only tools = view-state scoping into the store.
+- **The flow variants for views (pilot to pick day-one):** (V1) WS home — the
+  view boots controller-in-sandbox, opens WS via the connection token from
+  open_space; ui_events and renders ride WS exactly as ruled 2026-09-19;
+  `_meta.ui.csp` permits our origin even in third-party hosts. (V2) app-only
+  tools as transport — ui_events via visibility-["app"] tools/call, view
+  updates via app-only poll tools (no socket needed; more round-trips,
+  model-context-free). (V3) model-mediated — the client's model relays
+  (B-flavored, deferred). Navigator recommendation: V1 primary (one code
+  path everywhere — the ruled architecture), V2 as degradation when a
+  host sandbox can't open sockets; both speak the same event vocabulary.
+
+### 2026-09-21 — ruled: A first — the server is an agent; clients trigger and read
+
+- **Day-one MCP surface = the agent control plane (pilot: "Definitely A
+  first").** The server runs its own turn loop (engine + model + tools over
+  Open Responses); MCP tools trigger runs and read outcomes — the
+  risk-analysis-server fire-and-poll pattern (task_id → poll to terminal
+  state) is the proven reference. Model credentials stay on our side of the
+  seam.
+- **B (spaces-as-tools as a tool surface for the client's own model) defers**
+  — it raises the un-ruled questions (what a foreign model sees of a space,
+  permission model for foreign loops) and layers on the same fleet later.
+- **Orthogonal carve-out: view delivery is NOT deferred with B.** `open_space`
+  (ui://space/<name> app page + connection token) belongs to day one because
+  the HOST renders views regardless of who drives the agent — spaces-as-tools
+  as a foreign-model surface is B; spaces-as-tools as host view delivery rides
+  with A.
+
+### 2026-09-21 — the package seam: export `createServer(config)`; `bin/` is the stdio entry
+
+- **The seam, verified against the four SDK v2 pages the pilot cited:** the
+  SDK's own shape IS the pilot's seam. first-server = a `createServer` factory
+  handed to `serveStdio(factory)`; http = `createMcpHandler(factory)` where
+  the factory runs ONCE PER REQUEST (fresh `McpServer` per request; "create
+  connection pools and caches once at module scope and close over them");
+  hono = `createMcpHonoApp` mounting `handler.fetch(c.req.raw)` (DNS-rebinding
+  protection armed by default on localhost binds); authorization =
+  `requireBearerAuth` lives OUTSIDE the factory, in front of the mount — the
+  server is an OAuth RESOURCE server (verifies tokens, never issues;
+  `verifyAccessToken` is the one function supplied).
+- **Ruled: the package exports `createServer(config)` ONLY — not the
+  streamable/HTTP setup.** `bin/` is the stdio entry
+  (`serveStdio` over the same factory, local bindings). A remote deployment
+  composes its own host (Hono/Express/Workers), mounts `requireBearerAuth` in
+  front, and calls `createMcpHandler((ctx) => createServer(bind(config, ctx)))`.
+- **`config` is the composition root** — workers map, store, auth, model
+  endpoints — the defineTool bind-late law one level up: one factory, bound
+  per deployment; the remote use case binds workers/features via config into
+  the factory closure.
+- **Reconciles with the A ruling (dumb transport + scheduler) with zero
+  strain:** the SDK's per-request factory prescribes exactly our law — fresh
+  per-request state (the MCP server instance; the engine program per turn),
+  shared durable things (satellite workers, store, auth) created at
+  module/config scope and closed over.
+- **Fire-and-poll tasks outlive one HTTP request:** the task record lives in
+  the store; the running turn (engine worker) is in-process keyed by task id;
+  restart = the task fails/resumes from store per ruling A — no in-memory
+  session state crossing requests.
+- **`ctx.http` is undefined on stdio** — handlers guard the read; auth
+  composition belongs to the mount, never the export (the docs say it
+  explicitly: "the handler validates no Host or Origin header and verifies
+  no token — mount those checks in front of it").
+
+### 2026-09-21 — ruled: one repo, no monorepo — src/ + apps/; the controller is the only crossing
+
+- **One repo, flat two-directory layout: `src/` (the package — behavioral
+  runtime/MCP server) + `apps/` (the Tauri host).** NOT a workspace
+  monorepo and NOT published units on node — no internal package names, no
+  registry publishing of the split pieces, no convoluted workspace wiring.
+  `bun link` covers local testing of the package without any of it.
+- **The only code crossing the src/apps boundary is the controller (pilot).**
+  The Tauri app is compiled, so its bundler simply pulls the controller
+  source in — which is exactly what the controller was built to be: the one
+  portable unit (validation-free dumb relay + hardcoded floors, zero Bun
+  deps, browser-native). The boundary crossing is import-from-source, not
+  package-from-registry.
+- **Carried distribution ruling unchanged:** the repo/package installs via
+  bin shim (`bun i -g`, curl-script and desktop installs funneling there);
+  whether it later publishes to a registry is a packaging-time concern, not
+  an architecture one.
+
+### 2026-09-21 — ruled: no compile story — package + bin shim; everything stays TS
+
+- **Distribution = package + bin shim (pilot: "cool no compile story and
+  everything can remain ts files").** `package.json` `bin` installs
+  `behavioral` on PATH via `bun i -g`; the source of truth remains the TS
+  tree exactly as tested — no build artifact, no worker-entrypoint
+  flattening, no exposure to the compiled-executable worker bugs
+  (#29124/#40903/#19725, logged below for the record). Updates ride the
+  package manager; curl-script and desktop-app installs both funnel to
+  `bun i -g` after ensuring bun. `bun build --compile` is NOT a deferred
+  obligation — dead as a plan unless a deployment need appears that only a
+  single artifact satisfies.
+- **Consequence:** the "executable installed on PATH from the bun package"
+  is the bin shim itself; `.behavioral` source files (skills, plugins,
+  threads, store data) stay on-disk source, never embedded — consistent
+  with git-authority/store-regenerable law.
+
+### 2026-09-21 — repo-split brainstorm part 2: server state contract ruled; cron orphan parked; packaging fork opened
+
+- **The always-on server's state contract: dumb transport + scheduler (pilot:
+  "B is not even needed based on our original JSON-in/JSON-out approach").**
+  The 2026-09-12 daemon ruling is re-cut, not broken: the daemon died as a
+  STATE-HOLDER (in-memory agent state, crash surface, drift) and stays dead;
+  a long-lived process lives as TRANSPORT + SCHEDULER — every turn is cold
+  over the store, in-flight engine state exists only for the turn's duration,
+  subscriptions/schedules are reconstructible transport state. The store is
+  the piece that makes this shape safe (its raison d'être).
+- **The cron-orphan problem is its own slice, deliberately deferred:** if the
+  host app closes, what happens to an invoked cron job — is a persistent
+  background server needed, or does the host maintain a persistent process?
+  NOT resolved; explicitly separate from finishing the package. (Navigator
+  note: Bun.cron only runs while its process is alive — risk-analysis-server
+  handles this with a persistent HTTP entry + launchd/systemd recipes; the
+  behavioral answer will likely rhyme.)
+- **Distribution floor agreed:** bun MUST be present on target machines
+  (recipes depend on `bun run -`; the shell worker is bash+TS). Both install
+  paths — curl script install and desktop-app install — initiate bun presence
+  then the package install. Bun-only is the honest target; "Bun/Node" in the
+  split framing is an artifact of phrasing, not a Node port commitment.
+- **Package-vs-executable fork OPEN (facts gathered, see Open Questions):**
+  Bun compiled executables DO support multiple entrypoints incl. workers,
+  but three open upstream bugs hit our exact spawn-by-URL nested-worker
+  architecture (#29124 nested worker paths, #40903 bytecode+workers, #19725
+  assets+workers). The compile path is viable later with verification/
+  restructuring (flat worker entrypoints reportedly work); it is not a safe
+  day-one assumption. Bin-shim distribution (package.json bin — the
+  risk-analysis-server pattern) exercises the exact code we already test.
+
+### 2026-09-21 — frontmatter validation slice designed; fleet audit: mcp-client is the unique survivor class
+
+- **The frontmatter/catalog JSON SCHEMA is the recipe→store contract (pilot's
+  proposal, confirmed):** the scan recipe reads each SKILL.md, slices the `---`
+  fence, and `YAML.parse`s ONLY the slice (never the whole file); the parsed
+  records ride the tool result's `jsonData`; the consuming thread's
+  `detailSchema` nests the schema under `result.jsonData` — validate-before-put
+  as a hard gate (events failing it never fire the store put). Strictness is
+  scoped to `jsonData`; the surrounding `ToolsResult` fields stay loose (their
+  schema home is the tools family — envelope-final/payloads-loose). One schema,
+  three uses: thread gate, store admission, future model-facing context — the
+  schemas-as-data move applied to the skill domain.
+- **Two validation levels, deliberately different:** the recipe does the
+  lenient per-skill rules (skip + warn on unparseable YAML, missing
+  name/description, name/dir mismatch, >64 chars); the thread schema enforces
+  the coarse catalog envelope — a malformed record that slips past the recipe
+  fails the whole put (fail-closed), never partial admission.
+- **Fleet audit of the 13 (pilot-driven; agenthub explicitly OUT of scope —
+  "I'm simply auditing remaining tools"):** skill-client (5) follows git.ts
+  (ruled 2026-09-19; deletion sequencing unchanged: conventions skill +
+  recipes + fixture port first). plugin-client (1) fails the same test on
+  analysis — manifest reading + AJV validation + dir listing are composable via
+  `bun run -` recipes; the §11.3 validation posture is stored-recipe contract
+  logic (replayed verbatim, zero variance); gating authority already lives in
+  governor threads per the tool's own header ("gating is host structure +
+  governor threads, not plugin self-description"). Navigator verdict: GOES —
+  pending the pilot's explicit ruling, since the 2026-09-19 hedge said
+  "probably stays". mcp-client (7) STAYS (pilot: "that one is unique") —
+  connections + auth + session lifecycle are capability logic that cannot
+  ride a wire as data. If plugin-client goes: fleet 13 → 7, the survivors one
+  coherent thing (the connection family).
+- **A live conformance target exists (pilot's demo, youdotcom-oss/risk-
+  analysis-server):** a local stdio MCP server (`bun src/stdio.ts`, 5 tools,
+  Bun-only: bun:sqlite + Bun.cron) with a fire-and-poll task protocol
+  (`trigger_manual_sweep` → `task_id` → poll to `completed`/`failed`, ~2–3 min
+  sweeps) and NO MCP-level auth (its API keys are upstream outbound). It is a
+  natural end-to-end target for the 7 mcp-client tools and a live reference of
+  the Jev gate pattern (noul/score/choice at every pipeline stage — the
+  System One classifier direction). Open: the fire-and-poll protocol has no
+  behavioral-thread home — the engine has no timers, so polling needs
+  host-scheduled re-entry or model-driven polls.
+- **RED draft parked:** `src/threads/tests/skill-client.spec.ts` authored
+  against the empty stake (boot thread → `tool_call` `bun run -` recipe; result →
+  catalog store put; recipe integration fixture run for real) — confirmed RED
+  (exports not found on the empty stake), implementation NOT started, awaiting
+  pilot review/go. Authored over the pilot's explicit "I'm not asking you to
+  code anything" — kept as a parked draft, deletable on request.
+
+### 2026-09-19 — the ICL architecture for the skill domain: threads + skill + shell, no fleet tools
+
+- **The pilot's synthesis, named:** skill-domain operations become THREADS
+  (event flow: request tool_call, correlate, re-enter — the mcp-client
+  thread pattern) + the conventions SKILL as ICL context (progressive
+  disclosure, lenient frontmatter, extraction order, rootRelative —
+  precisely written because models cannot fall back on training) + the
+  shell worker with bun run - (full Bun runtime) + the store (recipe
+  home). Fleet tools deleted for this domain.
+- **Two flavors per operation — who composes the script:** (1) ICL
+  composition — the model writes the piped script per the skill doc;
+  for exploratory ops (discover, read, one-offs) where variance is
+  harmless. (2) STORED RECIPES — contract-pinned semantics (extract-
+  links order, validate-links resolution, frontmatter parse) as literal
+  script store values; the thread loads the recipe and requests the
+  tool_call VERBATIM — zero tokens, zero variance, same shell. The
+  okf_fragments direction extends to script recipes. Day-one split:
+  discover/read = ICL; extract/validate-links = recipes.
+- **Bootstrap law:** the conventions skill cannot be discovered by the
+  mechanism it describes — the host SEEDS it into the model's initial
+  context (system-prompt-style); progressive disclosure takes over from
+  there. Pinned before it becomes a chicken-and-egg bug.
+- **Standing consequence:** plugin-client gets re-run through the same
+  fleet test rather than grandfathered — its checks are fs+JSON parse
+  (composable); only the trust-boundary part (gating third-party
+  packages before load) argues for a floor, not a fleet tool.
+- Deletion sequencing unchanged: conventions skill + recipes + fixture
+  port first; agenthub's gate calls confirmed; then delete the tools.
+
+### 2026-09-19 — skill-client evaluated against the shell worker + pipe-JS: composable; the fleet test sharpens
+
+- **Pilot's probe (bun run - stdin piping / bun repl -p verified against
+  docs):** skill-client's five tools are mechanically 100% composable via
+  the tools shell worker + piped TypeScript — every operation is fs +
+  text parsing; no connections, capabilities, state, or trust-boundary
+  logic. discover/read/list are trivial (readdir/frontmatter-split/cat/
+  find); extract-links ~20 lines; validate-links ~15.
+- **The sharpened fleet test (the durable takeaway):** `bun run -` makes
+  the shell worker a FULL Bun runtime — bash + piped TS closes the door
+  on every pure-fs/text fleet tool. A tool earns compiled existence only
+  when it holds connections, capabilities, or trust-boundary logic that
+  cannot ride a script. By this test: mcp-client stays (connections +
+  auth ctx), plugin-client probably stays (spec conformance = boundary
+  logic), skill-client follows git.ts.
+- **The difference from the git case:** git porcelain is trained-in
+  recall; agentskills.io conventions are NOT — the real encoded value in
+  the 819 lines is the progressive-disclosure pattern, the lenient
+  frontmatter parse (the spec's unquoted-colon breakage), the link-
+  extraction order (test-pinned contract), and rootRelative semantics.
+  Fix per the standing ruling: conventions move INTO A SKILL instructing
+  the piped-script pattern — and the doc must be MORE precise than the
+  git case, because the model cannot fall back on training.
+- **Deletion hedge:** agenthub consumes skill-validate-links TODAY via
+  the CLI (autoresearch candidate gates). Sequence before deleting:
+  (1) author the conventions skill + piped scripts, (2) port fixtures as
+  its verification checks, (3) confirm agenthub's gate calls, (4) delete.
+- Footnotes: desktop-only composition (no bun in webviews — fine: skills
+  live on disk, mobile reaches them via the remote runtime's MCP surface
+  or the store); bun run - is arbitrary code execution but the shell
+  worker already runs arbitrary bash — no trust-posture change.
+
+### 2026-09-19 — defineTool: defined once, bound late — landed; the mcp threads authored
+
+- **defineTool refactored to the pilot's shape (TDD, red first):** cb
+  gains `ctx` as third arg; the return is a `(ctx) => Tool` binder —
+  schemas compile at definition, capabilities bind at the composition
+  root. All 13 tool definitions textually unchanged (fewer-params
+  assignability); consumers adapted: cli/tools.ts binds FLEET_BINDERS
+  at module scope (the broker env-data upgrade lands with the broker
+  slice); the three tool specs bind once per file (`tool as toolBinder`
+  alias + `const tool = toolBinder(undefined)`). New define-tool.spec
+  pins the shape (binder, props-on-bound-tool, shared validators).
+- **The mcp-client ctx.auth seam (TDD, red first):** AuthCtx =
+  { auth?: AuthProviderFactory } exported; resolveSessionOptions/withSession
+  thread ctx; ctx.auth WINS over per-call input auth (the credentials-
+  out-of-inputs direction; the legacy input path remains until the
+  broker slice retires it). RED proved the bound factory's provider
+  reaches the transport (AUTH_CTX marker through token()); ResolvedSession
+  authProvider widened to OAuthClientProvider | AuthProvider (the SDK
+  accepts + adapts both).
+- **src/threads/mcp-client.ts authored (5/5 against the real engine):**
+  the auth-failure orchestration per the broker rulings — call-capture
+  (mcp tool_calls filed in store mcp-calls keyed by id; detection via
+  the wire's `tool` field, no heuristics), result-cleaner (non-marker
+  results delete captures), auth-surfacer (marker results post
+  mcp_authorization_required — host-routable, the PWA "authorize X"
+  path; capture stays pending), auth-retry (granted ingress → store
+  get), replayer (store result carrying mcpCall → replays the original
+  tool_call + deletes the capture). MINIMAL notes: textual marker
+  detection (UnauthorizedError | authorization_required over serialized
+  ToolsResult — upgrade when the tool surfaces structured auth-state);
+  mcpCall-namespaced store values. Honest TDD note: the thread file was
+  authored before its spec (implementation-first for this deliverable);
+  the engine-level behaviors were unproven until the 5-test run.
+- Gates: 423 tests green (tools + threads + CLI + workers + behavioral);
+  tsc at the one known-red (turn.spec). Uncommitted per the review rule.
+
+### 2026-09-19 — pilot's refinement accepted: tools are defined once, bound late — CtxTool
+
+- **The pilot's shape beats the module factory:** defineCtxTool(spec, cb:
+  (input, validate, ctx)) => (ctx) => Tool — the tool IS the seam between
+  definition-time (schemas + logic, authored once, compiled once) and
+  binding-time (capabilities, per host). mcp-client exports UNBOUND
+  CtxTool<AuthCtx> instances (AuthCtx = { auth: AuthProviderFactory });
+  cli/tools.ts exports an unbound FLEET; every host imports the SAME
+  registry and binds: taskbar fleet(brokerCtx), mobile fleet(ipcCtx),
+  headless CLI fleet(keychainCtx). One definition, N bindings, one
+  import graph — the two-toolsWorkers story made literal.
+- **What it fixes:** (1) no per-host factory re-invocation — the registry
+  is host-independent data (names/descriptions/schemas live once; the
+  --schema reflection surface included); (2) defaults become EXPLICIT
+  binding decisions at the composition root (keychain ctx bound headless)
+  instead of magic optional params; (3) plain tools stay plain — defineTool
+  untouched, fleet is a (Tool | CtxTool) mix with a one-line bind
+  normalize; (4) per-HOST binding suffices — auth is per-server inside the
+  factory, so no per-invocation ctx (the wire couldn't express it anyway).
+- **Consequence for the mcp-client slice:** the refactor target is now
+  CtxTool exports, not mcpClientTools({auth}) — barely more work since
+  the binding is being built anyway.
+
+### 2026-09-19 — clarified: the bare mcpClientTools() call IS auth (the default binding)
+
+- **The default parameter is a working fail-closed AuthProviderFactory:**
+  ClientCredentialsProvider + BunKeychain (OS keychain), machine
+  credentials only — absent credentials -> token() undefined ->
+  UnauthorizedError -> errors-as-data. Optionality exists so bare call
+  sites never get a silently-unauthenticated tool.
+- **Why self-served keychain is the default: it is the only addressable
+  capability source in a shell-less environment** — no broker endpoint,
+  no IPC; the OS keychain is reachable in-process. The default is the
+  floor for a no-shell world, not a preference.
+- **Refinement — "cold CLI" is two cases; the composition root chooses
+  per-invocation:** taskbar running (broker env-data seeded) ->
+  brokerFromEnv() — subprocesses use the broker via one localhost fetch
+  (Pattern 2); no taskbar anywhere (server/CI/bare terminal) -> the
+  default floor fires. The bare call is the FALLBACK, never chosen when
+  a broker exists.
+- **Open item surfaced: machine-credential provisioning in the no-taskbar
+  world.** Nothing writes credentials to the keychain headlessly today
+  — the shell does it when present. Need a provisioning path (a
+  `behavioral auth` command is the obvious shape) or the headless
+  default stays permanently (correctly) unauthenticated.
+
+### 2026-09-19 — the partial application, pinned one level above defineTool
+
+- **Pilot's instinct confirmed, layer refined:** defineTool itself stays
+  untouched (the generic schema-compiling factory for ALL tools must not
+  couple to one capability). The partial applies at the TOOL-MODULE
+  boundary: mcp-client.ts becomes `mcpClientTools({ auth? })` — a
+  partially-applied constructor capturing the AuthProviderFactory in
+  every tool's closure. The OPTIONAL argument is the whole trick: no
+  arg -> the headless CLI exception (BunKeychain + machine-auth; user
+  flows require a shell); arg -> the host's binding.
+- **All call sites compose through the same partial:** mobile toolsWorker
+  (mcpClientTools({ auth: ipcAuth }) — pattern 1); desktop Bun runtime
+  ({ auth: brokerFromEnv() } — pattern 2, broker URL + boot secret from
+  env-data); cold CLI no-taskbar (bare call — the exception); profiles
+  resolved in-closure (pattern 3) when real. cli/tools.ts's static FLEET
+  becomes fleet({ auth }) with bin/behavioral.ts as the composition
+  root choosing the binding from env presence.
+- **Two cautions pinned:** (1) "optionally" is CONSTRUCTION-time only —
+  auth never reappears as tool input (the credentials-in-traces leak
+  class stays dead; the wire carries serverUrl + at most a profile
+  name); (2) no premature generalization of the options object — { auth? }
+  today, widen only when a second cross-cutting capability is evidenced.
+- **Free bonus:** the factory makes the tools testable — specs construct
+  mcpClientTools({ auth: fakeAuth }) against a scripted endpoint.
+- **Why not defineTool({ auth? }) — the generalization rule:** the
+  pattern is a MODULE-BOUNDARY idiom (constructor over own options,
+  capability captured in closure), already available to every future
+  tool at zero cost — no framework feature needed. Auth-aware defineTool
+  would couple the generic factory to one capability's vocabulary and
+  put a dead slot on every definition site. THE RIGHT GENERALIZATION
+  (only when 3+ modules show real closure-plumbing duplication): a
+  capability-AGNOSTIC context variant `defineToolCtx(ctx)` threading
+  `cb(input, validate, ctx)` — same defineTool underneath, module-typed
+  contexts. Greppable upgrade path: second module with duplication ->
+  build defineToolCtx, never defineTool({ auth }).
+
+### 2026-09-19 — the injection patterns confirmed for mobile (the cleanest host)
+
+- **Mobile works with LESS machinery than desktop:** no cold subprocess
+  exists (no bash/CLI fleet) — Pattern 1 alone covers the in-webview
+  runtime; the broker channel is Tauri IPC (same app), so the localhost
+  endpoint (Pattern 2) is NOT needed on mobile — it exists only because
+  desktop has a process boundary. One interface, three bindings:
+  desktop = fetch(localhost broker); mobile = invoke('request_access_
+  token'); headless CLI exception = ClientCredentialsProvider +
+  BunKeychain. The AuthProviderFactory hides the transport.
+- **Mobile's four auth needs, mapped:** (1) webview runtime's mcp-client
+  -> composition-root factory, token() over IPC to the shell keyring;
+  (2) the shell provider itself = the ALIGNED implementation (custom-
+  scheme/universal-link callback on mobile vs loopback on desktop — the
+  only delta); (3) sandboxed space views' remote WS -> the space-scoped
+  connection token in the MCP tool result (a different, already-ruled
+  mechanism — NOT the AuthProvider path); (4) mobile as generic MCP
+  client to third-party servers -> the shell's OAuthClientProvider,
+  same keyring/browser/scheme.
+- **Security invariant holds on mobile:** the webview (agent-generated
+  content) reaches ONLY request_access_token via IPC — worst-case blast
+  radius is an expiring access token; no keychain reads, refresh
+  tokens, or DCR client info cross into untrusted-content contexts.
+  Mobile-specific build item surfaced: the custom-scheme callback leg
+  (already on the mobile checklist).
+
+### 2026-09-19 — injection across pure-data boundaries: three patterns for the mcp-client factory
+
+- **The constraint, named by the pilot:** defineTool is JSON-in/JSON-out
+  across TWO pure-data boundaries (stdio for the CLI fleet; tool_call
+  BPEvent detail for the worker wire) — functions cannot ride either.
+  That is why oauth was wired directly (BunKeychainOAuthProvider module
+  default + credentials in tool input): there was no injection channel.
+- **Pattern 1 — composition-root injection:** the tool becomes a factory
+  (`mcpClientTools({ auth: AuthProviderFactory })`); the host binds
+  capabilities at registration; the function lives in the process that
+  registered the tool; tool_call detail never changes. Primary for the
+  Tauri webview toolsWorker / in-process hosts.
+- **Pattern 2 — externalized capability (the broker IS the injection):**
+  a function cannot cross a JSON boundary but an ADDRESS can — the
+  taskbar's broker makes token() a localhost endpoint; the provider is
+  constructible in any process from a URL + per-boot secret seeded via
+  ENV-DATA (the MODEL_ENDPOINTS_KEY / STORE_DB_PATH_KEY precedent). The
+  only pattern spanning cold CLI subprocesses + shell-worker fleet
+  calls + Tauri. Security: bind 127.0.0.1, per-boot secret via env-data
+  (never tool input), surface = request_access_token only.
+- **Pattern 3 — named profiles as wire-safe references:** input carries
+  authProfile: string (a reference, never the capability); binding
+  resolves host- or broker-side. Deferred until a multi-profile consumer
+  is real.
+- **Ruling recommended:** Pattern 2 is the backbone (uniform across all
+  hosts; the broker decision wearing its implementation detail); Pattern
+  1 is how the Tauri toolsWorker instantiates the tool (they compose);
+  direct-keychain wiring survives ONLY as the no-taskbar CLI exception.
+  **LAW: the wire carries data; capabilities bind in-process at the
+  composition root or externalize as addressable endpoints.**
+
+### 2026-09-19 — AuthProvider shape (verified against the installed SDK v2 types)
+
+- **SDK AuthProvider (dist/index.d.mts):** `token(): Promise<string |
+  undefined>` called before EVERY request (becomes the Authorization
+  header); optional `onUnauthorized(ctx: UnauthorizedContext)` on 401 —
+  transport awaits it, RETRIES ONCE, throws UnauthorizedError if the
+  retry fails or the hook is absent. Transports also accept a full
+  OAuthClientProvider (auto-adapted) — the shell's provider plugs into
+  the same seam when the shell itself connects.
+- **Our seam — a FACTORY, because the provider binds per server:**
+  `AuthProviderFactory = (serverUrl: URL) => AuthProvider`, injected at
+  toolsWorker/host construction, never tool input. Broker-backed
+  implementation is nearly nothing: token() = broker.requestAccessToken;
+  onUnauthorized = broker.invalidate (transport retry-once does the
+  rest).
+- **Three-valued broker contract maps onto the two-method shape:**
+  token|refreshed -> token() returns string; 401-refresh ->
+  onUnauthorized invalidate + retry; authorization_required ->
+  token() returns undefined -> UnauthorizedError -> errors-as-data at
+  the tool boundary -> error-ack -> PWA "authorize X" UX. No new
+  protocol — the SDK's own failure semantics carry it.
+- **Tool input schema shrinks:** serverUrl (+ at most a profile ref);
+  credentials never ride tool inputs again. CLI mode injects the
+  ClientCredentialsProvider + BunKeychain machine-auth factory.
+
+### 2026-09-19 — oauth: drop the mcp-client integration, keep + rehome the library
+
+- **DROPPED from src/tools/mcp-client.ts:** the direct
+  BunKeychainOAuthProvider wiring and the per-call credential inputs
+  (oauth-client-credentials / oauth-refresh-token). Two reasons at once:
+  the broker design keeps the full provider flow OUT of the runtime
+  process (thin AuthProvider only), and credential-carrying tool inputs
+  were the flagged leak class — the input schema SHRINKS to serverUrl
+  (+ at most a profile reference); secrets never ride inputs, event
+  details, or traces again, structurally.
+- **KEPT + REHOMED:** src/oauth/ as a library is unchanged (Keychain
+  type, keychain-oauth-provider — SDK v2, issuer-keyed DCR state —,
+  InMemoryKeychain); it changes WHO instantiates it: the SHELL (taskbar
+  first, mobile next — one implementation per the alignment ruling) with
+  a Rust keyring backend, instead of the runtime tool with Bun.secrets.
+  BunKeychain survives for the CLI machine-auth exception.
+- **Result:** mcp-client becomes runtime-agnostic by construction —
+  imports neither BunKeychain nor the provider, just the injected
+  AuthProvider interface. Identical in Bun, Tauri webview, PWA — the
+  "two toolsWorkers, one tool" ruling realized.
+
+### 2026-09-19 — outbound remote-MCP auth consolidated (the primary local case)
+
+- **The end-to-end loop (all pieces previously ruled, now one flow):**
+  runtime mcp-client connects remote servers with the thin AuthProvider;
+  token(serverUrl) hits the taskbar broker — valid keyring token ->
+  return; expired -> refresh -> return; absent/dead ->
+  AUTHORIZATION_REQUIRED (a first-class three-valued broker state, not
+  an error) -> error ack -> PWA chrome prompt -> invoke('start_oauth')
+  -> taskbar runs discovery + DCR + system browser + loopback -> tokens
+  to keyring. DCR client identity = the TASKBAR APP's metadata
+  (application_type native, loopback redirect) — the INSTALLATION is the
+  OAuth client, never the runtime. Machine-auth servers never touch the
+  browser: ClientCredentialsProvider shell-side, keyring credentials,
+  broker mints access tokens on demand.
+- **Credential vs. grant scoping (open, recommended):** credentials
+  INSTALLATION-level (keyring keyed by issuer — one registration per
+  installation+server, never duplicated per space); SPACE access to an
+  authorized server is POLICY — governor-thread allowlists enforced at
+  the event layer, observable in the deadlock trace, removable as
+  learned content. Secrets few (one keyring); grants many and in-band.
+  Auth never entangles with the learning surface.
+
+### 2026-09-19 — local OAuth with the taskbar: shell mints, runtime consumes, PWA is UX
+
+- **The broker ruling applied across the local process boundary:** the
+  taskbar is the OAuth home (full OAuthClientProvider in its TRUSTED-
+  CHROME context, Rust keyring/stronghold persistence, system-browser
+  handoff + loopback callback — never embedded). The Bun runtime's
+  mcp-client keeps the thin AuthProvider; token() crosses a PROCESS
+  boundary — the taskbar's minimal localhost broker endpoint (or pipe to
+  the process it spawns) answers request_access_token(serverUrl).
+  Ephemeral access tokens only; refresh tokens + DCR client info never
+  leave the taskbar keychain. The PWA main doc is pure UX: error ack ->
+  "authorize X" -> invoke('start_oauth') -> browser -> callback ->
+  notify. Safe because the PWA main doc IS trusted chrome; sandboxed
+  agent views never learn auth exists.
+- **The CLI exception (no shell):** cold `behavioral turn` runs
+  self-serve via the injectable BunKeychain (same behavioral.mcp service
+  labels — OS keychain shared regardless of minter process) with
+  MACHINE-AUTH ONLY (no interactive flow headless). Shell present ->
+  broker; shell absent -> BunKeychain + machine-auth. No code fork —
+  the Keychain interface carries both.
+- **Adjacent load-bearing item surfaced — local WS ingress gating:**
+  any browser page can attempt ws://127.0.0.1:<port> (CSWSH / DNS
+  rebinding class). SAME mechanism as the mobile ruling: short-lived
+  space-scoped connection tokens, distributed per door — mobile: MCP
+  tool result carries the token for the remote WS; local: the runtime
+  BAKES the token into the served view pages (it serves them) + Origin
+  check against the served origin. Different minters (runtime mints
+  local, taskbar brokers remote), same shape, both fail-closed.
+
+### 2026-09-19 — sandboxed-iframe views locally too — one architecture, isolation everywhere
+
+- **Pilot's addition:** for the local PWA, agent-generated views render in
+  <iframe sandbox="allow-scripts allow-forms" src="..."> — not into the
+  main document. This CLOSES the integrity-vs-isolation gap carried since
+  the iOS analysis: the opaque-origin sandbox (no allow-same-origin) is
+  REAL isolation — the thing the mobile MCP-App path gets for free and
+  the local path lacked.
+- **The unified architecture (all three hosts, one shape):** the view is
+  ALWAYS a served page that boots its own controller-in-sandbox and
+  speaks WS home. Local PWA: trusted chrome doc + sandboxed iframe per
+  space view (src = dev-server/served-URL for the space view — the job
+  the plan already gave Q5 + the growth-model html/ dir). Mobile: MCP
+  door (spaces-as-tools, ui://space/<name>) → same sandbox → same WS.
+  Local PWA stops being a special case — just the host whose door is a
+  localhost URL. Same controller, b-* vocabulary, fragments, store
+  artifacts; only the door changes.
+- **Floors shift from security to POLICY inside the sandbox:** isolation
+  (the iframe) does security; the floors become behavioral-vocabulary
+  convention (views speak b-trigger, not raw handlers) + defense in
+  depth. Keep them; the honest threat-model statement changes.
+- **Details flagged (pilot to rule):** (1) src=SERVED URL not srcdoc —
+  keeps local/mobile shape-identical, uses the dev-server surface;
+  (2) sandbox set = allow-scripts allow-forms ONLY (no allow-same-origin,
+  no top-navigation, no popups) + CSP as second lock; parent chrome
+  validates event.source strictly (null-origin postMessage discipline —
+  the A2UI security note now applies to us); (3) per-view controller,
+  per-view WS connection; parent doc = pure chrome, never renders agent
+  content directly; whether a main-document controller survives at all
+  in the PWA is now a real question; (4) scripts CAN now run in views
+  (capability upgrade — main-doc insertion inerted them); decide
+  day-one vs later turn-on.
+
+### 2026-09-19 — ruled: WS is the data plane everywhere; MCP is the entry plane; spaces as tools
+
+- **Pilot's ruling:** the WebSocket flow back to the agent runtime is best —
+  local PWA uses it directly (variant B, pure form; no MCP in the local
+  path at all). The mobile app is a PURE CLIENT — a generic MCP host
+  connecting to arbitrary servers, ours being just one. For ours, the
+  MCP surface is: SPACES AS TOOLS — each space a tool whose
+  _meta.ui.resourceUri points at its view (ui://space/<name> — the
+  single-file app page: controller bundle + connect script), rendered
+  in the host sandbox like any third-party MCP App; inside, the
+  controller boots and opens the SAME WS data plane — MCP is the door,
+  WS is the living flow. The view changes as the space's threads render
+  (agent-driven, no MCP per-update). LOGS AROUND EACH SPACE ship on the
+  tool/resource surface (read-only activity/provenance for the host).
+- **Why it works:** MCP Apps is delivery-vehicle-agnostic — the sandbox
+  doesn't care what the app speaks after boot. We use the extension
+  without translating a single message. Reconciles with existing law:
+  spaces are already the unit (growth model); logs are already exhaust
+  (trace-log-as-state) — spaces-as-tools is the read surface over it;
+  the store worker backs the log reads; OKF fragments are the same
+  artifacts in every host.
+- **Load-bearing dependency surfaced:** the mobile WS connection to a
+  cloud/Tailscale runtime needs a credential — natural shape: the MCP
+  tool result carries a SHORT-LIVED, SPACE-SCOPED connection token
+  minted shell-side (ties into the oauth broker work). Sequence first.
+- **Open (recommendations on record):** (1) list_spaces + open_space(name)
+  tool pair rather than churny tool-per-space; (2) logs as a param'd
+  tool (since/pagination, store-backed), not static resources; (3) the
+  connection-token design above.
+
+### 2026-09-19 — MCP Apps integration: A2UI's pattern (never their protocol) → three variants
+
+- **Context:** mobile app = MCP host rendering MCP-Apps views; taskbar +
+  local PWA could do the same, sandboxing agent-generated views. A2UI's
+  guides read for PATTERN ONLY — adoption explicitly ruled out by the
+  pilot. The reusable lessons mapped to our stack: (1) renderer-in-
+  sandbox + host-as-dumb-relay — our Controller is already that shape;
+  (2) UI semantics ride the existing carrier, protocol stays dumb — the
+  Transport seam (2026-09-13, `transport?: Transport`) is the join point;
+  (3) templates as cached addressable artifacts — matches our store/okf
+  fragment flow (we KEEP fragment-equals-template-plus-data; A2UI's
+  data-binding split not adopted); (4) user actions as calls with full
+  origin context (name/surfaceId/sourceComponentId/timestamp) — absorb
+  the field discipline into ui_event details; (5) errors as first-class
+  messages — have it; (6) capability negotiation at connect — the one
+  thing we LACK; worth building for every carrier (WS, Tauri IPC,
+  AppBridge).
+- **Three variants (pilot to pick; not exclusive — carrier per
+  deployment):** (A) Controller in the sandbox + AppBridgeTransport —
+  ui_events as tools/call, renders as results/notifications; the iframe
+  sandbox is the real isolation the webview floors lacked; the interop
+  story for third-party hosts; (B) Controller in the sandbox + WS data
+  plane (AppBridge for lifecycle only) — "keep the WebSocket transport"
+  taken literally; zero translation, full push semantics, Tailscale/
+  cloud URLs work; host is not the data-plane control point; (C) dual-
+  plane — WS for state pushes, AppBridge for actions (the consent-
+  relevant class, A2UI's asymmetric lesson); costs cross-plane
+  ordering. **Navigator recommendation: B first, C when host-
+  mediation is demanded, A for third-party host interop.**
+- **Skill implication:** under B/C the agent authors fragments as today
+  (app page = static infrastructure); under A the surface grows the
+  app-page recipe. skills/behavioral documents the picked variant's
+  authoring pattern.
+
+### 2026-09-19 — the taskbar app: auth moves to the Tauri shell; PWA never holds secrets
+
+- **New surface (pilot):** a Tauri TASKBAR app — starts/stops/updates/
+  restarts the local PWA. Topology now: PWA (webview, untrusted-content)
+  + taskbar shell (trusted chrome, Rust core) + mobile app (Tauri).
+- **Pilot's instinct validated — taskbar and mobile ALIGN as the auth
+  home:** both are Tauri shells with OS-keychain access (Rust `keyring`
+  crate or tauri-plugin-stronghold) and system-browser handoff
+  (loopback on desktop via a tauri-plugin-oauth-style listener; custom
+  scheme on mobile). One provider implementation, two callback
+  transports.
+- **Validation of the pasted Tauri-host pattern:** sound — external
+  browser never embedded auth (NIST 800-63C), machine-auth triad,
+  IssuerMismatchError mix-up defense, RFC 8707 resource binding, DCR.
+  WRONG details: "keytar or secrecy" (keytar is Node/Electron; secrecy is
+  memory hygiene) — Rust storage is the keyring crate / stronghold. The
+  DANGEROUS part: applying its webview-holds-tokens-via-IPC shape to the
+  PWA — the PWA webview renders agent-generated html; IPC-exposed
+  keychain read converts the logged XSS-reaches-IPC threat into
+  refresh-token theft. It applies to the taskbar (trusted chrome) only.
+- **The refined mechanism — the broker split:** full OAuthClientProvider
+  + machine-auth providers live shell-side; the PWA gets a thin
+  AuthProvider (token() + onUnauthorized per the SDK machine-auth doc)
+  backed by ONE minimal broker IPC (request_access_token(serverUrl)).
+  Refresh tokens, client secrets, and DCR client registrations never
+  cross into the untrusted-content webview. Blast-radius principle: the
+  PWA can lose, at worst, an expiring access token. Also structurally
+  prevents credentials riding tool_call event details / trace logs.
+- **StoreKeychain demotes, pending ONE pilot ruling:** does the PWA ever
+  run shell-less (plain-browser standalone)? If no: broker is THE
+  mechanism, StoreKeychain = hermetic-test path only. If yes: broker when
+  the shell is present (window.__TAURI__ detection), StoreKeychain floor
+  when not (web-storage-grade protection, honestly stated).
+
+### 2026-09-19 — oauth/mcp-client: reusable tool, not a worker — StoreKeychain is the webview floor
+
+- **Pilot's lean, confirmed by analysis + the SDK v2 docs (clients/oauth,
+  clients/machine-auth):** the oauth layer stays a REUSABLE TOOL LIBRARY,
+  runtime-agnostic, DCR-native — NOT a satellite worker. It has no
+  request/result event family; OAuthClientProvider is a storage+redirect
+  surface the transport drives in-process at connect(); worker-izing it
+  means relays for a library that must live where the transport lives.
+- **The Bun coupling is one 20-line function:** BunKeychain (Bun.secrets).
+  The refactor: BunKeychain moves to the Bun host layer; the oauth lib
+  keeps Keychain (type) + keychain-oauth-provider + InMemoryKeychain,
+  SDK-v2 surface only (IssuerMismatchError, discovery state, SEP-2352
+  issuer-keyed client info). Machine-auth providers
+  (ClientCredentialsProvider, PrivateKeyJwtProvider, bare AuthProvider
+  token()) are pure and portable; the mcp-client tool's input schema
+  already models them (oauth-client-credentials, oauth-refresh-token).
+- **StoreKeychain = the store coordination piece:** Keychain is 1:1 with
+  the store KV grammar (get/put/delete over a fixed 'mcp-oauth'
+  collection, async round-trip compatible). Tokens + DCR client
+  registrations are non-authority durable data — the growth-model law
+  puts them in the store, never git. Per-host injection: BunKeychain
+  (OS keychain, desktop default — stronger), StoreKeychain (Tauri mobile
+  + PWA floor), a Tauri stronghold adapter optional later.
+- **Two toolsWorkers, one tool:** the tool_call wire is unchanged; what
+  varies is the executor. Bun keeps bash; the Tauri toolsWorker's first
+  in-process tool is the mcp-client (pure JS in the webview, no bash).
+  Hosts inject their Keychain; the tool stays byte-identical.
+- **DCR:** user-flow is DCR-native in v2 (discovery -> register-or-lookup
+  -> saveClientInformation keyed by issuer); the provider already
+  persists it. The missing piece is the host-specific redirect surface —
+  DEFERRED; machine-auth first (no browser, covers the agent case,
+  matches the existing input shapes).
+- **src/threads/mcp-client.ts shape (after the extraction):** auth-
+  failure orchestration — waitFor on unauthorized results, coordinate
+  recovery (store lookup, refresh, retry). Composes ON TOP of the tool;
+  the tool works standalone (the reusability test).
+
 ### 2026-09-19 — html-tool consolidation committed: schemas as data in the controller; the fleet is 13
 
 - **The pilot's consolidation, completed and committed:** html.schemas.ts
@@ -1636,6 +2627,26 @@ repo and risks staleness.
   handler iterates for `$root`. **Pending: not yet implemented.**
 
 ## Open Questions
+
+- **plugin-client fleet-test ruling (audit 2026-09-21, dependency: governor
+  threads).** Analysis says GOES: manifest reading + AJV validation + dir
+  listing are composable via `bun run -` recipes; the §11.3 validation posture
+  is stored-recipe contract logic; the tool's own header already locates
+  gating authority in "host structure + governor threads, not plugin
+  self-description." The prior hedge ("probably stays — spec conformance =
+  boundary logic") conflated validation with a trust boundary — a verbatim
+  replayed recipe pins conformance without a compiled tool. Pilot ruling
+  pending: confirm deletion (fleet 13 → 7) and sequencing (the manifest schema
+  must reach the governor threads as schema-data before the tool dies).
+- **mcp-client conformance wiring (2026-09-21; reframed by the worker
+  conversion).** The pilot's risk-analysis-server (local stdio MCP, 5 tools,
+  fire-and-poll sweeps, no MCP-level auth) is a natural real-server target for
+  the mcp WORKER's ops (spec surface: `discover`/`list-tools`/`call-tool`/…) —
+  today's tests run against fixtures only. Related sub-question: the
+  fire-and-poll task protocol (`task_id` → poll ~20s to terminal state) has no
+  thread pattern yet — the engine has no timers, so a poll loop needs
+  host-scheduled re-entry or model-driven polls. Worth a thread-authored
+  pattern, or does the model just drive the polls?
 
 - **SUPERSEDED 2026-09-19 (pilot's pushback): validation moves out of the
   controller entirely — no AJV/schemas in the webview or PWA.** The
