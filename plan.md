@@ -179,14 +179,20 @@ ingress + a plugin-shipped behavior surface.
   the router/useWorkers test and the thread-spine negative tests landed
   against existing implementation (verification-first for those steps —
   the worker itself was red-first per test).
-- **TOOLCHAIN FINDING (surfaced, not fixed):** the recorded "tsc = 1 known-red"
-  baseline DOES NOT REPRODUCE — pinned TS 7.0.2 reports 215 errors at HEAD
-  (every ajv.compile callsite is TS2349: the TS7 compiler does not treat
-  ajv's ValidateFunction call-signature as callable; store/frontier workers
-  carry identical errors at HEAD). The conversion added only that ambient
-  class, plus zero avoidable new kinds (the one real new error — message:
-  unknown narrowing — was cast away). Pilot call: sweep-fix vs TS version
-  pin vs document-as-known-broken; not decided.
+- **TOOLCHAIN FINDING — RESOLVED (same day, root cause: local corruption,
+  not the compiler):** the "215 errors at HEAD" scare traced to ONE deleted
+  line in the installed `node_modules/ajv/dist/types/index.d.ts` — the
+  `ValidateFunction` call signature was missing from our copy while the npm
+  registry 8.20.0 tarball is intact (verified by npm pack diff). Both
+  TS 5.9.3 and 7.0.2 correctly rejected the corrupted type, which is why
+  the TS-pin experiment (pilot: "try ts pin change") reproduced the errors
+  under 5.9.3 — that result falsified the compiler theory in one step.
+  Fix: reinstall ajv (rm node_modules/ajv + bun install). With the intact
+  d.ts, TS 7.0.2 reports exactly the recorded baseline — 1 known-red
+  (turn.spec, the pilot stake) + the parked RED spec's 3 import errors.
+  The pin STAYS 7.0.2; no sweep-fix, no version change. When it landed:
+  unknowable post-reinstall (the damaged copy predated this session's first
+  tsc run; last week's green baselines were real against an intact copy).
 - **Parked RED spec still untracked:** src/threads/tests/skill-client.spec.ts
   (frontmatter-validation slice) — imports a not-yet-authored thread library;
   rides the pilot's review.
