@@ -1,6 +1,6 @@
 ---
 name: behavioral-tools
-description: Invoke the behavioral agent tool fleet via the `behavioral tools` CLI dispatcher — MCP client (mcp-discover, mcp-call-tool, mcp-list-tools, mcp-get-prompt, mcp-list-resources, mcp-read-resource), skill client (skill-discover, skill-read, skill-list-resources, skill-extract-links, skill-validate-links), and plugin loading (plugin-client). JSON in / JSON out over stdio, one subprocess call per invocation. Use when an agent needs remote MCP operations or skill/plugin inspection instead of raw shell commands. Git and raw shell belong to the shell worker; HTML validation belongs to the controller floors + the classifier story (prompts/html-classifier-gate.md); TypeScript LSP is a future satellite family (TS 7.1 stable API).
+description: Invoke the behavioral agent CLI fleet via the `behavioral tools` dispatcher — skill client (skill-discover, skill-read, skill-list-resources, skill-extract-links, skill-validate-links) and plugin loading (plugin-client). JSON in / JSON out over stdio, one subprocess call per invocation. Use when an agent needs skill/plugin inspection instead of raw shell commands. Remote MCP operations are a worker family (mcp_request wire) — see references/mcp-client.md; git and raw shell belong to the shell worker; HTML validation belongs to the controller floors + the classifier story (prompts/html-classifier-gate.md); TypeScript LSP is a future satellite family (TS 7.1 stable API).
 license: ISC
 compatibility: Requires bun and the behavioral CLI
 allowed-tools: Bash
@@ -59,9 +59,10 @@ Never guess a tool's input shape — the contract is exposed by flags:
 
 Each module's tools, when-to-use guidance, examples, and gotchas:
 
-- [mcp-client](references/mcp-client.md) — `mcp-discover`, `mcp-call-tool`,
-  `mcp-list-tools`, `mcp-list-prompts`, `mcp-get-prompt`,
-  `mcp-list-resources`, `mcp-read-resource`. Remote MCP server operations.
+- [mcp-client](references/mcp-client.md) — the remote MCP **worker family**
+  (`mcp_request` / `mcp_request_result` / `mcp_cancel` wire, seven ops,
+  typed `authorization_required` results, the auth replay spine). Not CLI
+  fleet tools — hosts mount the family in the `useWorkers` map.
 - [plugin-client](references/plugin-client.md) — `plugin-client`. Load and
   validate an Agent Plugins v1 package (plugin.json, mcp.json, skills/,
   threads/ — portable surface only, extension namespaces unread).
@@ -74,6 +75,6 @@ Each module's tools, when-to-use guidance, examples, and gotchas:
 
 | Need | Module |
 |------|--------|
-| Call/list tools on a remote MCP server | [mcp-client](references/mcp-client.md) |
+| Call/list tools on a remote MCP server | [mcp-client](references/mcp-client.md) — the mcp worker family |
 | Read a local skill or its bundled files | [skill-client](references/skill-client.md) |
 | Load a plugin package | [plugin-client](references/plugin-client.md) |

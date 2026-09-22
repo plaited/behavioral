@@ -97,6 +97,38 @@ export type StoreRequestResultEvent = {
   space?: string
 }
 
+/** MCP operations — its own worker family, like frontier and store. */
+export type McpOp =
+  | 'discover'
+  | 'list-tools'
+  | 'call-tool'
+  | 'list-prompts'
+  | 'get-prompt'
+  | 'list-resources'
+  | 'read-resource'
+
+export type McpRequestEvent = {
+  type: typeof WORKER_MESSAGE_KINDS.mcp_request
+  /** `op` selects the MCP client operation; the backing schema lives in `src/workers/mcp-client.types.ts`. */
+  detail: { id: string; op: McpOp; input: JsonObject }
+  space?: string
+}
+
+export type McpRequestResultEvent = {
+  type: typeof WORKER_MESSAGE_KINDS.mcp_request_result
+  detail: { id: string; result: JsonObject }
+  space?: string
+}
+
+// Remote MCP calls can hang indefinitely (third-party servers) — the async
+// families keep their cancels (tool_call, response; frontier/store ops are
+// short-lived and have none).
+export type McpCancelEvent = {
+  type: typeof WORKER_MESSAGE_KINDS.mcp_cancel
+  detail: { id: string }
+  space?: string
+}
+
 /** Union of every event the router can move between ports. @public */
 export type WorkerEvent =
   | ResponseRequestEvent
@@ -105,6 +137,9 @@ export type WorkerEvent =
   | ToolCallEvent
   | ToolCallResultEvent
   | ToolCancelEvent
+  | McpRequestEvent
+  | McpRequestResultEvent
+  | McpCancelEvent
   | FrontierRequestEvent
   | FrontierRequestResultEvent
   | StoreRequestEvent
@@ -209,6 +244,69 @@ export const ToolCancelEventSchema: JSONSchemaType<ToolCancelEvent> = {
   additionalProperties: false,
 }
 
+export const McpRequestEventSchema: JSONSchemaType<McpRequestEvent> = {
+  type: 'object',
+  properties: {
+    type: { type: 'string', const: WORKER_MESSAGE_KINDS.mcp_request },
+    detail: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', minLength: 1 },
+        op: {
+          type: 'string',
+          enum: [
+            'discover',
+            'list-tools',
+            'call-tool',
+            'list-prompts',
+            'get-prompt',
+            'list-resources',
+            'read-resource',
+          ],
+        },
+        input: jsonObjectSchema,
+      },
+      required: ['id', 'op', 'input'],
+      additionalProperties: false,
+    },
+    space: { type: 'string', nullable: true },
+  },
+  required: ['type', 'detail'],
+  additionalProperties: false,
+}
+
+export const McpRequestResultEventSchema: JSONSchemaType<McpRequestResultEvent> = {
+  type: 'object',
+  properties: {
+    type: { type: 'string', const: WORKER_MESSAGE_KINDS.mcp_request_result },
+    detail: {
+      type: 'object',
+      properties: { id: { type: 'string', minLength: 1 }, result: jsonObjectSchema },
+      required: ['id', 'result'],
+      additionalProperties: false,
+    },
+    space: { type: 'string', nullable: true },
+  },
+  required: ['type', 'detail'],
+  additionalProperties: false,
+}
+
+export const McpCancelEventSchema: JSONSchemaType<McpCancelEvent> = {
+  type: 'object',
+  properties: {
+    type: { type: 'string', const: WORKER_MESSAGE_KINDS.mcp_cancel },
+    detail: {
+      type: 'object',
+      properties: { id: { type: 'string', minLength: 1 } },
+      required: ['id'],
+      additionalProperties: false,
+    },
+    space: { type: 'string', nullable: true },
+  },
+  required: ['type', 'detail'],
+  additionalProperties: false,
+}
+
 export const WorkerErrorEventSchema: JSONSchemaType<WorkerErrorEvent> = {
   type: 'object',
   properties: {
@@ -231,6 +329,9 @@ export const validateResponseCancelEvent = ajv.compile(ResponseCancelEventSchema
 export const validateToolCallEvent = ajv.compile(ToolCallEventSchema)
 export const validateToolCallResultEvent = ajv.compile(ToolCallResultEventSchema)
 export const validateToolCancelEvent = ajv.compile(ToolCancelEventSchema)
+export const validateMcpRequestEvent = ajv.compile(McpRequestEventSchema)
+export const validateMcpRequestResultEvent = ajv.compile(McpRequestResultEventSchema)
+export const validateMcpCancelEvent = ajv.compile(McpCancelEventSchema)
 // No frontier cancel event: analyses are synchronous — nothing is in flight
 // to abort (the async families keep their cancels).
 export const FrontierRequestEventSchema: JSONSchemaType<FrontierRequestEvent> = {

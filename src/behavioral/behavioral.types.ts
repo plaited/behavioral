@@ -450,7 +450,7 @@ export type TransformEvaluation =
  * Structural schema for the SAB frame the jq worker ships back — the
  * trust-boundary validation in the `evaluateTransform` bridge (the
  * two-guards pattern: JSON.parse proves syntax, this proves shape). Hand-written `oneOf` on the `ok` discriminant, cast through
- * `unknown` per the mcp-client precedent; the `value` branch is the JsonObject
+ * `unknown` per the tools-fleet precedent; the `value` branch is the JsonObject
  * floor, mirroring the worker's own object check. Strict
  * `additionalProperties: false` at every level; no defaults (the strict-mode
  * oneOf conflict does not apply).

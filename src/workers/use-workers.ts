@@ -4,6 +4,9 @@ import { WORKER_MESSAGE_KINDS } from './workers.constants.ts'
 import {
   validateFrontierRequestEvent,
   validateFrontierRequestResultEvent,
+  validateMcpCancelEvent,
+  validateMcpRequestEvent,
+  validateMcpRequestResultEvent,
   validateResponseCancelEvent,
   validateResponseRequestEvent,
   validateResponseRequestResultEvent,
@@ -57,6 +60,8 @@ export const useWorkers = ({
     frontier?: Worker
     /** Optional: durable space-scoped store (`store_request`). */
     store?: Worker
+    /** Optional: remote MCP connections/sessions/auth (`mcp_request`). */
+    mcp?: Worker
   }
   useTrigger: (trigger: Trigger) => void
 }): Worker => {
@@ -65,6 +70,7 @@ export const useWorkers = ({
     responses: responsesClientWorker,
     frontier: frontierWorker,
     store: storeWorker,
+    mcp: mcpWorker,
   } = workers
   const behavioralWorker = new Worker(new URL('./behavioral.worker.ts', import.meta.url))
 
@@ -74,9 +80,9 @@ export const useWorkers = ({
 
   // The router's only family knowledge: which port an event type routes to.
   // Each worker family owns its event types (response_*, tool_*, frontier_*,
-  // store_*), so routing is one lookup on the type. Cancels exist only for the
-  // async families (model calls, shell runs); frontier analyses and store ops
-  // are short-lived and have no cancel.
+  // store_*, mcp_*), so routing is one lookup on the type. Cancels exist only
+  // for the async families (model calls, shell runs, remote MCP calls);
+  // frontier analyses and store ops are short-lived and have no cancel.
   const routes: Record<string, Worker> = {
     [WORKER_MESSAGE_KINDS.response_request]: responsesClientWorker,
     [WORKER_MESSAGE_KINDS.response_cancel]: responsesClientWorker,
@@ -109,6 +115,11 @@ export const useWorkers = ({
     reenter(data)
   }
 
+  const onMcpResult = ({ data }: MessageEvent): void => {
+    if (!validateMcpRequestResultEvent(data)) return
+    reenter(data)
+  }
+
   behavioralWorker.onmessage = async ({ data }: MessageEvent<Trace>): Promise<void> => {
     await traceListener(data)
     if (data.kind !== TRACE_MESSAGE_KINDS.selection) return
@@ -125,7 +136,9 @@ export const useWorkers = ({
       !validateResponseCancelEvent(event) &&
       !validateToolCancelEvent(event) &&
       !validateFrontierRequestEvent(event) &&
-      !validateStoreRequestEvent(event)
+      !validateStoreRequestEvent(event) &&
+      !validateMcpRequestEvent(event) &&
+      !validateMcpCancelEvent(event)
     ) {
       return
     }
@@ -175,6 +188,12 @@ export const useWorkers = ({
     routes[WORKER_MESSAGE_KINDS.store_request] = storeWorker
     storeWorker.onmessage = onStoreResult
     storeWorker.onerror = onCrash('store')
+  }
+  if (mcpWorker !== undefined) {
+    routes[WORKER_MESSAGE_KINDS.mcp_request] = mcpWorker
+    routes[WORKER_MESSAGE_KINDS.mcp_cancel] = mcpWorker
+    mcpWorker.onmessage = onMcpResult
+    mcpWorker.onerror = onCrash('mcp')
   }
 
   addThreads(threads)

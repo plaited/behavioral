@@ -5,6 +5,7 @@ import type { SelectionTrace, Thread, Trace, Trigger } from '../../behavioral/be
 import { STORE_DB_PATH_KEY } from '../store.types.ts'
 import { useWorkers } from '../use-workers.ts'
 import { WORKER_MESSAGE_KINDS } from '../workers.constants.ts'
+import { startMcpServer } from './mcp-server-fixture.ts'
 
 const spawnSatellite = () => new Worker(new URL('./fixtures/satellite.worker.ts', import.meta.url))
 const spawnCrashing = () => new Worker(new URL('./fixtures/crash.worker.ts', import.meta.url))
@@ -278,6 +279,53 @@ describe('useWorkers router', () => {
     expect((result?.selected.detail as { result?: { ok?: boolean } } | undefined)?.result?.ok).toBe(true)
     engineWorker.terminate()
     storeWorker.terminate()
+  })
+
+  test('routes mcp_requests to the mcp worker port and re-enters the result', async () => {
+    const traces: Trace[] = []
+    const server = await startMcpServer()
+    const loopback = Bun.serve({ port: 0, fetch: (req) => server.fetch(req.url, req) })
+    const mcpWorker = new Worker(new URL('../mcp-client.worker.ts', import.meta.url))
+    const engineWorker = useWorkers({
+      threads: [
+        {
+          once: true,
+          label: 'caller',
+          rules: [
+            {
+              request: {
+                type: WORKER_MESSAGE_KINDS.mcp_request,
+                detail: {
+                  id: 'm1',
+                  op: 'call-tool',
+                  input: { url: `http://127.0.0.1:${loopback.port}/mcp`, tool: 'echo', args: { message: 'hi' } },
+                },
+              },
+            },
+            { waitFor: [{ type: WORKER_MESSAGE_KINDS.mcp_request_result, detailSchema: idSchema('m1') }] },
+          ],
+        },
+      ],
+      traceListener: (trace) => {
+        traces.push(trace)
+      },
+      workers: { tools: spawnSatellite(), responses: spawnSatellite(), mcp: mcpWorker },
+      useTrigger: () => {},
+    })
+    try {
+      await waitForTraces(traces, (s) => s.some((t) => t.selected.type === WORKER_MESSAGE_KINDS.mcp_request_result))
+      const result = selectionsOf(traces).find((t) => t.selected.type === WORKER_MESSAGE_KINDS.mcp_request_result)
+      const detail = result?.selected.detail as
+        | { result?: { status?: string; output?: { content?: Array<{ text?: string }> } } }
+        | undefined
+      expect(detail?.result?.status).toBe('completed')
+      expect(detail?.result?.output?.content?.[0]?.text).toBe('echo:hi')
+    } finally {
+      engineWorker.terminate()
+      mcpWorker.terminate()
+      loopback.stop(true)
+      await server.close()
+    }
   })
 
   test('re-enters a worker_error event when a satellite worker crashes', async () => {

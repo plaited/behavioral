@@ -25,10 +25,12 @@ describe('behavioral tools', () => {
     expect(code).toBe(0)
     expect(stderr).toContain('Usage: tools')
     expect(stderr).toContain('skill-discover')
-    expect(stderr).toContain('mcp-discover')
     expect(stderr).toContain('plugin-client')
     expect(stderr).toContain('skill-extract-links')
     expect(stderr).toContain('skill-validate-links')
+    // the mcp tools left the fleet for the dedicated worker family — the CLI
+    // fleet index must no longer surface them
+    expect(stderr).not.toContain('mcp-discover')
   })
 
   test('bare --schema prints the fleet index with name + description per tool', async () => {
@@ -38,7 +40,9 @@ describe('behavioral tools', () => {
     const output = JSON.parse(stdout)
     expect(output.command).toBe('tools')
     expect(Array.isArray(output.tools)).toBe(true)
-    expect(output.tools.length).toBeGreaterThanOrEqual(13)
+    // fleet = plugin-client + the five skill tools (the mcp tools left for the
+    // dedicated worker family)
+    expect(output.tools.length).toBe(6)
     const skillDiscover = output.tools.find((t: { name: string }) => t.name === 'skill-discover')
     expect(skillDiscover?.description).toBeString()
     const names = output.tools.map((t: { name: string }) => t.name)

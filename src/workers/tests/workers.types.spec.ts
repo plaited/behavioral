@@ -3,6 +3,9 @@ import { WORKER_MESSAGE_KINDS } from '../workers.constants.ts'
 import {
   validateFrontierRequestEvent,
   validateFrontierRequestResultEvent,
+  validateMcpCancelEvent,
+  validateMcpRequestEvent,
+  validateMcpRequestResultEvent,
   validateResponseCancelEvent,
   validateResponseRequestEvent,
   validateResponseRequestResultEvent,
@@ -249,6 +252,87 @@ describe('workers.types event vocabulary', () => {
       const valid = validateStoreRequestResultEvent({
         type: WORKER_MESSAGE_KINDS.store_request_result,
         detail: { id: 's1', result: 'not-an-object' },
+      })
+      expect(valid).toBe(false)
+    })
+  })
+
+  describe('mcp_request', () => {
+    test('accepts a well-formed call-tool request', () => {
+      const valid = validateMcpRequestEvent({
+        type: WORKER_MESSAGE_KINDS.mcp_request,
+        detail: { id: 'm1', op: 'call-tool', input: { url: 'http://127.0.0.1:1/mcp', tool: 'echo', args: {} } },
+      })
+      expect(valid).toBe(true)
+    })
+    test('accepts optional space', () => {
+      const valid = validateMcpRequestEvent({
+        type: WORKER_MESSAGE_KINDS.mcp_request,
+        detail: { id: 'm1', op: 'list-tools', input: { url: 'http://127.0.0.1:1/mcp' } },
+        space: 'demo',
+      })
+      expect(valid).toBe(true)
+    })
+    test('rejects an op outside the enum — the 7 ops are the whole surface', () => {
+      const valid = validateMcpRequestEvent({
+        type: WORKER_MESSAGE_KINDS.mcp_request,
+        detail: { id: 'm1', op: 'purge', input: {} },
+      })
+      expect(valid).toBe(false)
+    })
+    test('rejects a detail without op', () => {
+      const valid = validateMcpRequestEvent({
+        type: WORKER_MESSAGE_KINDS.mcp_request,
+        detail: { id: 'm1', input: {} },
+      })
+      expect(valid).toBe(false)
+    })
+    test('rejects a detail without input', () => {
+      const valid = validateMcpRequestEvent({
+        type: WORKER_MESSAGE_KINDS.mcp_request,
+        detail: { id: 'm1', op: 'list-tools' },
+      })
+      expect(valid).toBe(false)
+    })
+    test('rejects ingress — routed events are synthesized, never ingress', () => {
+      const valid = validateMcpRequestEvent({
+        type: WORKER_MESSAGE_KINDS.mcp_request,
+        detail: { id: 'm1', op: 'list-tools', input: { url: 'http://127.0.0.1:1/mcp' } },
+        ingress: 'ui_event',
+      })
+      expect(valid).toBe(false)
+    })
+  })
+
+  describe('mcp_request_result', () => {
+    test('accepts a well-formed result', () => {
+      const valid = validateMcpRequestResultEvent({
+        type: WORKER_MESSAGE_KINDS.mcp_request_result,
+        detail: { id: 'm1', result: { status: 'completed', durationMs: 12 } },
+      })
+      expect(valid).toBe(true)
+    })
+    test('rejects a non-object result payload', () => {
+      const valid = validateMcpRequestResultEvent({
+        type: WORKER_MESSAGE_KINDS.mcp_request_result,
+        detail: { id: 'm1', result: 'not-an-object' },
+      })
+      expect(valid).toBe(false)
+    })
+  })
+
+  describe('mcp_cancel', () => {
+    test('accepts a well-formed cancel', () => {
+      const valid = validateMcpCancelEvent({
+        type: WORKER_MESSAGE_KINDS.mcp_cancel,
+        detail: { id: 'm1' },
+      })
+      expect(valid).toBe(true)
+    })
+    test('rejects a cancel without id', () => {
+      const valid = validateMcpCancelEvent({
+        type: WORKER_MESSAGE_KINDS.mcp_cancel,
+        detail: {},
       })
       expect(valid).toBe(false)
     })

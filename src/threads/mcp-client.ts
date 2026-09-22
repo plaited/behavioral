@@ -1,32 +1,33 @@
 /**
- * The mcp-client thread library — auth-failure orchestration over the worker
- * wire. Composes ON TOP of the mcp-client tool; the tool works standalone
- * (the reusability test).
+ * The mcp-client thread library — the CROSS-TURN REPLAY SPINE over the mcp
+ * worker's wire. Composes ON TOP of the mcp-client worker family; the worker
+ * works standalone (the reusability test).
  *
- * Four single-rule monitor threads coordinate the toolsWorker with the
- * storeWorker per the broker design:
+ * The worker (src/workers/mcp-client.worker.ts) owns connections, sessions,
+ * in-flight calls, and STRUCTURED auth-state: an unauthorized call returns a
+ * typed `authorization_required` result that echoes the originating
+ * request. Cold-per-turn means that state dies with the turn — so the only
+ * thing these threads do is what crosses turns:
  *
- * - `call-capture` — every mcp tool_call is filed in the store (`mcp-calls`)
- *   keyed by the call id, so a failed call can be replayed after consent.
- * - `result-cleaner` — a terminal result without the auth marker deletes its
- *   capture (captures never outlive their calls).
- * - `auth-surfacer` — a result carrying the auth marker re-enters as
- *   `mcp_authorization_required` (host-routable: the PWA "authorize X" prompt
- *   per the broker ruling) and does NOT clean the capture — it is pending.
+ * - `auth-capture` — an `authorization_required` result is filed in the
+ *   store (`mcp-calls`) keyed by call id, value = the echoed request. ONLY
+ *   auth failures are captured — successful calls never touch the store
+ *   (the per-call capture/clean churn of the pre-worker design is dead).
+ * - `auth-surfacer` — the same result re-enters as
+ *   `mcp_authorization_required` (host-routable: the shell's "authorize X"
+ *   prompt per the broker ruling).
  * - `auth-retry` — `mcp_authorization_granted` (host ingress after the shell
- *   completes the flow) triggers a store get; a store result carrying the
- *   captured call replays the original tool_call and deletes the capture.
+ *   completes the flow) triggers the store get.
+ * - `replayer` — a store get whose value carries a captured request replays
+ *   the original `mcp_request` and deletes the capture.
  *
  * Vocabulary (thread-owned): `mcp_authorization_required { id, reason }`,
  * `mcp_authorization_granted { id }`.
  *
- * MINIMAL: marker detection is textual (UnauthorizedError |
- * authorization_required) over the serialized ToolsResult — the CLI reports
- * the SDK's error on stderr. Upgrade path: the tool surfaces structured
- * auth-state in its output schema and the select narrows to a field test.
- * The replayer fires on any store get whose value carries mcpCall —
- * namespaced under `mcpCall` to avoid collisions; tighten when a second
- * store tenant exists.
+ * MINIMAL: the replayer fires on any store get whose value carries `op` —
+ * the captured-request shape is `{ op, input }`, distinct from every other
+ * planned tenant (the skill catalog is `{ skills, warnings }`). Tighten with
+ * a collection tag when a colliding tenant shape appears.
  */
 import type { Thread } from '../behavioral/behavioral.types.ts'
 import { WORKER_MESSAGE_KINDS } from '../workers/workers.constants.ts'
@@ -39,88 +40,53 @@ export const MCP_EVENT_TYPES = {
   authorizationGranted: 'mcp_authorization_granted',
 } as const
 
-/** The store collection holding captured mcp calls keyed by call id. */
+/** The store collection holding captured mcp requests keyed by call id. */
 export const MCP_CALLS_COLLECTION = 'mcp-calls'
 
-const AUTH_MARKER = 'UnauthorizedError|authorization_required'
-
-const STORE_REQUEST_DETAIL: Record<string, unknown> = {
+const MCP_RESULT_DETAIL = {
   type: 'object',
-  properties: { id: { type: 'string', minLength: 1 }, op: { type: 'string' }, input: { type: 'object' } },
-  required: ['id', 'op', 'input'],
-}
+  properties: { id: { type: 'string', minLength: 1 }, result: { type: 'object' } },
+  required: ['id', 'result'],
+} as const
 
 // ── Threads ───────────────────────────────────────────────────────────────────
 
-/** call-capture — file every mcp tool_call in the store for possible replay. */
-const callCapture: Thread = {
-  label: 'mcp/call-capture',
+/** auth-capture — file ONLY auth-failed requests; the result's echo is the payload. */
+const authCapture: Thread = {
+  label: 'mcp/auth-capture',
   rules: [
     {
       transform: [
         {
-          type: WORKER_MESSAGE_KINDS.tool_call,
-          query:
-            '. as $d | select($d.tool | startswith("mcp-")) | {id: $d.id, op: "put", input: {collection: "mcp-calls", key: $d.id, value: {mcpCall: {tool: $d.tool, input: $d.input}}}}',
+          type: WORKER_MESSAGE_KINDS.mcp_request_result,
+          query: `. as $d | select($d.result.status == "authorization_required") | {id: $d.id, op: "put", input: {collection: "${MCP_CALLS_COLLECTION}", key: $d.id, value: $d.result.request}}`,
           target: WORKER_MESSAGE_KINDS.store_request,
-          detailSchema: {
-            type: 'object',
-            properties: {
-              id: { type: 'string', minLength: 1 },
-              tool: { type: 'string' },
-              input: { type: 'object' },
-            },
-            required: ['id', 'tool'],
-          },
+          detailSchema: MCP_RESULT_DETAIL,
         },
       ],
     },
   ],
 }
 
-/** result-cleaner — a terminal result without the auth marker deletes its capture. */
-const resultCleaner: Thread = {
-  label: 'mcp/result-cleaner',
-  rules: [
-    {
-      transform: [
-        {
-          type: WORKER_MESSAGE_KINDS.tool_call_result,
-          query: `. as $d | ($d.result | tostring) as $r | select(($r | test("${AUTH_MARKER}")) | not) | {id: $d.id, op: "delete", input: {collection: "${MCP_CALLS_COLLECTION}", key: $d.id}}`,
-          target: WORKER_MESSAGE_KINDS.store_request,
-          detailSchema: {
-            type: 'object',
-            properties: { id: { type: 'string', minLength: 1 }, result: { type: 'object' } },
-            required: ['id'],
-          },
-        },
-      ],
-    },
-  ],
-}
-
-/** auth-surfacer — an auth-marker result surfaces to the host; the capture stays (pending). */
+/** auth-surfacer — the typed result surfaces to the host; the capture stays pending. */
 const authSurfacer: Thread = {
   label: 'mcp/auth-surfacer',
   rules: [
     {
       transform: [
         {
-          type: WORKER_MESSAGE_KINDS.tool_call_result,
-          query: `. as $d | ($d.result | tostring) as $r | select($r | test("${AUTH_MARKER}")) | {id: $d.id, reason: "mcp call requires authorization"}`,
+          type: WORKER_MESSAGE_KINDS.mcp_request_result,
+          query:
+            '. as $d | select($d.result.status == "authorization_required") | {id: $d.id, reason: "mcp call requires authorization"}',
           target: MCP_EVENT_TYPES.authorizationRequired,
-          detailSchema: {
-            type: 'object',
-            properties: { id: { type: 'string', minLength: 1 }, result: { type: 'object' } },
-            required: ['id'],
-          },
+          detailSchema: MCP_RESULT_DETAIL,
         },
       ],
     },
   ],
 }
 
-/** auth-retry — granted triggers the store get; the replayer replays + cleans below. */
+/** auth-retry — granted ingress triggers the store get; the replayer takes it from there. */
 const authRetry: Thread = {
   label: 'mcp/auth-retry',
   rules: [
@@ -141,7 +107,7 @@ const authRetry: Thread = {
   ],
 }
 
-/** replayer — a store result carrying the captured call replays the tool_call and deletes the capture. */
+/** replayer — a store get carrying a captured request replays the mcp_request and deletes the capture. */
 const replayer: Thread = {
   label: 'mcp/replayer',
   rules: [
@@ -150,8 +116,8 @@ const replayer: Thread = {
         {
           type: WORKER_MESSAGE_KINDS.store_request_result,
           query:
-            '. as $d | select($d.result.value.mcpCall != null) | {id: ($d.id + "-retry"), tool: $d.result.value.mcpCall.tool, input: $d.result.value.mcpCall.input}',
-          target: WORKER_MESSAGE_KINDS.tool_call,
+            '. as $d | select($d.result.value.op != null) | {id: ($d.id + "-retry"), op: $d.result.value.op, input: $d.result.value.input}',
+          target: WORKER_MESSAGE_KINDS.mcp_request,
           detailSchema: {
             type: 'object',
             properties: { id: { type: 'string', minLength: 1 }, result: { type: 'object' } },
@@ -161,7 +127,7 @@ const replayer: Thread = {
         {
           type: WORKER_MESSAGE_KINDS.store_request_result,
           query:
-            '. as $d | select($d.result.value.mcpCall != null) | {id: $d.id, op: "delete", input: {collection: "mcp-calls", key: $d.id}}',
+            '. as $d | select($d.result.value.op != null) | {id: $d.id, op: "delete", input: {collection: "mcp-calls", key: $d.id}}',
           target: WORKER_MESSAGE_KINDS.store_request,
           detailSchema: {
             type: 'object',
@@ -175,6 +141,4 @@ const replayer: Thread = {
 }
 
 /** The mcp-client thread library — add to the program alongside the satellites. */
-export const mcpThreads: Thread[] = [callCapture, resultCleaner, authSurfacer, authRetry, replayer]
-
-export { STORE_REQUEST_DETAIL }
+export const mcpThreads: Thread[] = [authCapture, authSurfacer, authRetry, replayer]

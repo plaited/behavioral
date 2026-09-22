@@ -93,7 +93,10 @@ const hostOf = (url: string): string => {
   }
 }
 
-const tokensKey = (serverUrl: string): string => `${hostOf(serverUrl)}:tokens`
+// The keychain names within the service — exported so the keychain-floor
+// reader (the mcp worker) derives the same keys as the writer (the provider)
+// from one source.
+export const tokensKey = (serverUrl: string): string => `${hostOf(serverUrl)}:tokens`
 const clientInfoKey = (serverUrl: string): string => `${hostOf(serverUrl)}:clientinfo`
 const discoveryKey = (serverUrl: string): string => `${hostOf(serverUrl)}:discovery`
 

@@ -19,15 +19,6 @@
 
 import type { JSONSchemaType, ValidateFunction } from 'ajv'
 import { ajv } from '../tools/define-tool.ts'
-import {
-  mcpCallTool,
-  mcpDiscover,
-  mcpGetPrompt,
-  mcpListPrompts,
-  mcpListResources,
-  mcpListTools,
-  mcpReadResource,
-} from '../tools/mcp-client.ts'
 import { pluginClient } from '../tools/plugin-client.ts'
 import {
   skillDiscover,
@@ -71,15 +62,10 @@ const entry = <TInput, TOutput>(tool: ToolProduct<TInput, TOutput>): FleetEntry 
 
 // The unbound fleet — one definition, N bindings. Each host binds at its
 // composition root; the CLI binds below with the CLI context (the broker
-// env-data upgrade lands with the broker slice).
+// env-data upgrade lands with the broker slice). The mcp-client tools left
+// the fleet for the dedicated worker family (src/workers/mcp-client.worker.ts
+// + the src/threads/mcp-client.ts spine).
 const FLEET_BINDERS = [
-  mcpCallTool,
-  mcpListTools,
-  mcpListPrompts,
-  mcpGetPrompt,
-  mcpListResources,
-  mcpReadResource,
-  mcpDiscover,
   pluginClient,
   skillDiscover,
   skillRead,

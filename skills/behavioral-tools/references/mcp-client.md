@@ -1,46 +1,63 @@
-# mcp-client — remote MCP server operations
+# mcp-client — the remote MCP worker family
 
-Seven tools fronting a remote MCP server: discover its surface in one call,
-or call tools, list/fetch prompts, and list/read resources individually.
-Every tool returns remote MCP data only — the dispatcher never writes a
-store.
+Remote MCP server operations are a **worker family**, not CLI fleet tools:
+`src/workers/mcp-client.worker.ts` (spawned by URL) holds the connections,
+and the engine speaks to it over the behavioral event wire. The
+`src/threads/mcp-client.ts` thread spine orchestrates cross-turn auth
+replay.
 
-## Tools
+## The wire
 
-| Tool | Returns |
-|------|---------|
-| `mcp-discover` | Tools, prompts, and resources in one call (missing capabilities → empty arrays) |
-| `mcp-call-tool` | The result of calling a named tool on the server |
-| `mcp-list-tools` | The tools the server exposes |
-| `mcp-list-prompts` | The prompts the server exposes |
-| `mcp-get-prompt` | A rendered prompt |
-| `mcp-list-resources` | The resources the server exposes |
-| `mcp-read-resource` | A resource's contents |
+| Event | Detail | Direction |
+|-------|--------|-----------|
+| `mcp_request` | `{ id, op, input }` | engine → worker |
+| `mcp_request_result` | `{ id, result }` | worker → engine |
+| `mcp_cancel` | `{ id }` | engine → worker |
 
-## Lifecycle
+The seven ops (`detail.op`): `discover`, `list-tools`, `call-tool`,
+`list-prompts`, `get-prompt`, `list-resources`, `read-resource`. Each op
+input carries the server `url` plus the op's own fields (`tool`/`args` for
+call-tool, `name` for get-prompt, `uri` for read-resource) and an optional
+`timeoutMs` wall-clock deadline for the whole call.
 
-Start with `mcp-discover` to learn a server's full surface (name, tools,
-prompts, resources) in one round-trip, then narrow to the specific operation
-(`mcp-call-tool`, `mcp-get-prompt`, `mcp-read-resource`). The list operations
-are cheap fallbacks when you already know the category.
+## The result envelope
 
-## Examples
+`detail.result` is a typed envelope — errors-as-data, never a throw:
 
-```bash
-# One round-trip surface discovery
-behavioral tools '{"tool":"mcp-discover","input":{"server":"https://api.example.com/mcp"}}'
-
-# Call a remote tool
-behavioral tools '{"tool":"mcp-call-tool","input":{"server":"https://api.example.com/mcp","tool":"search","args":{"query":"behavioral"}}}'
+```json
+{ "id": "…", "status": "…", "durationMs": 42 }
 ```
 
-## Notes
+- `completed` — `output` carries the remote MCP data (loose; consumers gate
+  with their own `detailSchema`).
+- `authorization_required` — the call hit a 401; `message` holds the reason
+  and `request` echoes `{ op, input }` (the replay spine's capture payload).
+- `timeout` / `canceled` — the two stop doors: the input `timeoutMs` (default
+  30s) or a `mcp_cancel` mid-flight.
+- `error` — invalid op input (the message names the AJV errors) or a failed
+  call/connection.
 
-- Server identity: the `server` field addresses the remote MCP server
-  (streamable-http URL). Check the tool's input schema for the exact field
-  names — `behavioral tools --schema input --tool mcp-discover` is
-  authoritative.
-- A failed connection or MCP handshake surfaces as the process error (exit
-  1) with the failure message on stderr — it is not an inline result.
-- `behavioral tools --schema output --tool mcp-discover` — the discovery
-  output shape.
+## Auth
+
+Per-call input credentials are **retired** — the wire carries the server
+URL only. Auth binds at the worker's module scope: broker env-data
+(`MCP_BROKER_URL` + `MCP_BROKER_BOOT_SECRET`, seeded by the spawning host)
+with the OS-keychain floor beneath it. Neither yields a token → the call
+goes unauthenticated → the server's 401 → typed `authorization_required`.
+
+## The auth replay spine (threads)
+
+An `authorization_required` result is captured in the store (`mcp-calls`,
+keyed by call id, value = the echoed request), surfaced to the host as
+`mcp_authorization_required { id, reason }` (the shell's "authorize X"
+prompt), and after the host re-enters `mcp_authorization_granted { id }`,
+the captured request is replayed and the capture deleted. Successful calls
+never touch the store.
+
+## Composing
+
+Threads request `mcp_request` events like any other worker family; hosts
+mount the family by adding `mcp: new Worker(new URL('./mcp-client.worker.ts', import.meta.url))`
+to the `useWorkers` workers map. Schema-reflect the op inputs via
+`src/workers/mcp-client.types.ts` (`MCP_*_OP_INPUT_SCHEMA`) when model-facing
+context is needed.
