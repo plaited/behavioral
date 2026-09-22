@@ -149,10 +149,40 @@ ingress + a plugin-shipped behavior surface.
 
 ## Decision Log
 
-<!-- LANDED 2026-09-21: mcp worker conversion (c8e50827) + the skills/plugin ICL
-     thread libraries (76c0cafd, aff0fc18). Fleet = 6, all threads/recipes built.
-     Remaining: conventions skill, extract/validate-links recipes, fixture ports,
-     governor thread, then the tool deletions (fleet 6 → 0). -->
+<!-- LANDED 2026-09-21: mcp worker conversion (c8e50827) + the full ICL slice —
+     scan/catalog (76c0cafd), manifests (aff0fc18), links recipes (8d56f6dd),
+     the conventions skill, docs sweep. Remaining: the deletion sweep (fleet 6 → 0)
+     and the governor thread (plugin admission). -->
+
+### 2026-09-21 — landed: the links contract pair + the conventions skill (the ICL slice completes)
+
+- **The skill-links threads (8d56f6dd):** extract-links + validate-links as
+  stored recipes (the parser transcribed verbatim) with a seeder
+  (recipes-as-tenant) and two DISPATCHERS — links_request becomes the
+  tool_call directly. The design discovery, logged as law: **bun run -
+  reads its script from stdin, so the recipe IS the stdin payload** (no
+  data channel left there) and **transforms are memoryless** (a
+  get-then-replay store chain cannot carry the request input — recipe text
+  and input never co-occur in one event). Honest B-shape fix: recipe text
+  rides the dispatcher query as STATIC THREAD DATA (JSON.stringify → a
+  valid jq string literal — never model context); per-call markdown rides
+  the tools worker's env channel (LINKS_INPUT; LINKS_ROOT_RELATIVE).
+- **The conventions skill authored (skills/skill-conventions/SKILL.md):**
+  the ICL teaching doc — frontmatter fence contract, lenient validation
+  table, scan roots, the three store tenants, links_request dispatching,
+  the pinned extraction order, the recipe-authoring shape (env-in/JSON-out,
+  dependencies-free), and the plugin §11.3 posture. Written MORE precisely
+  than the git case per the 2026-09-19 ruling. Bootstrap law noted inside:
+  the host seeds it; it cannot be discovered by the mechanism it teaches.
+- **Docs swept:** behavioral-tools' subject is now the mcp worker family
+  alone (the fleet references died with the skill-client/plugin-client
+  reference docs); behavioral's companion lines retarget (mcp reference +
+  skill-conventions).
+- **Dogfooded:** the scan recipe run over a real tree cataloged 14 skills,
+  zero warnings.
+- **NEXT (approved, sequencing):** the deletion sweep — src/tools/,
+  src/cli/tools.ts + spec, the bin registration, AGENTS.md boundaries
+  (fleet 6 → 0; behavioral-tools = the mcp worker-family skill).
 
 ### 2026-09-21 — landed: the skill + plugin thread libraries (the ICL slice; commits 76c0cafd, aff0fc18)
 

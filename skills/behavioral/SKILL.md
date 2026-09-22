@@ -52,11 +52,11 @@ only when the task calls for it.
 | Capturing/grading an agent run — eval trace primitives, divergence analysis | [`references/eval.md`](./references/eval.md) |
 | Design-system spec — DESIGN.md derivative, Structural IA, custom properties, `@scope`/`:host()`/`::part()`, scale + affordances/feedback (in-progress consensus surface) | [`references/design-spec.md`](./references/design-spec.md) |
 
-**Companion skill:** calling the tools from this framework (git, TypeScript
-LSP, MCP, html, frontier, discovery, skill/plugin clients) is the
-**behavioral-tools** skill — the single operator surface for the tool fleet
-(`behavioral tools '{"tool":"…","input":{…}}'`). This skill owns the
-concepts; that skill owns the tool contracts.
+**Companion skills:** remote MCP operations are the **mcp worker family**
+(`mcp_request` wire — see `behavioral-tools/references/mcp-client.md`); the
+skill/plugin domain conventions (store tenants, scan recipes, `links_request`,
+ICL composition) are the **skill-conventions** skill. This skill owns the
+concepts; those skills own the operator contracts.
 
 ## Repo conventions
 
