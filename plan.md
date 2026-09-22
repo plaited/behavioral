@@ -152,6 +152,53 @@ ingress + a plugin-shipped behavior surface.
 <!-- LANDED 2026-09-21 (c8e50827): the mcp worker conversion — see the entry below.
      Fleet 13 → 6. Remaining: plugin-client + skill-client deletion via ICL. -->
 
+### 2026-09-21 — ruled: the taskbar PARENTS the harness over pipes; zero local network surface — no localhost, no bundled harness
+
+- **Pilot's ruling ("agreed and log"): desktop/taskbar does NOT bundle the
+  harness in-process.** The cold-subprocess boundary is CONTAINMENT, not
+  wiring: the shell worker executes model-authored code (bash + bun run -),
+  so the process boundary is what keeps that code away from the keyring,
+  gives it no persistence, and keeps its crashes off the host — the daemon
+  ruling's crash-surface concerns return the moment agent code shares a
+  process with credentials. (Technical wall named for the record: Bun is not
+  embeddable as a library and a Tauri webview cannot run the Bun-dependent
+  harness — in-process was never actually on the table for a Tauri shell.)
+- **The local carrier is the parent-child pipe (inherited fds), not a
+  socket.** The taskbar already owns the turn lifecycle — it spawns the cold
+  harness — so egress/ingress ride stdio/extra-fd pipes with the SAME
+  ServerMessage/ClientMessage vocabulary ("one wire vocabulary, N carriers"
+  one level up). This REPLACES the local WS-dial shape of the egress
+  architecture: locally, nothing listens on the network at all. Composes
+  with the charted controller ruling (views → Tauri IPC): after both, the
+  local surface is views→IPC→shell→pipes→harness with zero TCP/sockets.
+- **The broker dissolves into the egress stream as a message kind** —
+  harness→shell `request_access_token { server }`, shell→harness `{ token }`.
+  No endpoint, no listener, no URL, no port; fd visibility is inherited, so
+  the channel is private by construction. The per-boot secret stays as
+  belt-and-braces, no longer load-bearing. Broker-slice amendment: there is
+  NO localhost broker endpoint to build — the slice is the shell-side token
+  message handler on the pipe.
+- **The mcp worker's binding seam is unchanged:** env-data at module scope;
+  the provider factory hides the carrier (`MCP_BROKER_CARRIER=pipe` or
+  equivalent — data, never a function). Credential laws hold everywhere:
+  never on the tool wire, never in agent-reachable processes; worst-case
+  blast radius stays one expiring access token.
+- **Carrier matrix (revised):** desktop = spawned child + pipes; mobile =
+  in-webview + Tauri IPC; bare terminal = keychain floor + one-shot
+  `behavioral auth` provisioning; remote fronting server = same pipe-parent
+  code, WS only at the real network perimeter — where connection tokens and
+  Origin checks belong. Connection tokens demote from a local concern to a
+  remote-fronting-server concern.
+- **Fallback carrier:** unix domain socket at 0600 if pipe plumbing proves
+  awkward — still strictly better than 127.0.0.1 HTTP (no browser-tab /
+  DNS-rebinding class, FS permissions). Honest costs accepted: Rust-side fd
+  passing + line framing is more work than Bun.serve; per-turn channels are
+  fine (tokens mint per turn); the curl-the-broker debugging handle is lost.
+- **Open sub-question folded into the broker slice:** the worker's thin
+  `POST request_access_token` fetch (MINIMAL, unpinned) re-cuts to the pipe
+  message kind when the slice lands — one honest shape change, already
+  anticipated by the MINIMAL note.
+
 ### 2026-09-21 — landed: the mcp worker conversion (commits 9530a83f…c8e50827)
 
 - **Sequence honored (Q5/A):** defineTool bind-late refactor (9530a83f) →
