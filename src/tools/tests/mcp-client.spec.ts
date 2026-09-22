@@ -116,6 +116,34 @@ describe('mcp-client tools — schema contract (RED)', () => {
   })
 })
 
+describe('mcp-client tools — the ctx.auth seam (defined once, bound late)', () => {
+  test('the bound ctx.auth factory supplies the transport auth provider', async () => {
+    const { url, fetch, close } = await startMcpServer()
+    try {
+      await withFetch(fetch as FetchLike, async () => {
+        const factoryCalls: string[] = []
+        const bound = mcpDiscoverBinder({
+          auth: (serverUrl) => {
+            factoryCalls.push(serverUrl.href)
+            return {
+              // A distinctive failure inside the provider is the observable:
+              // the transport calls token() before the first request, so if
+              // the bound factory's provider reached the transport, the call
+              // fails with the marker — proving the ctx won.
+              token: async () => {
+                throw new Error('AUTH_CTX_MARKER')
+              },
+            }
+          },
+        })
+        await expect(bound({ url })).rejects.toThrow('AUTH_CTX_MARKER')
+        expect(factoryCalls).toEqual([url])
+      })
+    } finally {
+      await close()
+    }
+  })
+})
 describe('mcp-client tools — one round-trip per tool (in-process handler.fetch)', () => {
   test('round-trips all seven tools against a real in-process MCP server', async () => {
     const { url, fetch, close } = await startMcpServer()

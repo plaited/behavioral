@@ -81,6 +81,19 @@ type RemoteMcpAuthConfig =
     }
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// The capability context — defined once, bound late (the host composition
+// root provides the auth factory; credentials never ride the tool input)
+// ---------------------------------------------------------------------------
+
+import type { AuthProvider } from '@modelcontextprotocol/client'
+
+/** Per-server auth provider constructor — the host binds it (broker, IPC, keychain). */
+export type AuthProviderFactory = (serverUrl: URL) => AuthProvider
+
+/** The mcp-client tools' capability context. */
+export type AuthCtx = { auth?: AuthProviderFactory }
+
 // Auth JSON schema — single source for auth-shape validation, compiled once
 // with AJV. The model-facing input schema treats `auth` as a permissive object;
 // the tool validates it at the trust boundary here (no parallel schema source,
@@ -552,7 +565,9 @@ export const createKeychainOAuthProvider = (
 
 type ResolvedSessionOptions = {
   headers?: Record<string, string>
-  authProvider?: OAuthClientProvider
+  // The SDK transport accepts either shape (a full OAuthClientProvider or a
+  // minimal AuthProvider) and adapts automatically.
+  authProvider?: OAuthClientProvider | AuthProvider
   timeoutMs?: number
 }
 
@@ -575,13 +590,24 @@ const resolveAuth = async (config: RemoteMcpAuthConfig, url: string): Promise<Re
   }
 }
 
-const resolveSessionOptions = async (input: {
-  url: string
-  auth?: RemoteMcpAuthConfig
-  headers?: Record<string, string>
-  timeoutMs?: number
-}): Promise<ResolvedSessionOptions> => {
+const resolveSessionOptions = async (
+  input: {
+    url: string
+    auth?: RemoteMcpAuthConfig
+    headers?: Record<string, string>
+    timeoutMs?: number
+  },
+  ctx?: AuthCtx,
+): Promise<ResolvedSessionOptions> => {
   const options: ResolvedSessionOptions = {}
+  // The bound capability context wins — the composition root's factory
+  // supersedes any per-call auth config (the credentials-out-of-inputs path).
+  if (ctx?.auth) {
+    options.authProvider = ctx.auth(new URL(input.url))
+    if (input.headers) options.headers = { ...input.headers }
+    if (input.timeoutMs) options.timeoutMs = input.timeoutMs
+    return options
+  }
   if (input.headers) options.headers = { ...input.headers }
   if (input.timeoutMs) options.timeoutMs = input.timeoutMs
   if (input.auth) {
@@ -639,8 +665,12 @@ const discoverCapabilities = async (client: Client, timeoutMs?: number): Promise
  * provider). Transport `fetch` is the ambient global, so the SDK's in-process
  * `handler.fetch` test pattern applies by assigning `globalThis.fetch`.
  */
-const withSession = async <T>(input: McpClientSharedInput, operation: (client: Client) => Promise<T>): Promise<T> => {
-  const { headers, authProvider } = await resolveSessionOptions(input)
+const withSession = async <T>(
+  input: McpClientSharedInput,
+  ctx: AuthCtx | undefined,
+  operation: (client: Client) => Promise<T>,
+): Promise<T> => {
+  const { headers, authProvider } = await resolveSessionOptions(input, ctx)
   const client = new Client(CLIENT_INFO)
   const transport = new StreamableHTTPClientTransport(new URL(input.url), {
     requestInit: headers ? { headers } : undefined,
@@ -674,9 +704,10 @@ export const mcpCallTool = defineTool(
     inputSchema: McpCallToolInputSchema,
     outputSchema: McpCallToolOutputSchema,
   },
-  (input): Promise<McpCallToolOutput> =>
+  (input, _validate, ctx: AuthCtx | undefined): Promise<McpCallToolOutput> =>
     withSession(
       input,
+      ctx,
       async (client) =>
         (await withTimeout(input.timeoutMs, () =>
           client.callTool({ name: input.tool, arguments: input.args }),
@@ -695,8 +726,8 @@ export const mcpListTools = defineTool(
     inputSchema: McpListToolsInputSchema,
     outputSchema: McpListToolsOutputSchema,
   },
-  (input): Promise<McpListToolsOutput> =>
-    withSession(input, async (client) => ({
+  (input, _validate, ctx: AuthCtx | undefined): Promise<McpListToolsOutput> =>
+    withSession(input, ctx, async (client) => ({
       tools: (await withTimeout(input.timeoutMs, async () => (await client.listTools()).tools)) as McpTool[],
     })),
 )
@@ -712,8 +743,8 @@ export const mcpListPrompts = defineTool(
     inputSchema: McpListPromptsInputSchema,
     outputSchema: McpListPromptsOutputSchema,
   },
-  (input): Promise<McpListPromptsOutput> =>
-    withSession(input, async (client) => ({
+  (input, _validate, ctx: AuthCtx | undefined): Promise<McpListPromptsOutput> =>
+    withSession(input, ctx, async (client) => ({
       prompts: (await withTimeout(input.timeoutMs, async () => (await client.listPrompts()).prompts)) as McpPrompt[],
     })),
 )
@@ -730,8 +761,8 @@ export const mcpGetPrompt = defineTool(
     inputSchema: McpGetPromptInputSchema,
     outputSchema: McpGetPromptOutputSchema,
   },
-  (input): Promise<McpGetPromptOutput> =>
-    withSession(input, async (client) => ({
+  (input, _validate, ctx: AuthCtx | undefined): Promise<McpGetPromptOutput> =>
+    withSession(input, ctx, async (client) => ({
       messages: (await withTimeout(
         input.timeoutMs,
         async () => (await client.getPrompt({ name: input.name, arguments: input.args })).messages,
@@ -750,8 +781,8 @@ export const mcpListResources = defineTool(
     inputSchema: McpListResourcesInputSchema,
     outputSchema: McpListResourcesOutputSchema,
   },
-  (input): Promise<McpListResourcesOutput> =>
-    withSession(input, async (client) => ({
+  (input, _validate, ctx: AuthCtx | undefined): Promise<McpListResourcesOutput> =>
+    withSession(input, ctx, async (client) => ({
       resources: (await withTimeout(
         input.timeoutMs,
         async () => (await client.listResources()).resources,
@@ -770,8 +801,8 @@ export const mcpReadResource = defineTool(
     inputSchema: McpReadResourceInputSchema,
     outputSchema: McpReadResourceOutputSchema,
   },
-  (input): Promise<McpReadResourceOutput> =>
-    withSession(input, async (client) => ({
+  (input, _validate, ctx: AuthCtx | undefined): Promise<McpReadResourceOutput> =>
+    withSession(input, ctx, async (client) => ({
       contents: (await withTimeout(
         input.timeoutMs,
         async () => (await client.readResource({ uri: input.uri })).contents,
@@ -792,5 +823,6 @@ export const mcpDiscover = defineTool(
     inputSchema: McpDiscoverInputSchema,
     outputSchema: McpDiscoverOutputSchema,
   },
-  (input): Promise<McpDiscoverOutput> => withSession(input, (client) => discoverCapabilities(client, input.timeoutMs)),
+  (input, _validate, ctx: AuthCtx | undefined): Promise<McpDiscoverOutput> =>
+    withSession(input, ctx, (client) => discoverCapabilities(client, input.timeoutMs)),
 )
