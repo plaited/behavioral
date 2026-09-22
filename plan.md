@@ -149,8 +149,43 @@ ingress + a plugin-shipped behavior surface.
 
 ## Decision Log
 
-<!-- LANDED 2026-09-21 (c8e50827): the mcp worker conversion — see the entry below.
-     Fleet 13 → 6. Remaining: plugin-client + skill-client deletion via ICL. -->
+<!-- LANDED 2026-09-21: mcp worker conversion (c8e50827) + the skills/plugin ICL
+     thread libraries (76c0cafd, aff0fc18). Fleet = 6, all threads/recipes built.
+     Remaining: conventions skill, extract/validate-links recipes, fixture ports,
+     governor thread, then the tool deletions (fleet 6 → 0). -->
+
+### 2026-09-21 — landed: the skill + plugin thread libraries (the ICL slice; commits 76c0cafd, aff0fc18)
+
+- **Both ICL replacements are built, green, and pushed.** Each library has
+  the full three-layer coverage: engine rules (transform matching,
+  once-ness, gate fail-closed), REAL-RUN integration (the recipe executed
+  via actual `bun run -` against fixture trees with HOME overridden —
+  frontmatter fence-slicing and the §11.3 posture proven end-to-end), and
+  TRANSPORT semantics (the boot requester self-starts on the add_threads
+  trailing step — no trigger; the cascade rides a triggered result).
+- **skill-client threads (76c0cafd):** boot thread requests the scan
+  recipe (bun run -, format json); catalog transform puts the result as
+  ONE store value (skills/catalog). SKILL_CATALOG_SCHEMA is schema-data
+  (one shape, three uses) nesting under result.jsonData in the transform's
+  detailSchema — validate-before-put, fail-closed.
+- **plugin-client threads (aff0fc18):** same shape (plugins/manifests
+  tenant). The recipe is DEPENDENCY-FREE (bun run - in arbitrary cwds
+  cannot rely on node_modules resolution) with §11.3 hand-rolled; §7.2.1
+  URL/header/cwd rules included; fatal plugin.json → skip + warn, others
+  load. PLUGIN_MANIFEST_SCHEMA is schema-data, ready for the governor
+  threads. Conventional scan roots: .agents/plugins/ project + user
+  (greppable MINIMAL decision). No dedup — admission policy is the
+  governor's.
+- **TDD honored:** both slices ran parked-or-fresh RED specs → minimal
+  GREEN → gate-test RED → schema-gate GREEN → transport coverage.
+- **The TOOLS still live** (fleet = 6): deletion per the logged sequences
+  awaits the conventions skill + extract/validate-links recipes
+  (skill-client) and the governor thread consuming PLUGIN_MANIFEST_SCHEMA
+  (plugin-client) + fixture ports. After both: fleet 6 → 0 and the
+  `behavioral tools` dispatcher goes vestigial.
+- **Worktree residue (pilot stakes, untouched):** src/cli/step.ts,
+  src/cli/setup.ts, and the empty src/threads/default.ts (presumably the
+  default-thread-pack home — pilot's call).
 
 ### 2026-09-21 — ruled: the taskbar PARENTS the harness over pipes; zero local network surface — no localhost, no bundled harness
 
@@ -2714,16 +2749,13 @@ repo and risks staleness.
 
 ## Open Questions
 
-- **plugin-client fleet-test ruling (audit 2026-09-21, dependency: governor
-  threads).** Analysis says GOES: manifest reading + AJV validation + dir
-  listing are composable via `bun run -` recipes; the §11.3 validation posture
-  is stored-recipe contract logic; the tool's own header already locates
-  gating authority in "host structure + governor threads, not plugin
-  self-description." The prior hedge ("probably stays — spec conformance =
-  boundary logic") conflated validation with a trust boundary — a verbatim
-  replayed recipe pins conformance without a compiled tool. Pilot ruling
-  pending: confirm deletion (fleet 13 → 7) and sequencing (the manifest schema
-  must reach the governor threads as schema-data before the tool dies).
+- **plugin-client tool deletion sequencing (RESOLVED-IN-PART 2026-09-21 —
+  the ICL threads landed, aff0fc18).** The audit ruling stands (GOES); the
+  manifest schema now exists as schema-data (PLUGIN_MANIFEST_SCHEMA,
+  exported and gating the manifests put). Remaining before the tool dies:
+  (1) the governor thread consuming the schema over the store tenant,
+  (2) the fixture port proving the hand-rolled recipe equivalent to the
+  tool's ajv-compiled checks, (3) delete tool + spec + FLEET_BINDER.
 - **mcp-client conformance wiring (2026-09-21; reframed by the worker
   conversion).** The pilot's risk-analysis-server (local stdio MCP, 5 tools,
   fire-and-poll sweeps, no MCP-level auth) is a natural real-server target for
