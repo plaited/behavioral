@@ -3,7 +3,7 @@
  * (`behavioral.worker.ts`) — the transport semantics the pure-engine spec
  * never exercises: the seeder is a REQUESTER, so `add_threads` provisions
  * it AND the trailing step self-starts the recipe puts with no trigger; a
- * triggered links_request cascades the dispatcher's tool_call (the router's
+ * triggered links_request cascades the dispatcher's shell_request (the router's
  * re-entry role played by this mock worker client).
  */
 import { describe, expect, test } from 'bun:test'
@@ -58,7 +58,7 @@ describe('skill-links threads — through the engine worker transport', () => {
     }
   })
 
-  test('a triggered links_request cascades the dispatcher tool_call', async () => {
+  test('a triggered links_request cascades the dispatcher shell_request', async () => {
     const engine = spawnEngineTransport()
     try {
       engine.addThreads(skillLinksThreads)
@@ -67,12 +67,12 @@ describe('skill-links threads — through the engine worker transport', () => {
         detail: { id: 'l1', recipe: 'extract-links', input: { markdown: 'See [a](a.ts)' } },
       })
       const selections = await engine.waitFor((s) =>
-        s.some((x) => x.type === WORKER_MESSAGE_KINDS.tool_call && x.detail?.id === 'l1'),
+        s.some((x) => x.type === WORKER_MESSAGE_KINDS.shell_request && x.detail?.id === 'l1'),
       )
-      const call = selections.find((s) => s.type === WORKER_MESSAGE_KINDS.tool_call && s.detail?.id === 'l1')
-      expect(call?.detail?.tool).toBe('skill-extract-links')
+      const call = selections.find((s) => s.type === WORKER_MESSAGE_KINDS.shell_request && s.detail?.id === 'l1')
+      expect(call?.detail?.label).toBe('skill-extract-links')
       const input = call?.detail?.input as Record<string, unknown>
-      expect(input.stdin).toBe(SKILL_EXTRACT_LINKS_SCRIPT)
+      expect(input.script).toBe(SKILL_EXTRACT_LINKS_SCRIPT)
       expect((input.env as Record<string, unknown>)?.LINKS_INPUT).toBe('See [a](a.ts)')
     } finally {
       engine.terminate()

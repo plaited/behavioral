@@ -9,11 +9,11 @@ import {
   validateResponseCancelEvent,
   validateResponseRequestEvent,
   validateResponseRequestResultEvent,
+  validateShellCancelEvent,
+  validateShellRequestEvent,
+  validateShellRequestResultEvent,
   validateStoreRequestEvent,
   validateStoreRequestResultEvent,
-  validateToolCallEvent,
-  validateToolCallResultEvent,
-  validateToolCancelEvent,
   validateWorkerErrorEvent,
 } from '../workers.types.ts'
 
@@ -57,8 +57,8 @@ describe('workers.types event vocabulary', () => {
     })
     test('rejects a different event type', () => {
       const valid = validateResponseRequestEvent({
-        type: WORKER_MESSAGE_KINDS.tool_call,
-        detail: { id: 'call_1', tool: 'git_status', input: {} },
+        type: WORKER_MESSAGE_KINDS.shell_request,
+        detail: { id: 'call_1', input: { op: 'run', script: 'x' } },
       })
       expect(valid).toBe(false)
     })
@@ -96,49 +96,49 @@ describe('workers.types event vocabulary', () => {
     })
   })
 
-  describe('tool_call', () => {
-    test('accepts a well-formed call', () => {
-      const valid = validateToolCallEvent({
-        type: WORKER_MESSAGE_KINDS.tool_call,
-        detail: { id: 'tool_1', tool: 'git_status', input: {} },
+  describe('shell_request', () => {
+    test('accepts a well-formed request', () => {
+      const valid = validateShellRequestEvent({
+        type: WORKER_MESSAGE_KINDS.shell_request,
+        detail: { id: 'sh_1', input: { op: 'run', script: 'console.log(1)' } },
       })
       expect(valid).toBe(true)
     })
-    test('rejects a detail without tool', () => {
-      const valid = validateToolCallEvent({
-        type: WORKER_MESSAGE_KINDS.tool_call,
-        detail: { id: 'tool_1', input: {} },
+    test('accepts an optional label annotation', () => {
+      const valid = validateShellRequestEvent({
+        type: WORKER_MESSAGE_KINDS.shell_request,
+        detail: { id: 'sh_1', label: 'skill-scan', input: { op: 'shell', command: 'echo hi' } },
       })
-      expect(valid).toBe(false)
+      expect(valid).toBe(true)
     })
     test('rejects a detail without input', () => {
-      const valid = validateToolCallEvent({
-        type: WORKER_MESSAGE_KINDS.tool_call,
-        detail: { id: 'tool_1', tool: 'git_status' },
+      const valid = validateShellRequestEvent({
+        type: WORKER_MESSAGE_KINDS.shell_request,
+        detail: { id: 'sh_1', label: 'skill-scan' },
       })
       expect(valid).toBe(false)
     })
-    test('rejects extra detail keys — tool params live inside input', () => {
-      const valid = validateToolCallEvent({
-        type: WORKER_MESSAGE_KINDS.tool_call,
-        detail: { id: 'tool_1', tool: 'git_status', input: {}, sneaky: true },
+    test('rejects extra detail keys — params live inside input', () => {
+      const valid = validateShellRequestEvent({
+        type: WORKER_MESSAGE_KINDS.shell_request,
+        detail: { id: 'sh_1', bogus: 'x', input: {} },
       })
       expect(valid).toBe(false)
     })
   })
 
-  describe('tool_call_result', () => {
+  describe('shell_request_result', () => {
     test('accepts a well-formed result', () => {
-      const valid = validateToolCallResultEvent({
-        type: WORKER_MESSAGE_KINDS.tool_call_result,
-        detail: { id: 'tool_1', result: { ok: true, value: {} } },
+      const valid = validateShellRequestResultEvent({
+        type: WORKER_MESSAGE_KINDS.shell_request_result,
+        detail: { id: 'sh_1', result: { ok: true, value: {} } },
       })
       expect(valid).toBe(true)
     })
     test('rejects a missing result payload', () => {
-      const valid = validateToolCallResultEvent({
-        type: WORKER_MESSAGE_KINDS.tool_call_result,
-        detail: { id: 'tool_1' },
+      const valid = validateShellRequestResultEvent({
+        type: WORKER_MESSAGE_KINDS.shell_request_result,
+        detail: { id: 'sh_1' },
       })
       expect(valid).toBe(false)
     })
@@ -152,10 +152,10 @@ describe('workers.types event vocabulary', () => {
       })
       expect(valid).toBe(true)
     })
-    test('accepts a well-formed tool_cancel', () => {
-      const valid = validateToolCancelEvent({
-        type: WORKER_MESSAGE_KINDS.tool_cancel,
-        detail: { id: 'tool_1' },
+    test('accepts a well-formed shell_cancel', () => {
+      const valid = validateShellCancelEvent({
+        type: WORKER_MESSAGE_KINDS.shell_cancel,
+        detail: { id: 'shell_1' },
       })
       expect(valid).toBe(true)
     })
@@ -342,14 +342,14 @@ describe('workers.types event vocabulary', () => {
     test('accepts a well-formed crash report', () => {
       const valid = validateWorkerErrorEvent({
         type: WORKER_MESSAGE_KINDS.worker_error,
-        detail: { worker: 'tools-client', message: 'module never loaded' },
+        detail: { worker: 'shell', message: 'module never loaded' },
       })
       expect(valid).toBe(true)
     })
     test('rejects a report without message', () => {
       const valid = validateWorkerErrorEvent({
         type: WORKER_MESSAGE_KINDS.worker_error,
-        detail: { worker: 'tools-client' },
+        detail: { worker: 'shell' },
       })
       expect(valid).toBe(false)
     })

@@ -11,16 +11,17 @@
  *   own variants).
  * - `dispatcher-extract` / `dispatcher-validate` — a `links_request
  *   { id, recipe, input }` event (model- or host-issued) becomes a
- *   `tool_call` directly: the recipe text rides `stdin` (embedded in the
- *   transform query via JSON.stringify — a valid jq string literal — so the
- *   text is STATIC THREAD DATA, never model context) and the markdown rides
- *   the `env` channel (`LINKS_INPUT`; `LINKS_ROOT_RELATIVE`), the tools
- *   worker's designed per-call input seam. One event in, one tool_call out —
+ *   `shell_request` (`run` op) directly: the recipe text rides the input's
+ *   `script` field (embedded in the transform query via JSON.stringify — a
+ *   valid jq string literal — so the text is STATIC THREAD DATA, never model
+ *   context) and the markdown rides the `env` channel (`LINKS_INPUT`;
+ *   `LINKS_ROOT_RELATIVE`), the shell worker's designed per-call input seam. One event in, one
+ * shell_request out —
  *   no store round-trip at call time (transforms are memoryless: the recipe
  *   text and the request input never co-occur in a store result, so a
  *   get-then-replay chain cannot carry the input).
  *
- * The recipes transcribe the retired tool's parser: escape-aware inline
+ * The recipes (executed bun-direct by the shell worker's `run` op) transcribe the retired tool's parser: escape-aware inline
  * markdown link extraction (bracket-depth scan, backslash escape skip),
  * inline-HTML <a>/<img> fallbacks, HTMLRewriter over Bun.markdown.html,
  * external/fragment-only drops, normalize+sort+dedupe, and validate-links'
@@ -48,7 +49,7 @@ export const LINKS_EXTRACT_RECIPE_KEY = 'extract-links'
 /** The validate-links recipe's store key. */
 export const LINKS_VALIDATE_RECIPE_KEY = 'validate-links'
 
-/** The logical recipe executor names — routes through the tools worker. */
+/** The logical recipe names — the shell_request trace labels. */
 export const SKILL_EXTRACT_LINKS_TOOL = 'skill-extract-links'
 export const SKILL_VALIDATE_LINKS_TOOL = 'skill-validate-links'
 
@@ -297,7 +298,7 @@ const LINKS_REQUEST_DETAIL_SCHEMA = {
   required: ['id', 'recipe', 'input'],
 } as const
 
-/** dispatcher-extract — links_request becomes the extract tool_call; recipe static, markdown via env. */
+/** dispatcher-extract — links_request becomes the extract shell_request; recipe static, markdown via env. */
 const dispatcherExtract: Thread = {
   label: 'skill-links/dispatch-extract',
   rules: [
@@ -305,8 +306,8 @@ const dispatcherExtract: Thread = {
       transform: [
         {
           type: LINKS_EVENT_TYPES.request,
-          query: `. as $d | select($d.recipe == "${LINKS_EXTRACT_RECIPE_KEY}") | {id: $d.id, tool: "${SKILL_EXTRACT_LINKS_TOOL}", input: {script: "bun run -", stdin: ${JSON.stringify(SKILL_EXTRACT_LINKS_SCRIPT)}, format: "json", env: {LINKS_INPUT: $d.input.markdown}}}`,
-          target: WORKER_MESSAGE_KINDS.tool_call,
+          query: `. as $d | select($d.recipe == "${LINKS_EXTRACT_RECIPE_KEY}") | {id: $d.id, label: "${SKILL_EXTRACT_LINKS_TOOL}", input: {op: "run", script: ${JSON.stringify(SKILL_EXTRACT_LINKS_SCRIPT)}, format: "json", env: {LINKS_INPUT: $d.input.markdown}}}`,
+          target: WORKER_MESSAGE_KINDS.shell_request,
           detailSchema: LINKS_REQUEST_DETAIL_SCHEMA,
         },
       ],
@@ -314,7 +315,7 @@ const dispatcherExtract: Thread = {
   ],
 }
 
-/** dispatcher-validate — links_request becomes the validate tool_call; rootRelative rides env too. */
+/** dispatcher-validate — links_request becomes the validate shell_request; rootRelative rides env too. */
 const dispatcherValidate: Thread = {
   label: 'skill-links/dispatch-validate',
   rules: [
@@ -322,8 +323,8 @@ const dispatcherValidate: Thread = {
       transform: [
         {
           type: LINKS_EVENT_TYPES.request,
-          query: `. as $d | select($d.recipe == "${LINKS_VALIDATE_RECIPE_KEY}") | {id: $d.id, tool: "${SKILL_VALIDATE_LINKS_TOOL}", input: {script: "bun run -", stdin: ${JSON.stringify(SKILL_VALIDATE_LINKS_SCRIPT)}, format: "json", env: {LINKS_INPUT: $d.input.markdown, LINKS_ROOT_RELATIVE: (if ($d.input.rootRelative // false) then "1" else "0" end)}}}`,
-          target: WORKER_MESSAGE_KINDS.tool_call,
+          query: `. as $d | select($d.recipe == "${LINKS_VALIDATE_RECIPE_KEY}") | {id: $d.id, label: "${SKILL_VALIDATE_LINKS_TOOL}", input: {op: "run", script: ${JSON.stringify(SKILL_VALIDATE_LINKS_SCRIPT)}, format: "json", env: {LINKS_INPUT: $d.input.markdown, LINKS_ROOT_RELATIVE: (if ($d.input.rootRelative // false) then "1" else "0" end)}}}`,
+          target: WORKER_MESSAGE_KINDS.shell_request,
           detailSchema: LINKS_REQUEST_DETAIL_SCHEMA,
         },
       ],

@@ -4,8 +4,8 @@ import { WORKER_MESSAGE_KINDS } from '../workers.constants.ts'
 
 /**
  * Frontier worker integration tests — exercised through the real worker
- * boundary speaking the behavioral event wire: `tool_call` events in
- * (dispatched by `detail.tool`), one `tool_call_result` event out.
+ * boundary speaking the behavioral event wire: `shell_request` events in
+ * (the op lives on the payload), one `shell_request_result` event out.
  *
  * @remarks
  * Ported from the former fleet-tool spec: every load-bearing claim is

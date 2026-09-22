@@ -154,6 +154,36 @@ ingress + a plugin-shipped behavior surface.
      the conventions skill, docs sweep. Remaining: the deletion sweep (fleet 6 → 0)
      and the governor thread (plugin admission). -->
 
+### 2026-09-21 — landed: the shell worker (bun-direct, op-shaped, temp-file payloads); the tool_call wire is gone
+
+- **One atomic commit per Q3:** wire kinds (`shell_request`/
+  `shell_request_result`/`shell_cancel`), `shell.worker.ts` + `shell.types.ts`
+  (family grammar), the op-discriminated input boundary (`run` = TS script
+  bun-direct via `bun run -`, script on stdin; `shell` = Bun Shell command
+  via the constant wrapper — command/payload on env, or temp file over
+  100KB), the router key `tools` → `shell`, the three thread libraries
+  re-voiced (boot threads and links dispatchers emit `shell_request` run-op
+  with `label` annotations), spec/fixture sweep, tools-client.* + the old
+  spec deleted. `detail.tool` died; `detail.label` (optional trace
+  annotation) replaced it.
+- **Temp-file deletion (Q2):** the worker's after-path (`finally`) deletes
+  every payload temp file on EVERY exit — completion and kill alike —
+  best-effort `allSettled`; tmpdir is the last resort. Pinned by spec: no
+  `shell-payload-*` leftovers after completion OR after a timeout kill.
+- **Verification carried into the spec:** run-op bun-direct execution with
+  env merge; shell-op dialect (pipes, $(…), exit codes); own-redirect
+  commands; large command + large stdin through the temp channel
+  (~150KB); timeout/cancel/line-quota group-kills through the wrapper;
+  clamped ceilings; space echo. The clamp order, the /var→/private/var
+  symlink, and the at-the-limit line-cap boundary all bit during the port —
+  three honest test-bug fixes, zero worker changes needed after GREEN.
+- **Spec coverage moved wholesale:** the old tools-client spec's 25 tests
+  re-homed as the 23-test shell spec (op-shaped; the op-discriminated
+  boundary rejects the legacy `{script, stdin}` shape by construction).
+- **Ripple notes:** "tool call" now means only the model-facing dispatch
+  bridge layer (future); AGENTS.md workers boundary + skill-conventions +
+  behavioral-tools updated to the shell family.
+
 ### 2026-09-21 — ruled: the shell slice — name, wire, cleanup, atomicity (Q1/A, Q2, Q3)
 
 - **Q1/A — the family is `shell`, kinds renamed to family grammar:**

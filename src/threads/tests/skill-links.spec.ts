@@ -4,7 +4,7 @@
  * RECIPES (test-pinned semantics replayed verbatim). Two thread roles: the
  * seeder puts the recipes into the store at boot (recipes-as-tenant, the
  * model/ICL surface); the dispatchers turn a links_request into the
- * tool_call (recipe static on stdin, markdown via env). The recipes run for
+ * shell_request run-op (recipe static on input, markdown via env). The recipes run for
  * real through `bun run -` in the integration describe (fixture port of the
  * tool-spec cases).
  */
@@ -65,7 +65,7 @@ describe('skill-links threads — recipe seeding', () => {
 })
 
 describe('skill-links threads — dispatchers', () => {
-  test('an extract links_request becomes the extract tool_call: recipe static on stdin, markdown via env', () => {
+  test('an extract links_request becomes the extract shell_request: recipe static on the run op, markdown via env', () => {
     const selected = runProgram([
       {
         type: 'links_request',
@@ -76,18 +76,18 @@ describe('skill-links threads — dispatchers', () => {
         },
       },
     ])
-    const call = selected.find((s) => s.type === WORKER_MESSAGE_KINDS.tool_call)
+    const call = selected.find((s) => s.type === WORKER_MESSAGE_KINDS.shell_request)
     expect(call).toBeDefined()
     expect(call?.detail?.id).toBe('l1')
-    expect(call?.detail?.tool).toBe('skill-extract-links')
+    expect(call?.detail?.label).toBe('skill-extract-links')
     const input = call?.detail?.input as JsonObject
-    expect(input.script).toBe('bun run -')
-    expect(input.stdin).toBe(SKILL_EXTRACT_LINKS_SCRIPT)
+    expect(input.op).toBe('run')
+    expect(input.script).toBe(SKILL_EXTRACT_LINKS_SCRIPT)
     expect(input.format).toBe('json')
     expect((input.env as JsonObject)?.LINKS_INPUT).toBe('See [a](scripts/a.ts)')
   })
 
-  test('a validate links_request becomes the validate tool_call: rootRelative rides env', () => {
+  test('a validate links_request becomes the validate shell_request: rootRelative rides env', () => {
     const selected = runProgram([
       {
         type: 'links_request',
@@ -98,10 +98,10 @@ describe('skill-links threads — dispatchers', () => {
         },
       },
     ])
-    const call = selected.find((s) => s.type === WORKER_MESSAGE_KINDS.tool_call)
-    expect(call?.detail?.tool).toBe('skill-validate-links')
+    const call = selected.find((s) => s.type === WORKER_MESSAGE_KINDS.shell_request)
+    expect(call?.detail?.label).toBe('skill-validate-links')
     const input = call?.detail?.input as JsonObject
-    expect(input.stdin).toBe(SKILL_VALIDATE_LINKS_SCRIPT)
+    expect(input.script).toBe(SKILL_VALIDATE_LINKS_SCRIPT)
     expect((input.env as JsonObject)?.LINKS_INPUT).toBe('See [x](docs/x.md)')
     expect((input.env as JsonObject)?.LINKS_ROOT_RELATIVE).toBe('1')
   })
@@ -113,7 +113,7 @@ describe('skill-links threads — dispatchers', () => {
         detail: { id: 'l3', recipe: 'nope', input: { markdown: 'x' } },
       },
     ])
-    expect(selected.some((s) => s.type === WORKER_MESSAGE_KINDS.tool_call)).toBe(false)
+    expect(selected.some((s) => s.type === WORKER_MESSAGE_KINDS.shell_request)).toBe(false)
   })
 })
 

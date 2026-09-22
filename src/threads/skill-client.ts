@@ -1,6 +1,6 @@
 /**
  * The skill-client thread library — the ICL replacement for the skill-discover
- * tool: a boot thread requests the scan recipe through the tools worker
+ * tool: a boot thread requests the scan recipe through the shell worker
  * (`bun run -`, the recipe on stdin, `format: 'json'`), and a transform
  * threads the result into the store as the skills CATALOG TENANT.
  *
@@ -25,7 +25,7 @@ import { WORKER_MESSAGE_KINDS } from '../workers/workers.constants.ts'
 
 // ── Vocabulary ───────────────────────────────────────────────────────────────
 
-/** The logical scan executor name — routes through the tools worker (`bun run -`). */
+/** The logical scan name — the shell_request trace label (the run op routes through the shell worker). */
 export const SKILL_SCAN_TOOL = 'skill-scan'
 
 /** The boot scan call's correlation id — the catalog transform matches on it via the store value. */
@@ -58,7 +58,7 @@ export const SKILL_CATALOG_RECORD_SCHEMA = {
  * catalog transform's detailSchema BEFORE the put — validate-before-put as a
  * hard gate. A malformed catalog fails the whole put (fail-closed), never
  * partial admission. Strictness is scoped to `jsonData`; the surrounding
- * ToolsResult fields stay loose (their schema home is the tools family).
+ * ShellResult fields stay loose (their schema home is the shell family).
  */
 export const SKILL_CATALOG_SCHEMA = {
   type: 'object',
@@ -73,7 +73,7 @@ export const SKILL_CATALOG_SCHEMA = {
 // ── The scan recipe (stored-recipe flavor: contract-pinned, replayed verbatim) ─
 
 /**
- * The skill-scan recipe — executed by the tools worker as `bun run -` stdin.
+ * The skill-scan recipe — executed bun-direct by the shell worker's `run` op (script on stdin).
  *
  * For each SKILL.md: read the file → slice the `---` frontmatter fence →
  * `YAML.parse` the slice ONLY (never the whole file). Lenient per-skill
@@ -170,11 +170,11 @@ const skillScanBoot: Thread = {
   rules: [
     {
       request: {
-        type: WORKER_MESSAGE_KINDS.tool_call,
+        type: WORKER_MESSAGE_KINDS.shell_request,
         detail: {
           id: SKILL_SCAN_CALL_ID,
-          tool: SKILL_SCAN_TOOL,
-          input: { script: 'bun run -', stdin: SKILL_SCAN_SCRIPT, format: 'json' },
+          label: SKILL_SCAN_TOOL,
+          input: { op: 'run', script: SKILL_SCAN_SCRIPT, format: 'json' },
         },
       },
     },
@@ -188,7 +188,7 @@ const skillCatalog: Thread = {
     {
       transform: [
         {
-          type: WORKER_MESSAGE_KINDS.tool_call_result,
+          type: WORKER_MESSAGE_KINDS.shell_request_result,
           query:
             '. as $d | select($d.result.jsonData.skills? != null) | {id: $d.id, op: "put", input: {collection: "skills", key: "catalog", value: $d.result.jsonData}}',
           target: WORKER_MESSAGE_KINDS.store_request,

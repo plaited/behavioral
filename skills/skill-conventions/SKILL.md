@@ -11,7 +11,7 @@ description: >
   composing bun run - scripts over skill data, or when wiring skill/plugin
   discovery threads.
 license: ISC
-compatibility: Requires bun and the behavioral runtime (threads + tools worker + store worker)
+compatibility: Requires bun and the behavioral runtime (threads + shell worker + store worker)
 allowed-tools: Bash Read
 ---
 
@@ -26,7 +26,7 @@ document is deliberately precise.
 
 ## The architecture in one paragraph
 
-Boot threads run **scan recipes** through the tools worker; the results are
+Boot threads run **scan recipes** through the shell worker; the results are
 schema-gated and land in the **store** as tenants (`skills/catalog`,
 `plugins/manifests`, `skill-recipes`). The model (or a host) reads those
 tenants to discover what exists, fires **`links_request`** for the
@@ -115,9 +115,9 @@ recompose them by hand; request them:
 } }
 ```
 
-The dispatcher threads turn this into the `tool_call` automatically — the
+The dispatcher threads turn this into the `shell_request` (`run` op) automatically — the
 recipe text is static thread data and never enters model context. The result
-re-enters as the correlated `tool_call_result` with `jsonData`:
+re-enters as the correlated `shell_request_result` with `jsonData`:
 
 - extract → `{ links: [{ value, text }] }` — sorted, de-duplicated, local
   links only (external http/mailto and fragment-only `#` dropped)
@@ -142,7 +142,7 @@ const markdown = process.env.LINKS_INPUT ?? ''
 import { YAML } from 'bun'      // YAML.parse for fences
 import { readdirSync } from 'node:fs'
 // … do the work, dependencies-free (node: + bun builtins only — the
-//    tools worker does not guarantee node_modules resolution in cwd) …
+//    shell worker does not guarantee node_modules resolution in cwd) …
 console.log(JSON.stringify(result))  // stdout = JSON, exactly one object
 ```
 

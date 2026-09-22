@@ -79,8 +79,11 @@ and the impact is broad or unclear, expand coverage until the affected surface i
 registry), the engine entry (`behavioral.worker.ts` — a dumb transport over one behavioral
 program), the router (`use-workers.ts`, `useWorkers` — supersedes the deleted kernel; forwards
 selections verbatim and re-enters worker results as once-threads), and the satellite families:
-`responses-client` (Open Responses model calls), `tools-client` (shell execution), `frontier`
-(reachability analysis), `store` (durable space-scoped persistence). Spawn-by-URL entries end in
+`responses-client` (Open Responses model calls), `shell` (bun-direct script
+execution — `run` op = TS scripts via `bun run -`, `shell` op = Bun Shell
+commands through the constant wrapper; temp-file payloads over ~100KB,
+deleted on every exit), `frontier` (reachability analysis), `store` (durable
+space-scoped persistence). Spawn-by-URL entries end in
 `.worker.ts`; each family owns its event types + input boundary; results echo the request
 `space`.
 **`src/tools/`** — deleted (fleet 0): the ICL conversion retired the CLI tool

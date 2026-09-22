@@ -6,7 +6,7 @@
  * The load-bearing assertion here is the inverse of the mcp spine's
  * quiet-boot test: the scan boot thread is a REQUESTER, and the transport's
  * `add_threads` provisions it AND runs the trailing step — so the scan
- * `tool_call` must self-start with NO trigger at all. The catalog transform
+ * `shell_request` must self-start with NO trigger at all. The catalog transform
  * cascade rides a triggered result (the router's re-entry role played by
  * the mock client). Satellite routing stays covered by the useWorkers spec.
  */
@@ -52,14 +52,14 @@ describe('skill threads — through the engine worker transport', () => {
     try {
       engine.addThreads(skillThreads)
       const selections = await engine.waitFor((s) =>
-        s.some((x) => x.type === WORKER_MESSAGE_KINDS.tool_call && x.detail?.id === SKILL_SCAN_CALL_ID),
+        s.some((x) => x.type === WORKER_MESSAGE_KINDS.shell_request && x.detail?.id === SKILL_SCAN_CALL_ID),
       )
       const call = selections.find(
-        (s) => s.type === WORKER_MESSAGE_KINDS.tool_call && s.detail?.id === SKILL_SCAN_CALL_ID,
+        (s) => s.type === WORKER_MESSAGE_KINDS.shell_request && s.detail?.id === SKILL_SCAN_CALL_ID,
       )
-      expect(call?.detail?.tool).toBe('skill-scan')
+      expect(call?.detail?.label).toBe('skill-scan')
       const input = call?.detail?.input as Record<string, unknown>
-      expect(input.script).toBe('bun run -')
+      expect(input.op).toBe('run')
       expect(input.format).toBe('json')
     } finally {
       engine.terminate()
@@ -71,7 +71,7 @@ describe('skill threads — through the engine worker transport', () => {
     try {
       engine.addThreads(skillThreads)
       engine.trigger({
-        type: WORKER_MESSAGE_KINDS.tool_call_result,
+        type: WORKER_MESSAGE_KINDS.shell_request_result,
         detail: {
           id: SKILL_SCAN_CALL_ID,
           result: {

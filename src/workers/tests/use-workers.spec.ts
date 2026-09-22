@@ -30,9 +30,9 @@ const idSchema = (id: string) => ({
 })
 
 describe('useWorkers router', () => {
-  test('routes a selected tool_call to the tools worker and re-enters its result', async () => {
+  test('routes a selected shell_request to the shell worker and re-enters its result', async () => {
     const traces: Trace[] = []
-    const toolsClientWorker = spawnSatellite()
+    const shellWorker = spawnSatellite()
     const responsesClientWorker = spawnSatellite()
     const engineWorker = useWorkers({
       threads: [
@@ -42,35 +42,35 @@ describe('useWorkers router', () => {
           rules: [
             {
               request: {
-                type: WORKER_MESSAGE_KINDS.tool_call,
-                detail: { id: 't1', tool: 'execute_shell', input: { script: 'echo hi' } },
+                type: WORKER_MESSAGE_KINDS.shell_request,
+                detail: { id: 't1', label: 'execute', input: { op: 'shell', command: 'echo hi' } },
               },
             },
-            { waitFor: [{ type: WORKER_MESSAGE_KINDS.tool_call_result, detailSchema: idSchema('t1') }] },
+            { waitFor: [{ type: WORKER_MESSAGE_KINDS.shell_request_result, detailSchema: idSchema('t1') }] },
           ],
         },
       ],
       traceListener: (trace) => {
         traces.push(trace)
       },
-      workers: { tools: toolsClientWorker, responses: responsesClientWorker },
+      workers: { shell: shellWorker, responses: responsesClientWorker },
       useTrigger: () => {},
     })
-    await waitForTraces(traces, (s) => s.some((t) => t.selected.type === WORKER_MESSAGE_KINDS.tool_call_result))
+    await waitForTraces(traces, (s) => s.some((t) => t.selected.type === WORKER_MESSAGE_KINDS.shell_request_result))
     const types = selectionsOf(traces).map((t) => t.selected.type)
-    expect(types).toContain(WORKER_MESSAGE_KINDS.tool_call)
-    expect(types).toContain(WORKER_MESSAGE_KINDS.tool_call_result)
-    expect(types.indexOf(WORKER_MESSAGE_KINDS.tool_call)).toBeLessThan(
-      types.indexOf(WORKER_MESSAGE_KINDS.tool_call_result),
+    expect(types).toContain(WORKER_MESSAGE_KINDS.shell_request)
+    expect(types).toContain(WORKER_MESSAGE_KINDS.shell_request_result)
+    expect(types.indexOf(WORKER_MESSAGE_KINDS.shell_request)).toBeLessThan(
+      types.indexOf(WORKER_MESSAGE_KINDS.shell_request_result),
     )
     engineWorker.terminate()
-    toolsClientWorker.terminate()
+    shellWorker.terminate()
     responsesClientWorker.terminate()
   })
 
   test('routes a selected response_request to the responses worker and re-enters its result', async () => {
     const traces: Trace[] = []
-    const toolsClientWorker = spawnSatellite()
+    const shellWorker = spawnSatellite()
     const responsesClientWorker = spawnSatellite()
     const engineWorker = useWorkers({
       threads: [
@@ -91,7 +91,7 @@ describe('useWorkers router', () => {
       traceListener: (trace) => {
         traces.push(trace)
       },
-      workers: { tools: toolsClientWorker, responses: responsesClientWorker },
+      workers: { shell: shellWorker, responses: responsesClientWorker },
       useTrigger: () => {},
     })
     await waitForTraces(traces, (s) => s.some((t) => t.selected.type === WORKER_MESSAGE_KINDS.response_request_result))
@@ -99,13 +99,13 @@ describe('useWorkers router', () => {
     expect(types).toContain(WORKER_MESSAGE_KINDS.response_request)
     expect(types).toContain(WORKER_MESSAGE_KINDS.response_request_result)
     engineWorker.terminate()
-    toolsClientWorker.terminate()
+    shellWorker.terminate()
     responsesClientWorker.terminate()
   })
 
   test('wires useTrigger so hosts can inject ingress events', async () => {
     const traces: Trace[] = []
-    const toolsClientWorker = spawnSatellite()
+    const shellWorker = spawnSatellite()
     const responsesClientWorker = spawnSatellite()
     let trigger: Trigger | undefined
     const engineWorker = useWorkers({
@@ -113,7 +113,7 @@ describe('useWorkers router', () => {
       traceListener: (trace) => {
         traces.push(trace)
       },
-      workers: { tools: toolsClientWorker, responses: responsesClientWorker },
+      workers: { shell: shellWorker, responses: responsesClientWorker },
       useTrigger: (t) => {
         trigger = t
       },
@@ -123,13 +123,13 @@ describe('useWorkers router', () => {
     await waitForTraces(traces, (s) => s.some((t) => t.selected.type === 'boot'))
     expect(selectionsOf(traces).some((t) => t.selected.type === 'boot')).toBe(true)
     engineWorker.terminate()
-    toolsClientWorker.terminate()
+    shellWorker.terminate()
     responsesClientWorker.terminate()
   })
 
   test('preserves the requesting event space on the result re-entry', async () => {
     const traces: Trace[] = []
-    const toolsClientWorker = spawnSatellite()
+    const shellWorker = spawnSatellite()
     const responsesClientWorker = spawnSatellite()
     const engineWorker = useWorkers({
       threads: [
@@ -139,33 +139,35 @@ describe('useWorkers router', () => {
           rules: [
             {
               request: {
-                type: WORKER_MESSAGE_KINDS.tool_call,
-                detail: { id: 't9', tool: 'execute_shell', input: { script: 'pwd' } },
+                type: WORKER_MESSAGE_KINDS.shell_request,
+                detail: { id: 't9', label: 'execute', input: { op: 'shell', command: 'pwd' } },
               },
             },
-            { waitFor: [{ type: WORKER_MESSAGE_KINDS.tool_call_result, detailSchema: idSchema('t9') }] },
+            { waitFor: [{ type: WORKER_MESSAGE_KINDS.shell_request_result, detailSchema: idSchema('t9') }] },
           ],
         } satisfies Thread,
       ],
       traceListener: (trace) => {
         traces.push(trace)
       },
-      workers: { tools: toolsClientWorker, responses: responsesClientWorker },
+      workers: { shell: shellWorker, responses: responsesClientWorker },
       useTrigger: () => {},
     })
     await waitForTraces(traces, (s) =>
-      s.some((t) => t.selected.type === WORKER_MESSAGE_KINDS.tool_call_result && t.selected.space === 's1'),
+      s.some((t) => t.selected.type === WORKER_MESSAGE_KINDS.shell_request_result && t.selected.space === 's1'),
     )
-    const resultSelection = selectionsOf(traces).find((t) => t.selected.type === WORKER_MESSAGE_KINDS.tool_call_result)
+    const resultSelection = selectionsOf(traces).find(
+      (t) => t.selected.type === WORKER_MESSAGE_KINDS.shell_request_result,
+    )
     expect(resultSelection?.selected.space).toBe('s1')
     engineWorker.terminate()
-    toolsClientWorker.terminate()
+    shellWorker.terminate()
     responsesClientWorker.terminate()
   })
 
   test('routes cancel events to the owning worker port', async () => {
     const traces: Trace[] = []
-    const toolsClientWorker = spawnSatellite()
+    const shellWorker = spawnSatellite()
     const responsesClientWorker = spawnSatellite()
     const engineWorker = useWorkers({
       threads: [
@@ -175,8 +177,8 @@ describe('useWorkers router', () => {
           rules: [
             {
               request: {
-                type: WORKER_MESSAGE_KINDS.tool_call,
-                detail: { id: 't1', tool: 'execute_shell', input: { script: 'sleep 1' } },
+                type: WORKER_MESSAGE_KINDS.shell_request,
+                detail: { id: 't1', label: 'execute', input: { op: 'shell', command: 'sleep 1' } },
               },
             },
           ],
@@ -184,35 +186,35 @@ describe('useWorkers router', () => {
         {
           once: true,
           label: 'canceller',
-          rules: [{ request: { type: WORKER_MESSAGE_KINDS.tool_cancel, detail: { id: 't1' } } }],
+          rules: [{ request: { type: WORKER_MESSAGE_KINDS.shell_cancel, detail: { id: 't1' } } }],
         },
       ],
       traceListener: (trace) => {
         traces.push(trace)
       },
-      workers: { tools: toolsClientWorker, responses: responsesClientWorker },
+      workers: { shell: shellWorker, responses: responsesClientWorker },
       useTrigger: () => {},
     })
     // The stub reports CANCEL receipt through the result channel with a
-    // `cancel-` prefixed id, which re-enters as a tool_call_result.
+    // `cancel-` prefixed id, which re-enters as a shell_request_result.
     await waitForTraces(traces, (s) =>
       s.some(
         (t) =>
-          t.selected.type === WORKER_MESSAGE_KINDS.tool_call_result &&
+          t.selected.type === WORKER_MESSAGE_KINDS.shell_request_result &&
           (t.selected.detail as { id?: string } | undefined)?.id === 'cancel-t1',
       ),
     )
-    expect(selectionsOf(traces).some((t) => t.selected.type === WORKER_MESSAGE_KINDS.tool_cancel)).toBe(true)
+    expect(selectionsOf(traces).some((t) => t.selected.type === WORKER_MESSAGE_KINDS.shell_cancel)).toBe(true)
     engineWorker.terminate()
-    toolsClientWorker.terminate()
+    shellWorker.terminate()
     responsesClientWorker.terminate()
   })
 
   test('routes frontier_requests to the frontier worker port', async () => {
     const traces: Trace[] = []
-    // A mis-route to the tools port would crash it — the crash fixture makes
+    // A mis-route to the shell port would crash it — the crash fixture makes
     // wrong routing fail loudly instead of silently succeeding.
-    const toolsClientWorker = spawnCrashing()
+    const shellWorker = spawnCrashing()
     const responsesClientWorker = spawnSatellite()
     const frontierWorker = spawnSatellite()
     const engineWorker = useWorkers({
@@ -234,14 +236,14 @@ describe('useWorkers router', () => {
       traceListener: (trace) => {
         traces.push(trace)
       },
-      workers: { tools: toolsClientWorker, responses: responsesClientWorker, frontier: frontierWorker },
+      workers: { shell: shellWorker, responses: responsesClientWorker, frontier: frontierWorker },
       useTrigger: () => {},
     })
     await waitForTraces(traces, (s) => s.some((t) => t.selected.type === WORKER_MESSAGE_KINDS.frontier_request_result))
     const result = selectionsOf(traces).find((t) => t.selected.type === WORKER_MESSAGE_KINDS.frontier_request_result)
     expect((result?.selected.detail as { id?: string } | undefined)?.id).toBe('f1')
     engineWorker.terminate()
-    toolsClientWorker.terminate()
+    shellWorker.terminate()
     responsesClientWorker.terminate()
     frontierWorker.terminate()
   })
@@ -271,7 +273,7 @@ describe('useWorkers router', () => {
       traceListener: (trace) => {
         traces.push(trace)
       },
-      workers: { tools: spawnSatellite(), responses: spawnSatellite(), store: storeWorker },
+      workers: { shell: spawnSatellite(), responses: spawnSatellite(), store: storeWorker },
       useTrigger: () => {},
     })
     await waitForTraces(traces, (s) => s.some((t) => t.selected.type === WORKER_MESSAGE_KINDS.store_request_result))
@@ -309,7 +311,7 @@ describe('useWorkers router', () => {
       traceListener: (trace) => {
         traces.push(trace)
       },
-      workers: { tools: spawnSatellite(), responses: spawnSatellite(), mcp: mcpWorker },
+      workers: { shell: spawnSatellite(), responses: spawnSatellite(), mcp: mcpWorker },
       useTrigger: () => {},
     })
     try {
@@ -330,7 +332,7 @@ describe('useWorkers router', () => {
 
   test('re-enters a worker_error event when a satellite worker crashes', async () => {
     const traces: Trace[] = []
-    const toolsClientWorker = spawnCrashing()
+    const shellWorker = spawnCrashing()
     const responsesClientWorker = spawnSatellite()
     const engineWorker = useWorkers({
       threads: [
@@ -340,8 +342,8 @@ describe('useWorkers router', () => {
           rules: [
             {
               request: {
-                type: WORKER_MESSAGE_KINDS.tool_call,
-                detail: { id: 't1', tool: 'execute_shell', input: { script: 'boom' } },
+                type: WORKER_MESSAGE_KINDS.shell_request,
+                detail: { id: 't1', label: 'execute', input: { op: 'run', script: 'boom' } },
               },
             },
           ],
@@ -356,7 +358,7 @@ describe('useWorkers router', () => {
                   type: WORKER_MESSAGE_KINDS.worker_error,
                   detailSchema: {
                     type: 'object',
-                    properties: { worker: { const: 'tools' } },
+                    properties: { worker: { const: 'shell' } },
                     required: ['worker'],
                   },
                 },
@@ -368,14 +370,14 @@ describe('useWorkers router', () => {
       traceListener: (trace) => {
         traces.push(trace)
       },
-      workers: { tools: toolsClientWorker, responses: responsesClientWorker },
+      workers: { shell: shellWorker, responses: responsesClientWorker },
       useTrigger: () => {},
     })
     await waitForTraces(traces, (s) => s.some((t) => t.selected.type === WORKER_MESSAGE_KINDS.worker_error))
     const crash = selectionsOf(traces).find((t) => t.selected.type === WORKER_MESSAGE_KINDS.worker_error)
-    expect((crash?.selected.detail as { worker?: string } | undefined)?.worker).toBe('tools')
+    expect((crash?.selected.detail as { worker?: string } | undefined)?.worker).toBe('shell')
     engineWorker.terminate()
-    toolsClientWorker.terminate()
+    shellWorker.terminate()
     responsesClientWorker.terminate()
   })
 })

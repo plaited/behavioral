@@ -33,7 +33,7 @@ import { WORKER_MESSAGE_KINDS } from '../workers/workers.constants.ts'
 
 // ── Vocabulary ───────────────────────────────────────────────────────────────
 
-/** The logical scan executor name — routes through the tools worker (`bun run -`). */
+/** The logical scan name — the shell_request trace label (the run op routes through the shell worker). */
 export const PLUGIN_SCAN_TOOL = 'plugin-scan'
 
 /** The boot scan call's correlation id. */
@@ -72,8 +72,8 @@ export const PLUGIN_MANIFEST_SCHEMA = {
  * The recipe→store contract: the coarse manifest-set envelope, enforced by
  * the manifests transform's detailSchema BEFORE the put — validate-before-put
  * as a hard gate (fail-closed, never partial admission). Strictness is scoped
- * to `jsonData`; the surrounding ToolsResult fields stay loose (their schema
- * home is the tools family).
+ * to `jsonData`; the surrounding ShellResult fields stay loose (their schema
+ * home is the shell family).
  */
 export const PLUGIN_MANIFESTS_SCHEMA = {
   type: 'object',
@@ -89,7 +89,7 @@ export const PLUGIN_MANIFESTS_SCHEMA = {
 //    replayed verbatim — the §11.3 posture is zero-variance logic) ───────────
 
 /**
- * The plugin-scan recipe — executed by the tools worker as `bun run -` stdin.
+ * The plugin-scan recipe — executed bun-direct by the shell worker's `run` op (script on stdin).
  *
  * Scans `<cwd>/.agents/plugins/` (project) and `<HOME>/.agents/plugins/`
  * (user); for each plugin dir: read + parse plugin.json → fatal validation
@@ -399,18 +399,18 @@ console.log(JSON.stringify({ plugins: manifests, warnings }))
 
 // ── Threads ───────────────────────────────────────────────────────────────────
 
-/** scan-boot — once: the manifest-scan recipe is requested at boot; the tools worker pipes it. */
+/** scan-boot — once: the manifest-scan recipe is requested at boot; the shell worker runs it. */
 const pluginScanBoot: Thread = {
   label: 'plugin/scan-boot',
   once: true,
   rules: [
     {
       request: {
-        type: WORKER_MESSAGE_KINDS.tool_call,
+        type: WORKER_MESSAGE_KINDS.shell_request,
         detail: {
           id: PLUGIN_SCAN_CALL_ID,
-          tool: PLUGIN_SCAN_TOOL,
-          input: { script: 'bun run -', stdin: PLUGIN_SCAN_SCRIPT, format: 'json' },
+          label: PLUGIN_SCAN_TOOL,
+          input: { op: 'run', script: PLUGIN_SCAN_SCRIPT, format: 'json' },
         },
       },
     },
@@ -424,7 +424,7 @@ const pluginManifests: Thread = {
     {
       transform: [
         {
-          type: WORKER_MESSAGE_KINDS.tool_call_result,
+          type: WORKER_MESSAGE_KINDS.shell_request_result,
           query:
             '. as $d | select($d.result.jsonData.plugins? != null) | {id: $d.id, op: "put", input: {collection: "plugins", key: "manifests", value: $d.result.jsonData}}',
           target: WORKER_MESSAGE_KINDS.store_request,

@@ -49,14 +49,14 @@ describe('plugin threads — through the engine worker transport', () => {
     try {
       engine.addThreads(pluginThreads)
       const selections = await engine.waitFor((s) =>
-        s.some((x) => x.type === WORKER_MESSAGE_KINDS.tool_call && x.detail?.id === PLUGIN_SCAN_CALL_ID),
+        s.some((x) => x.type === WORKER_MESSAGE_KINDS.shell_request && x.detail?.id === PLUGIN_SCAN_CALL_ID),
       )
       const call = selections.find(
-        (s) => s.type === WORKER_MESSAGE_KINDS.tool_call && s.detail?.id === PLUGIN_SCAN_CALL_ID,
+        (s) => s.type === WORKER_MESSAGE_KINDS.shell_request && s.detail?.id === PLUGIN_SCAN_CALL_ID,
       )
-      expect(call?.detail?.tool).toBe('plugin-scan')
+      expect(call?.detail?.label).toBe('plugin-scan')
       const input = call?.detail?.input as Record<string, unknown>
-      expect(input.script).toBe('bun run -')
+      expect(input.op).toBe('run')
       expect(input.format).toBe('json')
     } finally {
       engine.terminate()
@@ -68,7 +68,7 @@ describe('plugin threads — through the engine worker transport', () => {
     try {
       engine.addThreads(pluginThreads)
       engine.trigger({
-        type: WORKER_MESSAGE_KINDS.tool_call_result,
+        type: WORKER_MESSAGE_KINDS.shell_request_result,
         detail: {
           id: PLUGIN_SCAN_CALL_ID,
           result: {

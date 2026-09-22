@@ -1,36 +1,62 @@
 /**
- * Tools-client worker — executes one script per `tool_call` event in a
- * cancellable `bash` subprocess and returns a single bounded terminal
- * `tool_call_result` event.
+ * Shell worker — executes one op per `shell_request` event and returns a
+ * single bounded terminal `shell_request_result` event.
  *
  * @remarks
  * Spawned by URL (never imported) and speaks the behavioral event wire:
- * `tool_call` / `tool_cancel` in, `tool_call_result` out, with any request
- * `space` echoed on the result. `detail.input` is validated against the
- * input boundary below (§5 surface + host bounds); over-ceiling bounds are
- * clamped and the clamp is reported in `ToolsResult.clamped` — policy lives
- * with enforcement. Streamed lines are counted for quotas but not posted:
- * no consumer exists (MINIMAL: router-published delta trace when one does).
+ * `shell_request` / `shell_cancel` in, `shell_request_result` out, with any
+ * request `space` echoed on the result. `detail.input` is validated against
+ * the op-discriminated boundary (`shell.types.ts`) — `'run'` = a TypeScript
+ * script executed bun-direct (`bun run -`, script on stdin), `'shell'` = a
+ * Bun Shell command string through the constant wrapper below.
  *
- * MINIMAL: `Bun.spawn` + `bash -lc` is the launch path (the spec's `Bun.$.lines()`
- * cannot stream or be cancelled — it buffers to EOF and exposes no signal/kill).
- * Upgrade path for non-bash hosts is `Bun.which('bash') ?? Bun.which('sh')`.
+ * THE EXECUTOR IS BUN EVERYWHERE (the bun-direct conversion, verified
+ * empirically 2026-09-21): no bash, no POSIX shell dependency, and the
+ * PowerShell/Windows interpreter question dissolves — Bun Shell is
+ * cross-platform and bash-like. The `run` op spawns
+ * `Bun.spawn(['bun', 'run', '-'])` with the script written to stdin. The
+ * `shell` op spawns the same bun entry with the wrapper on stdin; the
+ * command rides env (`EXEC_CMD`), the payload rides env (`EXEC_STDIN`) or,
+ * over the large-payload threshold (env vars are size-limited per platform),
+ * a temp file (`EXEC_CMD_PATH` / `EXEC_STDIN_PATH` + `Bun.file` redirect —
+ * the documented-parts recipe: `os.tmpdir()` + `Bun.write()` +
+ * `file.delete()`). Payload temp files are deleted in the after-path on
+ * EVERY exit — completion and kill alike (`finally` runs in both); the
+ * deletes are best-effort `allSettled`, the tmpdir the last resort, never
+ * the plan.
  *
- * MINIMAL: control characters beyond ANSI (C0, interlinear annotations) are not
- * sanitized; JSON escaping keeps them harmless in model context. Upgrade path:
- * the prior bash tool's `sanitize()` filter, should output ever feed a terminal.
+ * Containment is the worker's own deadline + group-kill (Bun Shell promises
+ * expose no `.timeout()` on 1.3.14, and the group kill is strictly stronger
+ * — it reaps trees, not just processes): `detached` makes the bun process a
+ * group leader, Bun Shell's children (and the run op's spawned children)
+ * join the group, and `kill(-pid, SIGTERM → SIGKILL)` reaps the whole tree —
+ * verified to survive the wrapper unchanged. Streamed lines are counted for
+ * quotas but not posted: no consumer exists (MINIMAL: router-published
+ * delta trace when one does).
+ *
+ * MINIMAL: control characters beyond ANSI (C0, interlinear annotations) are
+ * not sanitized; JSON escaping keeps them harmless in model context.
  *
  * @packageDocumentation
  */
 
-import type { JSONSchemaType } from 'ajv'
+import { tmpdir } from 'node:os'
+import * as path from 'node:path'
+import type { ValidateFunction } from 'ajv'
+import type { JsonObject } from '../behavioral/behavioral.types.ts'
 import { ajv } from '../behavioral/behavioral.types.ts'
-import type { ToolsFormat, ToolsOptions, ToolsResult, ToolsStatus } from './tools-client.types.ts'
+import {
+  type ShellCallInput,
+  ShellCallInputSchema,
+  type ShellOptions,
+  type ShellResult,
+  type ShellStatus,
+} from './shell.types.ts'
 import { WORKER_MESSAGE_KINDS } from './workers.constants.ts'
-import { type ToolCallEvent, validateToolCallEvent, validateToolCancelEvent } from './workers.types.ts'
+import { type ShellRequestEvent, validateShellCancelEvent, validateShellRequestEvent } from './workers.types.ts'
 
 // ---------------------------------------------------------------------------
-// Defaults
+// Constants
 // ---------------------------------------------------------------------------
 
 /** Default lines captured into a `paged` result. */
@@ -51,43 +77,45 @@ const DEFAULT_TIMEOUT_MS = 30_000
 /** Default stdout+stderr lines allowed before a group kill. */
 const DEFAULT_MAX_LINES = 250
 
+/** The bun entry every execution rides — no shell, no bash, just bun. */
+const BUN_STDIN_ENTRY = ['bun', 'run', '-'] as const
+
+/**
+ * Payload size (characters) over which a command or stdin rides a temp file
+ * instead of env — env vars are size-limited per platform (~256KB on macOS).
+ */
+const LARGE_PAYLOAD_BYTES = 100_000
+
+/**
+ * The constant wrapper for the `'shell'` op — the only script besides the
+ * caller's that ever rides an execution's stdin.
+ *
+ * The command arrives via env (small) or a temp file (large); the payload
+ * likewise. `.nothrow()` keeps the real exit code (the naive `await $`
+ * throws `ShellError`, swallowing both streams and the code);
+ * `process.exit(result.exitCode)` propagates it. A stdin redirect is added
+ * ONLY when a payload exists — a command carrying its own `<` redirect must
+ * not collide with ours.
+ */
+const SHELL_OP_WRAPPER = `import { $ } from 'bun'
+const cmd = Bun.env.EXEC_CMD_PATH !== undefined
+  ? await Bun.file(Bun.env.EXEC_CMD_PATH).text()
+  : (Bun.env.EXEC_CMD ?? '')
+const stdinPath = Bun.env.EXEC_STDIN_PATH
+const stdinData = Bun.env.EXEC_STDIN
+const result = stdinPath !== undefined
+  ? await $\`\${{ raw: cmd }} < \${Bun.file(stdinPath)}\`.nothrow()
+  : stdinData !== undefined && stdinData !== ''
+    ? await $\`\${{ raw: cmd }} < \${new Response(stdinData)}\`.nothrow()
+    : await $\`\${{ raw: cmd }}\`.nothrow()
+process.exit(result.exitCode)
+`
+
 // ---------------------------------------------------------------------------
-// Input boundary (§5 surface + host bounds)
+// Input boundary
 // ---------------------------------------------------------------------------
 
-/** The `tool_call` event's `detail.input`. */
-export type ToolsCallInput = {
-  script: string
-  format?: ToolsFormat
-  offset?: number
-  limit?: number
-  timeoutMs?: number
-  maxLines?: number
-  maxCharacters?: number
-  stdin?: string
-  cwd?: string
-  env?: Record<string, string>
-}
-
-export const ToolsCallInputSchema: JSONSchemaType<ToolsCallInput> = {
-  type: 'object',
-  properties: {
-    script: { type: 'string', minLength: 1 },
-    format: { type: 'string', enum: ['paged', 'json', 'raw'], nullable: true },
-    offset: { type: 'integer', minimum: 0, nullable: true },
-    limit: { type: 'integer', minimum: 1, nullable: true },
-    timeoutMs: { type: 'integer', minimum: 1, nullable: true },
-    maxLines: { type: 'integer', minimum: 1, nullable: true },
-    maxCharacters: { type: 'integer', minimum: 1, nullable: true },
-    stdin: { type: 'string', nullable: true },
-    cwd: { type: 'string', nullable: true },
-    env: { type: 'object', required: [], additionalProperties: { type: 'string' }, nullable: true },
-  },
-  required: ['script'],
-  additionalProperties: false,
-}
-
-const validateToolsCallInput = ajv.compile(ToolsCallInputSchema)
+const validateShellCallInput = ajv.compile(ShellCallInputSchema)
 
 /** Hard bounds a caller cannot exceed — clamping lives with enforcement. */
 const CEILINGS = { timeoutMs: 120_000, maxLines: 5_000, maxCharacters: 200_000, limit: 1_000 } as const
@@ -95,43 +123,74 @@ const CEILINGS = { timeoutMs: 120_000, maxLines: 5_000, maxCharacters: 200_000, 
 const CLAMPED_KEYS = ['timeoutMs', 'maxLines', 'maxCharacters', 'limit'] as const
 
 /** Clamp over-ceiling bounds, recording every adjustment as `'<key> <given> -> <applied>'`. */
-const clampOptions = (input: ToolsCallInput): { options: ToolsOptions; clamped: string[] } => {
+const clampOptions = (input: ShellCallInput): { options: ShellOptions; clamped: string[] } => {
   const clamped: string[] = []
-  const options: ToolsOptions = {
+  const options: ShellOptions = {
     ...(input.format === undefined ? {} : { format: input.format }),
     ...(input.offset === undefined ? {} : { offset: input.offset }),
     ...(input.limit === undefined ? {} : { limit: input.limit }),
     ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
     ...(input.maxLines === undefined ? {} : { maxLines: input.maxLines }),
     ...(input.maxCharacters === undefined ? {} : { maxCharacters: input.maxCharacters }),
-    ...(input.stdin === undefined ? {} : { stdin: input.stdin }),
     ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
     ...(input.env === undefined ? {} : { env: input.env }),
+    // The stdin field exists only on the 'shell' branch; the worker channels it.
+    ...(input.op === 'shell' && input.stdin !== undefined ? { stdin: input.stdin } : {}),
   }
   for (const key of CLAMPED_KEYS) {
     const given = options[key]
     if (given !== undefined && given > CEILINGS[key]) {
       clamped.push(`${key} ${given} -> ${CEILINGS[key]}`)
-      // CLAMPED_KEYS are all numeric ToolsOptions fields.
+      // CLAMPED_KEYS are all numeric ShellOptions fields.
       ;(options as Record<string, number>)[key] = CEILINGS[key]
     }
   }
   return { options, clamped }
 }
 
-/** Why an execution was stopped early. */
+// ---------------------------------------------------------------------------
+// Payload channeling — env for small text, temp file for large
+// ---------------------------------------------------------------------------
+
+/** A payload temp file path (OS tmpdir, UUID-named, worker-owned lifetime). */
+const payloadTempPath = (): string => path.join(tmpdir(), `shell-payload-${crypto.randomUUID()}.txt`)
+
+/** Channel one payload field: env when small, temp file when large. */
+const channelPayload = async ({
+  text,
+  envKey,
+  pathKey,
+  env,
+  tempFiles,
+}: {
+  text: string
+  envKey: string
+  pathKey: string
+  env: Record<string, string>
+  tempFiles: string[]
+}): Promise<void> => {
+  if (text.length > LARGE_PAYLOAD_BYTES) {
+    const file = payloadTempPath()
+    await Bun.write(file, text)
+    tempFiles.push(file)
+    env[pathKey] = file
+  } else {
+    env[envKey] = text
+  }
+}
+
+// ---------------------------------------------------------------------------
+// In-flight execution — enough state to stop it by correlation id
+// ---------------------------------------------------------------------------
+
 type StopReason = 'canceled' | 'timeout' | 'line_quota' | 'byte_quota'
 
-/** In-flight execution — enough state to stop it by correlation id. */
 type Execution = {
   /** Process-group leader pid. `detached` makes the group id equal this pid. */
   pid: number
   /** First stop signal wins, so a late cancel cannot relabel a timeout. */
   stopReason: StopReason | null
 }
-
-/** Interpreter bridge — `-lc` so the script runs as shell source with login PATH. */
-const SHELL = Bun.which('bash') ?? Bun.which('sh') ?? 'bash'
 
 /** Executions currently running, keyed by correlation id. */
 const active = new Map<string, Execution>()
@@ -141,10 +200,11 @@ const active = new Map<string, Execution>()
  *
  * @remarks
  * `Bun.spawn`'s `AbortSignal` and native `timeout` kill only the leader: a
- * `bash -lc` that forks (`echo x; sleep 30`) leaves the grandchild orphaned and
- * reparented to init. Signals must target `-pid` (the group created by
- * `detached: true`), and SIGTERM alone can be trapped or ignored, hence the
- * SIGKILL escalation.
+ * bun entry that forks (the shell op's children, a run script's own spawns)
+ * leaves grandchildren orphaned and reparented to init. Signals must target
+ * `-pid` (the group created by `detached: true`), and SIGTERM alone can be
+ * trapped or ignored, hence the SIGKILL escalation. Verified to survive the
+ * Bun Shell wrapper: wrapper children join the group.
  */
 const killGroup = ({ pid }: { pid: number }): void => {
   try {
@@ -184,15 +244,9 @@ const takeLines = ({ chunk, carry }: { chunk: string; carry: string }): { lines:
  *
  * @remarks
  * Both streams are pumped concurrently: an unread pipe fills at ~64KB and
- * blocks the child, so a command that writes heavily to stderr would deadlock
- * if stderr were drained only after stdout.
- *
- * `flushLimit` bounds a line that never ends: a chunk without newlines (a
- * minified blob, `cat` of a binary) is flushed in `flushLimit`-sized pieces so
- * `carry` — and every line handed downstream — stays bounded. Pieces are
- * UTF-16 slices, so a split astral character yields escaped surrogates in the
- * JSON result; the alternative (byte-accurate grapheme slicing) is not worth
- * the machinery for guardrail output.
+ * blocks the child, so a command that writes heavily to stderr would
+ * deadlock if stderr were drained only after stdout. `flushLimit` bounds a
+ * line that never ends.
  */
 const pumpLines = async ({
   stream,
@@ -228,15 +282,6 @@ const pumpLines = async ({
   if (carry !== '') emit(carry)
 }
 
-/** Post the single terminal result event for an execution, echoing any request space. */
-const postResult = ({ id, result, space }: { id: string; result: ToolsResult; space?: string }): void => {
-  self.postMessage({
-    type: WORKER_MESSAGE_KINDS.tool_call_result,
-    detail: { id, result },
-    ...(space === undefined ? {} : { space }),
-  })
-}
-
 // ---------------------------------------------------------------------------
 // Execution
 // ---------------------------------------------------------------------------
@@ -245,22 +290,24 @@ const postResult = ({ id, result, space }: { id: string; result: ToolsResult; sp
 const JSON_SNIPPET_CHARS = 200
 
 /**
- * Run one script and return its bounded result.
+ * Run one op and return its bounded result.
  *
  * @remarks
  * Everything captured is bounded by construction: the paged window by
  * `offset`/`limit`, `raw`/`stderr` by tail-truncation, `json` by the byte
  * quota's group kill, and the whole run by `maxLines` and the deadline.
+ * The payload temp files are deleted in the `finally` — the after-path runs
+ * on completion AND on every kill.
  */
-const runScript = async ({
+const runOp = async ({
   id,
-  script,
+  input,
   options,
 }: {
   id: string
-  script: string
-  options: ToolsOptions
-}): Promise<ToolsResult> => {
+  input: ShellCallInput
+  options: ShellOptions
+}): Promise<ShellResult> => {
   const started = performance.now()
   const format = options.format ?? 'paged'
   const offset = options.offset ?? DEFAULT_OFFSET
@@ -269,18 +316,43 @@ const runScript = async ({
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
   const maxLines = options.maxLines ?? DEFAULT_MAX_LINES
 
-  const proc = Bun.spawn([SHELL, '-lc', script], {
+  // The shell op's payload channeling: env for small, temp file for large.
+  const tempFiles: string[] = []
+  let extraEnv: Record<string, string> | undefined
+  if (input.op === 'shell') {
+    extraEnv = {}
+    await channelPayload({
+      text: input.command,
+      envKey: 'EXEC_CMD',
+      pathKey: 'EXEC_CMD_PATH',
+      env: extraEnv,
+      tempFiles,
+    })
+    if (input.stdin !== undefined) {
+      await channelPayload({
+        text: input.stdin,
+        envKey: 'EXEC_STDIN',
+        pathKey: 'EXEC_STDIN_PATH',
+        env: extraEnv,
+        tempFiles,
+      })
+    }
+  }
+
+  const proc = Bun.spawn([...BUN_STDIN_ENTRY], {
     ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
-    ...(options.env === undefined ? {} : { env: { ...process.env, ...options.env } }),
-    // Always piped: an unread stdin would hang any command that reads it, so
-    // the sink is written when the host supplied one and closed either way.
+    env: { ...process.env, ...(options.env ?? {}), ...(extraEnv ?? {}) },
+    // Always piped: an unread stdin would hang any command that reads it;
+    // the script (run op) or the wrapper (shell op) IS the stdin payload.
     stdin: 'pipe',
     stdout: 'pipe',
     stderr: 'pipe',
     detached: true,
   })
 
-  if (options.stdin !== undefined) proc.stdin.write(options.stdin)
+  // The run op's script IS the stdin; the shell op's wrapper is. Either way
+  // one write, one end — bun reads its source from stdin.
+  proc.stdin.write(input.op === 'run' ? input.script : SHELL_OP_WRAPPER)
   proc.stdin.end()
 
   const execution: Execution = { pid: proc.pid, stopReason: null }
@@ -302,16 +374,7 @@ const runScript = async ({
     let stderrDropped = 0
     let stderrTruncated = false
 
-    /**
-     * Enforce the hard line bound.
-     *
-     * @remarks
-     * The line that trips the cap is still captured and streamed, then the group
-     * is killed and both handlers go inert — so `totalLines` can never exceed
-     * `maxLines` no matter how fast the command floods. This is the guarantee
-     * §4.2 wanted from a quota thread; it lives here because the worker is the
-     * only party holding the pid.
-     */
+    /** Enforce the hard line bound — the line that trips the cap is still captured, then the group dies. */
     const enforceLineCap = (): void => {
       if (sequence >= maxLines) stopExecution({ execution, reason: 'line_quota' })
     }
@@ -327,12 +390,11 @@ const runScript = async ({
         jsonLines.push(clean)
         jsonChars += clean.length + 1
         // A JSON blob over the character bound would flood the model's context
-        // wholesale — §2's hard claim — so the group dies rather than the parse.
+        // wholesale — the group dies rather than the parse.
         if (jsonChars > maxCharacters) stopExecution({ execution, reason: 'byte_quota' })
       } else {
-        // Tail-biased: errors surface at the end of output, so the dropped head is
-        // the least useful part. Only the tail window is retained — the full
-        // stream is never buffered.
+        // Tail-biased: errors surface at the end of output, so the dropped
+        // head is the least useful part.
         const next = rawTail === '' ? clean : `${rawTail}\n${clean}`
         rawChars += next.length - rawTail.length
         rawTail = next
@@ -349,8 +411,6 @@ const runScript = async ({
       if (execution.stopReason !== null) return
       const clean = Bun.stripANSI(raw)
       sequence += 1
-      // Tail-biased like `raw`: failures print at the end, so the dropped head
-      // is the least useful part.
       const next = stderrTail === '' ? clean : `${stderrTail}\n${clean}`
       stderrChars += next.length - stderrTail.length
       stderrTail = next
@@ -369,10 +429,7 @@ const runScript = async ({
 
     await proc.exited
 
-    // A stopped run reports what it managed to produce: the streams end when the
-    // group dies, so the partial window is already in hand. `byte_quota` is only
-    // raised on the json path, which returns its own error before using this.
-    const stopped: ToolsStatus =
+    const stopped: ShellStatus =
       execution.stopReason === null
         ? 'completed'
         : execution.stopReason === 'byte_quota'
@@ -428,15 +485,30 @@ const runScript = async ({
   } finally {
     clearTimeout(deadline)
     active.delete(id)
+    // The after-path: sensible deletion on EVERY exit — completion and kill
+    // alike (the finally runs in both). Best-effort; the tmpdir is the last
+    // resort, never the plan.
+    if (tempFiles.length > 0) {
+      await Promise.allSettled(tempFiles.map((file) => Bun.file(file).delete()))
+    }
   }
 }
 
 // ---------------------------------------------------------------------------
-// Worker message loop
+// Result envelope
 // ---------------------------------------------------------------------------
 
+/** Post the single terminal result event for an execution, echoing any request space. */
+const postResult = ({ id, result, space }: { id: string; result: ShellResult; space?: string }): void => {
+  self.postMessage({
+    type: WORKER_MESSAGE_KINDS.shell_request_result,
+    detail: { id, result: result as unknown as JsonObject },
+    ...(space === undefined ? {} : { space }),
+  })
+}
+
 /** An error result carrying no capture — the run never produced a process. */
-const errorResult = ({ id, message }: { id: string; message: string }): ToolsResult => ({
+const errorResult = ({ id, message }: { id: string; message: string }): ShellResult => ({
   id,
   status: 'error',
   exitCode: null,
@@ -448,40 +520,53 @@ const errorResult = ({ id, message }: { id: string; message: string }): ToolsRes
   message,
 })
 
+// ---------------------------------------------------------------------------
+// Worker message loop
+// ---------------------------------------------------------------------------
+
 /** Route one inbound event. */
 const handleInbound = async (message: unknown): Promise<void> => {
-  if (validateToolCancelEvent(message)) {
-    const execution = active.get(message.detail.id)
+  if (validateShellCancelEvent(message)) {
+    const cancel = message as import('./workers.types.ts').ShellCancelEvent
+    const execution = active.get(cancel.detail.id)
     if (execution !== undefined) stopExecution({ execution, reason: 'canceled' })
     return
   }
   // Events failing the shared schema have no correlation id to report to and
   // are dropped — the router only forwards schema-valid events, so this is
   // defense in depth at the process boundary.
-  if (!validateToolCallEvent(message)) return
-  const event = message as ToolCallEvent
+  if (!validateShellRequestEvent(message)) return
+  const event = message as ShellRequestEvent
   const { id, input } = event.detail
-  // Input that fails the boundary is error data, not a throw: the id is valid,
-  // so the caller learns why nothing ran.
-  if (!validateToolsCallInput(input)) {
+
+  // Input that fails the boundary is error data, not a throw: the id is
+  // valid, so the caller learns why nothing ran.
+  const validate = validateShellCallInput as unknown as ValidateFunction<unknown>
+  if (!validate(input)) {
     postResult({
       id,
-      result: errorResult({ id, message: `invalid input: ${ajv.errorsText(validateToolsCallInput.errors)}` }),
       space: event.space,
+      result: errorResult({ id, message: `invalid input: ${ajv.errorsText(validate.errors)}` }),
     })
     return
   }
-  const { options, clamped } = clampOptions(input)
-  // `runScript` never rejects on the host side: any worker-side throw (bad cwd,
-  // missing interpreter, a kill race) becomes `status: 'error'` data instead.
+  // Cast: the op-input schema validated this JsonObject — trust it downstream.
+  const opInput = input as ShellCallInput
+  const { options, clamped } = clampOptions(opInput)
+  // `runOp` never rejects on the host side: any worker-side throw (bad cwd,
+  // a kill race) becomes `status: 'error'` data instead.
   try {
-    const result = await runScript({ id, script: input.script, options })
-    postResult({ id, result: clamped.length === 0 ? result : { ...result, clamped }, space: event.space })
+    const result = await runOp({ id, input: opInput, options })
+    postResult({
+      id,
+      space: event.space,
+      result: clamped.length === 0 ? result : { ...result, clamped },
+    })
   } catch (err) {
     postResult({
       id,
-      result: errorResult({ id, message: err instanceof Error ? err.message : String(err) }),
       space: event.space,
+      result: errorResult({ id, message: err instanceof Error ? err.message : String(err) }),
     })
   }
 }

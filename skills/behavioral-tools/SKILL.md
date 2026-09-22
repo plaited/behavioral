@@ -21,8 +21,8 @@ the CLI tool fleet is retired:
 - **Skills and plugins** (discovery, reading, frontmatter validation, link
   extraction/validation) run through threads + the shell worker (`bun run -`)
   + the store — taught by the **skill-conventions** skill.
-- **Git and raw shell** belong to the shell worker (`tool_call`, bash +
-  `bun run -`).
+- **Git and raw shell** belong to the shell worker (`shell_request`, bun-direct —
+  `run` op TS scripts, `shell` op Bun Shell commands).
 - **HTML validation** belongs to the controller floors and the classifier
   story ([prompts/html-classifier-gate.md](../../prompts/html-classifier-gate.md)).
 

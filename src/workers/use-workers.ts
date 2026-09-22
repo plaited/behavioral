@@ -10,16 +10,16 @@ import {
   validateResponseCancelEvent,
   validateResponseRequestEvent,
   validateResponseRequestResultEvent,
+  validateShellCancelEvent,
+  validateShellRequestEvent,
+  validateShellRequestResultEvent,
   validateStoreRequestEvent,
   validateStoreRequestResultEvent,
-  validateToolCallEvent,
-  validateToolCallResultEvent,
-  validateToolCancelEvent,
 } from './workers.types.ts'
 
 /*
  * The runtime composition hook: a dumb pump between the engine worker and the
- * satellite worker families (responses, tools, frontier, store), and the one
+ * satellite worker families (responses, shell, frontier, store, mcp), and the one
  * wiring point every host shares — CLI, local
  * PWA, Tauri mobile each pass their own workers and threads through here.
  *
@@ -52,8 +52,8 @@ export const useWorkers = ({
   traceListener: TraceListener
   /** The satellite worker families keyed by family — the router holds no positional knowledge. */
   workers: {
-    /** Executes shell scripts (`tool_call`). */
-    tools: Worker
+    /** Executes scripts bun-direct (`shell_request`). */
+    shell: Worker
     /** Runs Open Responses model calls (`response_request`). */
     responses: Worker
     /** Optional: frontier analysis (`frontier_request`). */
@@ -66,7 +66,7 @@ export const useWorkers = ({
   useTrigger: (trigger: Trigger) => void
 }): Worker => {
   const {
-    tools: toolsClientWorker,
+    shell: shellWorker,
     responses: responsesClientWorker,
     frontier: frontierWorker,
     store: storeWorker,
@@ -79,15 +79,15 @@ export const useWorkers = ({
     behavioralWorker.postMessage({ kind: WORKER_MESSAGE_KINDS.add_threads, threads: newThreads })
 
   // The router's only family knowledge: which port an event type routes to.
-  // Each worker family owns its event types (response_*, tool_*, frontier_*,
+  // Each worker family owns its event types (response_*, shell_*, frontier_*,
   // store_*, mcp_*), so routing is one lookup on the type. Cancels exist only
-  // for the async families (model calls, shell runs, remote MCP calls);
+  // for the async families (model calls, script runs, remote MCP calls);
   // frontier analyses and store ops are short-lived and have no cancel.
   const routes: Record<string, Worker> = {
     [WORKER_MESSAGE_KINDS.response_request]: responsesClientWorker,
     [WORKER_MESSAGE_KINDS.response_cancel]: responsesClientWorker,
-    [WORKER_MESSAGE_KINDS.tool_call]: toolsClientWorker,
-    [WORKER_MESSAGE_KINDS.tool_cancel]: toolsClientWorker,
+    [WORKER_MESSAGE_KINDS.shell_request]: shellWorker,
+    [WORKER_MESSAGE_KINDS.shell_cancel]: shellWorker,
   }
 
   const reenter = (message: { type: string; detail: JsonObject & { id: string }; space?: string }): void => {
@@ -102,8 +102,8 @@ export const useWorkers = ({
   }
 
   // Satellites post their family's result event; each re-enters as a thread.
-  const onToolCallResult = ({ data }: MessageEvent): void => {
-    if (!validateToolCallResultEvent(data)) return
+  const onShellResult = ({ data }: MessageEvent): void => {
+    if (!validateShellRequestResultEvent(data)) return
     reenter(data)
   }
   const onFrontierResult = ({ data }: MessageEvent): void => {
@@ -132,9 +132,9 @@ export const useWorkers = ({
     if (port === undefined) return
     if (
       !validateResponseRequestEvent(event) &&
-      !validateToolCallEvent(event) &&
+      !validateShellRequestEvent(event) &&
       !validateResponseCancelEvent(event) &&
-      !validateToolCancelEvent(event) &&
+      !validateShellCancelEvent(event) &&
       !validateFrontierRequestEvent(event) &&
       !validateStoreRequestEvent(event) &&
       !validateMcpRequestEvent(event) &&
@@ -150,7 +150,7 @@ export const useWorkers = ({
     reenter(data)
   }
 
-  toolsClientWorker.onmessage = onToolCallResult
+  shellWorker.onmessage = onShellResult
 
   // Only the router can see a satellite crash — no thread ever could — so the
   // crash is synthesized as one worker_error event (errors-as-data).
@@ -174,7 +174,7 @@ export const useWorkers = ({
     }
 
   responsesClientWorker.onerror = onCrash('responses')
-  toolsClientWorker.onerror = onCrash('tools')
+  shellWorker.onerror = onCrash('shell')
 
   // Optional families: hosts without one simply have no route for that
   // family's events, and the requesting thread waits — a program should not

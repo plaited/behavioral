@@ -1,7 +1,7 @@
 /**
  * The skill-client thread library against the real engine — the ICL
  * replacement for the skill-discover tool: a boot thread requests the scan
- * recipe through the tools worker (`bun run -` on stdin), and a transform
+ * recipe through the shell worker (the run op), and a transform
  * threads the result into a store put of the catalog. The recipe itself is
  * run for real against a fixture tree (read file → slice frontmatter fence →
  * YAML.parse the slice).
@@ -40,24 +40,26 @@ const runProgram = (events: BPEvent[]): Selected[] => {
 }
 
 describe('skill threads — scan boot', () => {
-  test('boot requests the skill-scan tool_call: bun run - with the recipe on stdin, json format', () => {
+  test('boot requests the skill-scan shell_request: the run op carries the recipe, json format', () => {
     const selected = runProgram([])
-    const call = selected.find((s) => s.type === WORKER_MESSAGE_KINDS.tool_call && s.detail?.id === SKILL_SCAN_CALL_ID)
+    const call = selected.find(
+      (s) => s.type === WORKER_MESSAGE_KINDS.shell_request && s.detail?.id === SKILL_SCAN_CALL_ID,
+    )
     expect(call).toBeDefined()
-    expect(call?.detail?.tool).toBe('skill-scan')
+    expect(call?.detail?.label).toBe('skill-scan')
     const input = call?.detail?.input as JsonObject
-    expect(input.script).toBe('bun run -')
+    expect(input.op).toBe('run')
     expect(input.format).toBe('json')
-    expect(input.stdin).toBe(SKILL_SCAN_SCRIPT)
+    expect(input.script).toBe(SKILL_SCAN_SCRIPT)
     // the recipe reads each SKILL.md, slices the frontmatter fence, then YAML.parses the slice
-    expect(String(input.stdin).includes('YAML.parse')).toBe(true)
-    expect(String(input.stdin).includes('---')).toBe(true)
+    expect(String(input.script).includes('YAML.parse')).toBe(true)
+    expect(String(input.script).includes('---')).toBe(true)
   })
 
   test('boot fires once — a second pump adds no duplicate call', () => {
     const selected = runProgram([])
     const calls = selected.filter(
-      (s) => s.type === WORKER_MESSAGE_KINDS.tool_call && s.detail?.id === SKILL_SCAN_CALL_ID,
+      (s) => s.type === WORKER_MESSAGE_KINDS.shell_request && s.detail?.id === SKILL_SCAN_CALL_ID,
     )
     expect(calls).toHaveLength(1)
   })
@@ -71,7 +73,7 @@ describe('skill threads — catalog transform', () => {
     }
     const selected = runProgram([
       {
-        type: WORKER_MESSAGE_KINDS.tool_call_result,
+        type: WORKER_MESSAGE_KINDS.shell_request_result,
         detail: { id: SKILL_SCAN_CALL_ID, result: { status: 'completed', jsonData: catalog } },
       },
     ])
@@ -86,7 +88,7 @@ describe('skill threads — catalog transform', () => {
   test('a result without a catalog does not put', () => {
     const selected = runProgram([
       {
-        type: WORKER_MESSAGE_KINDS.tool_call_result,
+        type: WORKER_MESSAGE_KINDS.shell_request_result,
         detail: { id: 'other-call', result: { status: 'completed', lines: ['x'], totalLines: 1 } },
       },
     ])
@@ -99,7 +101,7 @@ describe('skill threads — catalog transform', () => {
     const malformed = { skills: 'not-an-array', warnings: [] }
     const selected = runProgram([
       {
-        type: WORKER_MESSAGE_KINDS.tool_call_result,
+        type: WORKER_MESSAGE_KINDS.shell_request_result,
         detail: { id: SKILL_SCAN_CALL_ID, result: { status: 'completed', jsonData: malformed } },
       },
     ])

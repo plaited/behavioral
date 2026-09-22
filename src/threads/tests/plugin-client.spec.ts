@@ -48,24 +48,26 @@ const PLUGIN_SCHEMA = 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.jso
 const MCP_SCHEMA = 'https://agent-plugins.org/schemas/1.0.0/mcp.schema.json'
 
 describe('plugin threads — scan boot', () => {
-  test('boot requests the plugin-scan tool_call: bun run - with the recipe on stdin, json format', () => {
+  test('boot requests the plugin-scan shell_request: the run op carries the recipe, json format', () => {
     const selected = runProgram([])
-    const call = selected.find((s) => s.type === WORKER_MESSAGE_KINDS.tool_call && s.detail?.id === PLUGIN_SCAN_CALL_ID)
+    const call = selected.find(
+      (s) => s.type === WORKER_MESSAGE_KINDS.shell_request && s.detail?.id === PLUGIN_SCAN_CALL_ID,
+    )
     expect(call).toBeDefined()
-    expect(call?.detail?.tool).toBe('plugin-scan')
+    expect(call?.detail?.label).toBe('plugin-scan')
     const input = call?.detail?.input as JsonObject
-    expect(input.script).toBe('bun run -')
+    expect(input.op).toBe('run')
     expect(input.format).toBe('json')
-    expect(input.stdin).toBe(PLUGIN_SCAN_SCRIPT)
+    expect(input.script).toBe(PLUGIN_SCAN_SCRIPT)
     // the recipe validates plugin.json + mcp.json and discovers skills/threads
-    expect(String(input.stdin).includes('plugin.json')).toBe(true)
-    expect(String(input.stdin).includes('mcp.json')).toBe(true)
+    expect(String(input.script).includes('plugin.json')).toBe(true)
+    expect(String(input.script).includes('mcp.json')).toBe(true)
   })
 
   test('boot fires once — a second pump adds no duplicate call', () => {
     const selected = runProgram([])
     const calls = selected.filter(
-      (s) => s.type === WORKER_MESSAGE_KINDS.tool_call && s.detail?.id === PLUGIN_SCAN_CALL_ID,
+      (s) => s.type === WORKER_MESSAGE_KINDS.shell_request && s.detail?.id === PLUGIN_SCAN_CALL_ID,
     )
     expect(calls).toHaveLength(1)
   })
@@ -88,7 +90,7 @@ describe('plugin threads — manifests transform', () => {
     }
     const selected = runProgram([
       {
-        type: WORKER_MESSAGE_KINDS.tool_call_result,
+        type: WORKER_MESSAGE_KINDS.shell_request_result,
         detail: { id: PLUGIN_SCAN_CALL_ID, result: { status: 'completed', jsonData: manifests } },
       },
     ])
@@ -103,7 +105,7 @@ describe('plugin threads — manifests transform', () => {
   test('a result without manifests does not put', () => {
     const selected = runProgram([
       {
-        type: WORKER_MESSAGE_KINDS.tool_call_result,
+        type: WORKER_MESSAGE_KINDS.shell_request_result,
         detail: { id: 'other-call', result: { status: 'completed', lines: ['x'], totalLines: 1 } },
       },
     ])
@@ -116,7 +118,7 @@ describe('plugin threads — manifests transform', () => {
     const malformed = { plugins: 'not-an-array', warnings: [] }
     const selected = runProgram([
       {
-        type: WORKER_MESSAGE_KINDS.tool_call_result,
+        type: WORKER_MESSAGE_KINDS.shell_request_result,
         detail: { id: PLUGIN_SCAN_CALL_ID, result: { status: 'completed', jsonData: malformed } },
       },
     ])
