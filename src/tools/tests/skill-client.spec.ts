@@ -10,12 +10,19 @@ import {
   SkillListResourcesOutputSchema,
   SkillReadInputSchema,
   SkillReadOutputSchema,
-  skillDiscover,
-  skillExtractLinks,
-  skillListResources,
-  skillRead,
-  skillValidateLinks,
+  skillDiscover as skillDiscoverBinder,
+  skillExtractLinks as skillExtractLinksBinder,
+  skillListResources as skillListResourcesBinder,
+  skillRead as skillReadBinder,
+  skillValidateLinks as skillValidateLinksBinder,
 } from '../skill-client.ts'
+
+// Defined once, bound late — the test context carries no capabilities.
+const skillDiscover = skillDiscoverBinder(undefined)
+const skillRead = skillReadBinder(undefined)
+const skillListResources = skillListResourcesBinder(undefined)
+const skillExtractLinks = skillExtractLinksBinder(undefined)
+const skillValidateLinks = skillValidateLinksBinder(undefined)
 
 const validateDiscoverInput = ajv.compile(SkillDiscoverInputSchema)
 const validateDiscoverOutput = ajv.compile(SkillDiscoverOutputSchema)
@@ -168,9 +175,9 @@ describe('skill-client — skill-extract-links', () => {
   })
 
   test('returns sorted, de-duplicated local links with display text', async () => {
-    const output = await skillExtractLinks({
+    const output = (await skillExtractLinks({
       markdown: 'See [b](scripts/b.ts) and [a](scripts/a.ts) ![d](assets/d.png) [a again](scripts/a.ts)',
-    })
+    })) as { links: unknown[] }
     expect(output.links).toEqual([
       { value: 'assets/d.png', text: 'd' },
       { value: 'scripts/a.ts', text: 'a' },
@@ -179,10 +186,10 @@ describe('skill-client — skill-extract-links', () => {
   })
 
   test('drops external and fragment-only links; keeps inline HTML', async () => {
-    const output = await skillExtractLinks({
+    const output = (await skillExtractLinks({
       markdown:
         '[site](https://example.com) [mail](mailto:a@b.c) [frag](#section) <a href="docs/guide.md">guide</a> <img src="assets/logo.png" alt="logo">',
-    })
+    })) as { links: unknown[] }
     expect(output.links).toEqual([
       { value: 'assets/logo.png', text: 'logo' },
       { value: 'docs/guide.md', text: 'guide' },
@@ -190,7 +197,7 @@ describe('skill-client — skill-extract-links', () => {
   })
 
   test('empty result for markdown with no local links', async () => {
-    const output = await skillExtractLinks({ markdown: 'No links here, just text.' })
+    const output = (await skillExtractLinks({ markdown: 'No links here, just text.' })) as { links: unknown[] }
     expect(output.links).toEqual([])
   })
 })
@@ -214,10 +221,10 @@ describe('skill-client — skill-validate-links', () => {
       await mkdir(path.join(baseDir, 'docs'), { recursive: true })
       await Bun.write(path.join(baseDir, 'docs', 'guide.md'), '# guide')
 
-      const output = await skillValidateLinks({
+      const output = (await skillValidateLinks({
         cwd: baseDir,
         markdownBody: 'See [guide](docs/guide.md) and [missing](docs/missing.md)',
-      })
+      })) as { present: unknown[]; missing: unknown[] }
       expect(output.present).toEqual([{ value: 'docs/guide.md', text: 'guide' }])
       expect(output.missing).toEqual([{ value: 'docs/missing.md', text: 'missing' }])
     } finally {
@@ -231,11 +238,11 @@ describe('skill-client — skill-validate-links', () => {
       await mkdir(path.join(baseDir, 'tables'), { recursive: true })
       await Bun.write(path.join(baseDir, 'tables', 'customers.md'), '# customers')
 
-      const output = await skillValidateLinks({
+      const output = (await skillValidateLinks({
         cwd: baseDir,
         markdownBody: 'See [customers](/tables/customers.md) and [gone](/tables/gone.md)',
         rootRelative: true,
-      })
+      })) as { present: unknown[]; missing: unknown[] }
       expect(output.present).toEqual([{ value: '/tables/customers.md', text: 'customers' }])
       expect(output.missing).toEqual([{ value: '/tables/gone.md', text: 'gone' }])
     } finally {
@@ -249,10 +256,10 @@ describe('skill-client — skill-validate-links', () => {
       await mkdir(path.join(baseDir, 'tables'), { recursive: true })
       await Bun.write(path.join(baseDir, 'tables', 'customers.md'), '# customers')
 
-      const output = await skillValidateLinks({
+      const output = (await skillValidateLinks({
         cwd: baseDir,
         markdownBody: 'See [customers](/tables/customers.md)',
-      })
+      })) as { present: unknown[]; missing: unknown[] }
       expect(output.present).toEqual([])
       expect(output.missing).toEqual([{ value: '/tables/customers.md', text: 'customers' }])
     } finally {

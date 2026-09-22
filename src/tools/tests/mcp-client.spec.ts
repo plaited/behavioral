@@ -16,14 +16,24 @@ import {
   McpListToolsOutputSchema,
   McpReadResourceInputSchema,
   McpReadResourceOutputSchema,
-  mcpCallTool,
-  mcpDiscover,
-  mcpGetPrompt,
-  mcpListPrompts,
-  mcpListResources,
-  mcpListTools,
-  mcpReadResource,
+  mcpCallTool as mcpCallToolBinder,
+  mcpDiscover as mcpDiscoverBinder,
+  mcpGetPrompt as mcpGetPromptBinder,
+  mcpListPrompts as mcpListPromptsBinder,
+  mcpListResources as mcpListResourcesBinder,
+  mcpListTools as mcpListToolsBinder,
+  mcpReadResource as mcpReadResourceBinder,
 } from '../mcp-client.ts'
+
+// Defined once, bound late — the test context carries no capabilities.
+const mcpCallTool = mcpCallToolBinder(undefined)
+const mcpListTools = mcpListToolsBinder(undefined)
+const mcpListPrompts = mcpListPromptsBinder(undefined)
+const mcpGetPrompt = mcpGetPromptBinder(undefined)
+const mcpListResources = mcpListResourcesBinder(undefined)
+const mcpReadResource = mcpReadResourceBinder(undefined)
+const mcpDiscover = mcpDiscoverBinder(undefined)
+
 import { startMcpServer } from './mcp-server-fixture.ts'
 
 const validateCallToolInput = ajv.compile(McpCallToolInputSchema)

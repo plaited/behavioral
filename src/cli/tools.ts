@@ -69,21 +69,28 @@ const entry = <TInput, TOutput>(tool: ToolProduct<TInput, TOutput>): FleetEntry 
   run: (input) => tool(input as TInput),
 })
 
-const FLEET: FleetEntry[] = [
-  entry(mcpCallTool),
-  entry(mcpListTools),
-  entry(mcpListPrompts),
-  entry(mcpGetPrompt),
-  entry(mcpListResources),
-  entry(mcpReadResource),
-  entry(mcpDiscover),
-  entry(pluginClient),
-  entry(skillDiscover),
-  entry(skillRead),
-  entry(skillListResources),
-  entry(skillExtractLinks),
-  entry(skillValidateLinks),
+// The unbound fleet — one definition, N bindings. Each host binds at its
+// composition root; the CLI binds below with the CLI context (the broker
+// env-data upgrade lands with the broker slice).
+const FLEET_BINDERS = [
+  mcpCallTool,
+  mcpListTools,
+  mcpListPrompts,
+  mcpGetPrompt,
+  mcpListResources,
+  mcpReadResource,
+  mcpDiscover,
+  pluginClient,
+  skillDiscover,
+  skillRead,
+  skillListResources,
+  skillExtractLinks,
+  skillValidateLinks,
 ]
+
+const FLEET: FleetEntry[] = FLEET_BINDERS.map((binder) =>
+  entry((binder as (ctx: unknown) => ToolProduct<never, never>)(undefined)),
+)
 
 const registry = new Map(FLEET.map((tool) => [tool.name, tool]))
 

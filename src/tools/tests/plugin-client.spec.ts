@@ -6,8 +6,11 @@ import {
   type PluginClientOutput,
   PluginClientOutputSchema,
   type PluginManifest,
-  pluginClient,
+  pluginClient as pluginClientBinder,
 } from '../plugin-client.ts'
+
+// Defined once, bound late — the test context carries no capabilities.
+const pluginClient = pluginClientBinder(undefined)
 
 const validateInput = ajv.compile(PluginClientInputSchema)
 const validateOutput = ajv.compile(PluginClientOutputSchema)
