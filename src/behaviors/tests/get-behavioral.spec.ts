@@ -249,6 +249,20 @@ describe('getBehavioral — the runtime composition', () => {
     }
   })
 
+  test('the root guard pack is mounted: a malformed ui_* message is blocked', async () => {
+    const { runtime, traces } = startRuntime({ behaviors: [] })
+    try {
+      // Invalid ui_render (no html): the guard blocks it, so it never selects and
+      // the frontier deadlocks — the reject is visible in the trace.
+      runtime.trigger({ type: 'ui_render', detail: { id: 'r1', target: 'main', swap: 'innerHTML' } })
+      await Bun.sleep(100)
+      expect(selectionsOf(traces).some((t) => t.selected.type === 'ui_render')).toBe(false)
+      expect(traces.some((t) => t.kind === TRACE_MESSAGE_KINDS.deadlock)).toBe(true)
+    } finally {
+      runtime.terminate()
+    }
+  })
+
   test('terminate kills overridden families too — the composition owns every process it invokes', async () => {
     const factory = useBehavior({
       command: ['bun', 'run', 'tests/fixtures/probe.proc.ts'],

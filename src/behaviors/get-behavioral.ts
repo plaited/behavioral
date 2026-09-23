@@ -2,6 +2,7 @@ import { TRACE_MESSAGE_KINDS } from '../behavioral/behavioral.constants.ts'
 import { behavioral } from '../behavioral/behavioral.ts'
 import type { BPEvent, JsonObject, SelectionTrace, Thread, Trace } from '../behavioral/behavioral.types.ts'
 import { BEHAVIOR_MESSAGE_KINDS } from './behaviors.constants.ts'
+import { behaviorsThreads } from './behaviors.threads.ts'
 import {
   validateFrontierRequestEvent,
   validateMcpCancelEvent,
@@ -176,6 +177,9 @@ export const getBehavioral = ({
   })(familyAddThreads)
 
   // ── Routing: event type → family lane (the only family knowledge) ────────
+
+  // The root guard pack is always mounted, independent of the allow-list.
+  familyAddThreads(behaviorsThreads)
 
   type FamilyPort = { send: (event: BPEvent) => void; gate: (event: BPEvent) => boolean }
   const families: Record<string, FamilyPort> = {}
