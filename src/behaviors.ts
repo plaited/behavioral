@@ -15,8 +15,10 @@
 export type Behavior = 'shell' | 'responses' | 'store' | 'mcp'
 
 export * from './behaviors/behaviors.types.ts'
-export { mcpThreads } from './behaviors/mcp.threads.ts'
-export { shellThreads } from './behaviors/shell.threads.ts'
+export * from './behaviors/mcp-client.threads.ts'
+export * from './behaviors/mcp-client.types.ts'
+export * from './behaviors/shell.threads.ts'
 export * from './behaviors/shell.types.ts'
+export * from './behaviors/store.threads.ts'
 export * from './behaviors/store.types.ts'
-export { useBehavior } from './behaviors/use-behavior.ts'
+export * from './behaviors/use-behavior.ts'

@@ -14,7 +14,7 @@ import { TRACE_MESSAGE_KINDS } from '../../behavioral/behavioral.constants.ts'
 import { behavioral } from '../../behavioral/behavioral.ts'
 import type { BPEvent, JsonObject, SelectionTrace, Trace } from '../../behavioral/behavioral.types.ts'
 import { BEHAVIOR_MESSAGE_KINDS } from '../behaviors.constants.ts'
-import { MCP_CALLS_COLLECTION, MCP_EVENT_TYPES, mcpThreads } from '../mcp.threads.ts'
+import { MCP_CALLS_COLLECTION, MCP_EVENT_TYPES, mcpThreads } from '../mcp-client.threads.ts'
 
 type Selected = { type: string; detail: Record<string, unknown> | undefined }
 

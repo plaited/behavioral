@@ -18,7 +18,7 @@ import {
   validateStoreRequestResultEvent,
 } from '../behaviors/behaviors.types.ts'
 import { handleFrontierMessage } from '../behaviors/frontier.behavior.ts'
-import { mcpThreads } from '../behaviors/mcp.threads.ts'
+import { mcpThreads } from '../behaviors/mcp-client.threads.ts'
 import { bindEmit } from '../behaviors/process-lane.ts'
 import { shellThreads } from '../behaviors/shell.threads.ts'
 import { useBehavior } from '../behaviors/use-behavior.ts'
