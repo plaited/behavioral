@@ -98,7 +98,7 @@ host) — there are no gate threads by design.
   never a silent pass, never a silent block of floor-passing html.
 - RED first: offline/absent classifier behavior; then the
   scripted-endpoint happy path (the responses-behavior spec pattern — a
-  fixture server, real worker, no mocks beyond the endpoint).
+  fixture server, real behavior process, no mocks beyond the endpoint).
 
 ## Phase 4 — the correction loop
 

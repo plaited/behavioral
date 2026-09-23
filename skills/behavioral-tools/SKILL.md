@@ -28,5 +28,5 @@ the CLI tool fleet is retired:
 
 ## Module references
 
-- [mcp-client](references/mcp-client.md) — the mcp worker family: wire,
+- [mcp-client](references/mcp-client.md) — the mcp behavior: wire,
   ops, typed results, auth binding, the replay spine, composing.

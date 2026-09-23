@@ -98,7 +98,7 @@ skill/plugin operations are the shell family's thread pack
 `skills/skill-conventions/`.
 **`src/behavioral/`** — the pure language layer: types, constants, utils, the interpreter core
 (`behavioral.ts`), and its internal jq subprocess (`jq.worker.ts` — engine-internal, wire-external;
-nothing outside behavioral/ speaks its wire). Zero process entries that speak the worker wire —
+nothing outside behavioral/ speaks its wire). Zero process entries that speak the behavior wire —
 dependency arrow is one-way: `src/workers/` → `src/behavioral/`.
 **`src/controller/`** — the browser Controller: a validation-free dumb relay over an injectable
 Transport, plus `controller.utils.ts` (DelegatedListener, swapBoundary, the deterministic floors
@@ -188,7 +188,7 @@ Expand test coverage when the impact is broad, shared, or uncertain.
 **Type over interface** — `type User = {` not `interface User {`
 **No any** — use `unknown` with type guards. At external boundaries (file/network/IPC/event-detail
 payloads), validate with AJV: define a `JSONSchemaType<T>` and compile with `ajv.compile` (the shared
-instance in `src/behavioral/behavioral.types.ts`; thread `detailSchema` gates and worker-family
+instance in `src/behavioral/behavioral.types.ts`; thread `detailSchema` gates and behavior-family
 input boundaries are the pattern homes). Trust the validated value downstream.
 **PascalCase types** — schemas get `Schema` suffix.
 **Schemas are AJV, not Zod.** Define wire shapes as `JSONSchemaType<T>` and compile with the shared
