@@ -155,6 +155,91 @@ ingress + a plugin-shipped behavior surface.
      the conventions skill, docs sweep. Remaining: the deletion sweep (fleet 6 → 0)
      and the governor thread (plugin admission). -->
 
+### 2026-09-22 — landed: the betterleaks install script + CI wiring
+
+- **The registry source is betterleaks** — gitleaks is feature-frozen
+  ("security patches only; shifting focus to Betterleaks"); betterleaks is
+  MIT, active, made by the same authors. No npm package ships the ruleset, so
+  the path is the binary + `Bun.$`.
+- **`scripts/betterleaks/install.ts`** installs the pinned v1.8.1 binary into
+  `scripts/betterleaks/.bin/` (gitignored), checksum-verified against the
+  release `checksums.txt`. Pure helpers (`resolveTarget`, `releaseAsset`,
+  `parseChecksums`, `binaryEntry`) tested (12 tests).
+- **CI:** `bun run betterleaks:install` step + `actions/cache` on
+  `scripts/betterleaks/.bin` in `.github/workflows/ci.yml`.
+- **Next:** the TOML→TS pattern generator from `betterleaks config show`
+  (417 rules on the pinned binary), converting `(?i)`→flags, `(?P<`→`(?<`,
+  `\z`→`$`, dropping the 1 POSIX-class rule, and dropping `filter`/`validate`
+  (Expr) — plus the `generic-*` include/exclude call.
+
+### 2026-09-22 — landed: the trace consumer (issues 2 & 3)
+
+- **`src/cli/trace-consumer.ts`** — the deterministic egress floor. Redaction
+  clones then scrubs (never mutates — the engine passes the trace by reference
+  and the routing listener reads `trace.selected`): (1) registry VALUES from
+  `collectSecretValues` (env keys matching a sensitive pattern, min length;
+  `.env.schema` `@sensitive` keys passable as `keys`), (2) sensitive field
+  names (`authorization`, `x-api-key`, `token`, …), (3) well-known credential
+  shapes (`sk-`, `ghp_`, `AKIA`, `Bearer …`) for undeclared secrets pasted
+  into command strings. `createTraceConsumer` redacts once and fans out to
+  sinks (one throwing sink cannot starve the others); `traceLogSink` appends
+  synchronously to `~/.behavioral/traces/<space>/<date>.jsonl`.
+- **Next:** wire the consumer into the CLI — a JSON-RPC 2.0 stdio server that
+  subscribes (`runtime.useTrace`), calls `runtime.start()` once at boot, and
+  pushes redacted traces as notifications (the log sink + an egress sink).
+
+### 2026-09-22 — landed: the composition handle — explicit start(), override termination, spec migration
+
+- **Explicit lifecycle (`start()`).** The deferred pack-mount flush moved out
+  of the constructor: `useBehavioral` returns `{ trigger, useTrace, start,
+  terminate }`; the host subscribes (`useTrace`) then calls `start()` so the
+  boot cascade flushes AFTER subscribers attach (boot traces observable —
+  empirically confirmed). `trigger` auto-starts (idempotent) so trigger-only
+  hosts still boot. Closes the boot-trace-ordering open question.
+- **Override termination fixed.** `terminate()` now calls every family it
+  invoked, overrides included (`shell`/`store`); the old
+  `if (override === undefined)` guards were a Worker-era leftover (the host
+  passes a curried factory, the composition holds the only handle). TDD:
+  RED `terminate kills overridden families too` → GREEN.
+- **Spec migrated** to the returned-handle API: `use-behavioral.spec.ts`
+  drops `traceListener`/`useTrigger`, uses a `startRuntime` helper
+  (subscribe → start) + `runtime.trigger`. Static type-import cleanup
+  (`JsonObject`, `SelectionTrace`) folded into `use-behavioral.ts`.
+- **Validated:** 8/8 use-behavioral, 229/229 src/behaviors, tsc clean.
+
+### 2026-09-22 — ruled: thread persistence is hybrid; traces are an in-process writer
+
+- **Thread persistence (pilot agreed, Q1/C).** Store holds the runtime
+  admission ledger (space-scoped collection `threads`, space from the event
+  envelope, model output gated by the admission monitor); files hold the
+  saved/promoted set (git-authority); the boot scanner re-enters through the
+  SAME `admission_request` gate, so store/file content re-passes the
+  admission floor at MOUNT (store and file are untrusted carriers — the gate
+  is admission AND mount). Default root threads ship in
+  `src/behaviors/behaviors.threads.ts` — the composition's root pack, always
+  mounted (no family requirement, unlike `shell.threads.ts`/`mcp.threads.ts`).
+  Orchestration reuses the existing shell (file read/write; the
+  `.agents/plugins` scan pattern at `shell.threads.ts:279`) + store families —
+  no new family.
+- **Traces (pilot agreed, Q2/A).** Written in-process from the composition's
+  trace seam (the engine is in-process; no behavior/process). Home
+  `~/.behavioral/traces/<space>/<date>.jsonl` (extension resolved: `.jsonl` —
+  same format as `.ndjson`, the more common line-delimited name; space
+  path-sanitized). Secret filtering: deterministic scrubber (declared-secret
+  registry — varlock `.env.schema` is the source of truth — plus field-name
+  patterns) as the floor; source law (secrets ride env, not details) primary;
+  classifier at most an offline audit, never the inline filter.
+- **Consumer placement resolved by the composition change (2026-09-22).**
+  `useBehavioral` no longer takes `traceListener`/`useTrigger`; it returns
+  `{ trigger, useTrace, terminate }` (the engine's own hooks). The host/
+  consumer therefore subscribes egress via `runtime.useTrace(...)` and drives
+  ingress via `runtime.trigger(...)`. `trigger` already validates
+  (`validateBPEvent` → `trigger_error` trace), so no ingress wrapper is
+  needed. The `behavioral-consumer` is now a consumer-side module, not a
+  composition change.
+- See Open Questions 2026-09-22 for the consumer module shape and
+  root-vs-per-space scoping branches.
+
 ### 2026-09-21 — landed: the behavior rename (commits 1–2 of 3)
 
 - **Commit 1 (30a374ad):** the B-tier sweep + the crash event, atomic —
@@ -3216,6 +3301,28 @@ repo and risks staleness.
 
 ## Open Questions
 
+- **Trace consumer — LANDED 2026-09-22 (`src/cli/trace-consumer.ts`).**
+  `redactTrace` (clone + registry values + sensitive field names + credential
+  shapes), `collectSecretValues` (env sensitive-key heuristic; `.env.schema`
+  `@sensitive` keys can be passed as `keys`), `createTraceConsumer` (redact
+  once, fan out, per-sink isolation), `traceLogSink`
+  (`~/.behavioral/traces/<space>/<date>.jsonl`, synchronous append). Open:
+  (d) raw-trace dev opt-out or internal-only listener; (e) `Bun.secrets` —
+  MCP-token backend, or out of scope? (f) **credential-pattern source —
+  betterleaks.** LANDED 2026-09-22: install script
+  (`scripts/betterleaks/install.ts`, pinned v1.8.1, checksum-verified) + CI
+  wiring (`betterleaks:install` + cached `scripts/betterleaks/.bin`).
+  `betterleaks config show` prints the resolved ruleset (417 rules on the
+  pinned binary) — the generator's source via `Bun.$`. Remaining: the TOML→TS
+  generator + call-site swap; decide whether the broad `generic-*` rules are
+  included (heavy over-redaction without their entropy/CEL filters) or
+  excluded.
+- **Admitted-thread scoping vs the store's envelope-stamped space isolation
+  (2026-09-22).** Store ops cannot cross spaces (space comes from the
+  envelope, never op input); root-scoped threads therefore need either a
+  ROOT_SPACE query at boot (two queries: root + current) or stay git-only
+  (shipped in `behaviors.threads.ts`). Also: which space does a model-admitted
+  thread land in by default?
 - **plugin-client tool deletion sequencing (RESOLVED-IN-PART 2026-09-21 —
   the ICL threads landed, aff0fc18).** The audit ruling stands (GOES); the
   manifest schema now exists as schema-data (PLUGIN_MANIFEST_SCHEMA,
