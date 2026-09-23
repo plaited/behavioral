@@ -25,9 +25,9 @@
  * - When `apiKey` is configured, requests must carry
  *   `Authorization: Bearer <apiKey>` or get a 401 structured error body.
  *
- * No /responses/compact route: the compaction client was removed (context
- * management is client-side — see plan.md Decision Log); no test surface
- * needs it.
+ * No /responses/compact route: the compaction client was removed — context
+ * management is client-side (the 2026-09-21 worker-conversion ruling); no
+ * test surface needs it.
  *
  * Every request (path, authorization header, parsed JSON body) is recorded in
  * `requests` for routing/auth assertions.

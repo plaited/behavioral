@@ -12,7 +12,7 @@
  * `src/behaviors/workers.types.ts` — only the `detail.input` and
  * `detail.result` payload shapes live here.
  *
- * Per the worker-conversion rulings (plan.md, 2026-09-21): per-call input
+ * Per the 2026-09-21 worker-conversion ruling: per-call input
  * credentials are RETIRED — `detail.input` carries the server URL and the
  * op's own fields, never an `auth` config or credential headers. Auth binds
  * at the worker's module scope from env-data (broker) with the keychain

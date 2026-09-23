@@ -5,7 +5,7 @@
  * and produces the schema-only source for `src/controller/css.schemas.ts`:
  * one exported JSON Schema object, no ajv import, no validation functions —
  * validation lives with the consumers (controller floors), and the schema
- * doubles as classifier context (prompts/html-classifier-gate.md).
+ * doubles as classifier context (.prompts/html-classifier-gate.md, local-only).
  *
  * @remarks
  * This is a dev-only module used by the `run.ts` script. It is not part of
