@@ -7,7 +7,7 @@ runs: *can it deadlock?* and *can it spin forever without making progress?*
 
 ## Public surface
 
-Frontier analysis is a **worker family**: `src/workers/frontier.worker.ts`,
+Frontier analysis is a behavior, embedded **in-process** by the composition: `src/workers/frontier.worker.ts`,
 speaking the behavioral event wire — `frontier_request { id, op: replay |
 explore | verify, input }` in, one `frontier_request_result { id, result }`
 out. Mount it via the `useBehavioral` map (`frontier: new Worker(...)`); threads
@@ -24,9 +24,9 @@ Schema, compiled at registration.
 
 The three ops carry the former tools' contracts: `replay` (re-run to a
 frontier), `explore` (enumerate reachable frontiers), `verify` (deadlock/
-livelock checks). Input/output shapes validate at the worker's boundary;
+livelock checks). Input/output shapes validate at the behavior's boundary;
 the wire payloads are loose JsonObject with their strict schema home in the
-frontier worker family.
+frontier behavior.
 
 ## The `progress` spec
 

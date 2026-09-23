@@ -74,20 +74,25 @@ and the impact is broad or unclear, expand coverage until the affected surface i
 
 ## Directory Boundaries
 
-**`src/workers/`** — the process layer: the worker event wire (`workers.types.ts` +
-`workers.constants.ts` — every request/result event family, validators, and the kind
-registry), the engine entry (`behavioral.worker.ts` — a dumb transport over one behavioral
-program), the router (`use-behavioral.ts`, `useBehavioral` — supersedes the deleted kernel; forwards
-selections verbatim and re-enters worker results as once-threads), and the satellite families:
-`responses-client` (Open Responses model calls), `shell` (bun-direct script
-execution — `run` op = TS scripts via `bun run -`, `shell` op = Bun Shell
-commands through the constant wrapper; temp-file payloads over ~100KB,
-deleted on every exit), `frontier` (reachability analysis), `store` (durable
-space-scoped persistence). Spawn-by-URL entries end in
-`.worker.ts`; each family owns its event types + input boundary; results echo the request
-`space`.
+**`src/workers/`** — the process layer: the behavior event wire
+(`behaviors.types.ts` + `behaviors.constants.ts` — every request/result event kind,
+validators, and the kind registry), the in-process engine composition
+(`use-behavioral.ts`, `useBehavioral` — behavioral() runs in-process; pack mounts
+defer until the pump subscribes; every re-entry pumps one super-step), the behavior
+wiring primitive (`use-process.ts`, `useProcess` — Bun.spawn processes speaking the
+wire over stdio lines; exit-code crash synthesis as `behavior_error`; respawn on
+demand), the process lane (`process-lane.ts` — stdio emit/inbound, the envData
+bridge, bindEmit for the frontier embed), and the behavior families:
+`responses-client.behavior.ts` (Open Responses model calls), `shell.behavior.ts`
+(bun-direct script execution — `run` op TS scripts via `bun run -`, `shell` op
+Bun Shell commands through the wrapper; temp-file payloads over ~100KB, deleted
+on every exit), `frontier.behavior.ts` (the in-process embed — imported and driven
+by the composition; standalone spawns are a compatibility entry),
+`store.behavior.ts` (durable space-scoped persistence), `mcp-client.behavior.ts`
+(remote MCP connections/sessions/auth). Each behavior owns its event types + input
+boundary; results echo the request `space`; op runners errors-as-data.
 **`src/tools/`** — deleted (fleet 0): the ICL conversion retired the CLI tool
-fleet. mcp-client is the mcp worker family (`src/workers/mcp-client.worker.ts`);
+fleet. mcp-client is the mcp behavior (`src/workers/mcp-client.behavior.ts`);
 skill/plugin operations are the shell family's thread pack
 (`src/workers/shell.threads.ts`) + recipes + store, taught by
 `skills/skill-conventions/`.
@@ -103,7 +108,7 @@ AJV; its floors are hardcoded invariants (on*, malformed b-trigger, scale mismat
 registered in `bin/behavioral.ts`. The `behavioral tools` fleet dispatcher is retired with the
 fleet (0 tools); turn/config commands land here as the composition rulings build out.
 **`src/utils/`** — shared pure utilities.
-**`src/workers/*.threads.ts`** — family thread packs: `shell.threads.ts` (the
+**`src/workers/*.threads.ts`** — behavior thread packs: `shell.threads.ts` (the
 ICL pack — skill/plugin scans, catalog/manifest schema gates, links dispatchers
 + stored recipes) and `mcp.threads.ts` (the auth replay spine). Packs ship with
 their family; `useBehavioral` mounts a pack when the family and its required
@@ -195,7 +200,7 @@ catalog/manifest/recipe contracts in `src/workers/shell.threads.ts`).
 the output schema must derive from or reference that module's exported schema —
 not be hand-mirrored. Failure mode: a module's output type changes; a downstream CLI/tool schema
 silently rejects the new field (`additionalProperties: false` bites). Fix: one JSON-schema home for
-the shape (e.g. a worker family's event schema in `src/workers/workers.types.ts`), consumed
+the shape (e.g. a behavior's event schema in `src/workers/behaviors.types.ts`), consumed
 downstream via `.schema` or export.
 **CLI schema reflection uses AJV.** The `makeCliRouter`/`parseCli` framework in `src/cli/cli.ts`
 reflects command schemas via `--schema input|output` — schemas are `JSONSchemaType<T>` objects,
@@ -252,7 +257,7 @@ Prefer direct callsite wiring when logic is local, stable, and used once.
 - Do not replace a short set of direct event registrations with forwarding maps or event
   lists unless there is a demonstrated maintenance benefit.
 - Keep runtime boundary code explicit at callsites: IPC handlers, event-emitter wiring, path
-  resolution at security-sensitive boundaries, process/worker lifecycle wiring.
+  resolution at security-sensitive boundaries, process lifecycle wiring.
 - Prefer tests that exercise the real runtime boundary (process, IPC, event, lifecycle) over
   helper-only tests that bypass the contract. Small abstractions are justified only when they
   remove real cross-callsite duplication, materially improve correctness, encode a real domain

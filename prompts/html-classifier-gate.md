@@ -5,7 +5,7 @@ by consumers of `useWorkers` — a local PWA or a Tauri mobile app runs the
 whole runtime (engine + satellites) in one context and **generates html at
 runtime**; the classifier decides whether what was generated is valid
 before it reaches the controller. **Read the 2026-09-19 Decision Log
-entries in `plan.md` first — the store worker, the controller floors, the
+entries in `plan.md` first — the store behavior, the controller floors, the
 html-tool consolidation, and the OKF-HTML north star are the authority
 for this prompt.**
 
@@ -51,7 +51,7 @@ layers with one job each:
 ## Phase 0 — pin the floor invariant
 
 The floors must hold with NO classifier reachable (offline simulation —
-the responses worker errors): a fragment with an inline handler or a
+the responses behavior errors): a fragment with an inline handler or a
 malformed b-trigger is still rejected by `controller.utils.ts`. RED
 first: a test proving exactly that, offline. This prevents the future
 "simplification" of removing the floors "because the classifier catches
@@ -80,7 +80,7 @@ and report (cited) before building:
 - System One / classifier-class providers (Jev): API shape, cost,
   latency, structured-output guarantees, whether they speak Open
   Responses (then it's just an endpoint entry) or need a thin adapter in
-  the responses worker.
+  the responses behavior.
 - Local small models classifiable on-device (WebGPU/WASM) for the
   offline story. **Decide:** remote-only, local-only, or
   remote-with-local-fallback. Recommended default: remote with graceful
@@ -97,7 +97,7 @@ host) — there are no gate threads by design.
 - Errors-as-data: classifier outage = no stamp + the floors still hold;
   never a silent pass, never a silent block of floor-passing html.
 - RED first: offline/absent classifier behavior; then the
-  scripted-endpoint happy path (the responses-worker spec pattern — a
+  scripted-endpoint happy path (the responses-behavior spec pattern — a
   fixture server, real worker, no mocks beyond the endpoint).
 
 ## Phase 4 — the correction loop

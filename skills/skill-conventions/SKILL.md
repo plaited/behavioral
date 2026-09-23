@@ -3,7 +3,7 @@ name: skill-conventions
 description: >
   The ICL conventions for the behavioral agent's skill and plugin domains:
   how to discover, read, validate, and compose over local skills and plugins
-  through threads, the shell worker (bun run -), and the store — not fleet
+  through threads, the shell behavior (bun run -), and the store — not fleet
   tools. Covers the scan recipes (frontmatter fence-slicing, lenient
   validation), the store catalog/manifest/recipe tenants, links_request
   dispatching, and how to author your own piped scripts for exploratory
@@ -11,7 +11,7 @@ description: >
   composing bun run - scripts over skill data, or when wiring skill/plugin
   discovery threads.
 license: ISC
-compatibility: Requires bun and the behavioral runtime (threads + shell worker + store worker)
+compatibility: Requires bun and the behavioral runtime (threads + the shell and store behaviors)
 allowed-tools: Bash Read
 ---
 
@@ -19,14 +19,14 @@ allowed-tools: Bash Read
 
 This skill teaches the **context layer** for the skill and plugin domains:
 discovery, reading, validation, and composition all run through **threads +
-the shell worker (`bun run -`) + the store** — there are no fleet tools for
+the shell behavior (`bun run -`) + the store** — there are no fleet tools for
 this domain. Everything below is a convention the runtime and the model
 share; the model cannot fall back on training for these mechanics, so this
 document is deliberately precise.
 
 ## The architecture in one paragraph
 
-Boot threads run **scan recipes** through the shell worker; the results are
+Boot threads run **scan recipes** through the shell behavior; the results are
 schema-gated and land in the **store** as tenants (`skills/catalog`,
 `plugins/manifests`, `skill-recipes`). The model (or a host) reads those
 tenants to discover what exists, fires **`links_request`** for the
@@ -122,7 +122,7 @@ re-enters as the correlated `shell_request_result` with `jsonData`:
 - extract → `{ links: [{ value, text }] }` — sorted, de-duplicated, local
   links only (external http/mailto and fragment-only `#` dropped)
 - validate → `{ present: [...], missing: [...] }` resolved against the
-  worker's `cwd`; with `rootRelative: true`, leading-`/` links resolve
+  behavior's `cwd`; with `rootRelative: true`, leading-`/` links resolve
   against cwd, otherwise against the filesystem root (legacy default)
 
 Extraction order (the pinned contract): inline markdown links first (display
@@ -142,7 +142,7 @@ const markdown = process.env.LINKS_INPUT ?? ''
 import { YAML } from 'bun'      // YAML.parse for fences
 import { readdirSync } from 'node:fs'
 // … do the work, dependencies-free (node: + bun builtins only — the
-//    shell worker does not guarantee node_modules resolution in cwd) …
+//    shell behavior does not guarantee node_modules resolution in cwd) …
 console.log(JSON.stringify(result))  // stdout = JSON, exactly one object
 ```
 

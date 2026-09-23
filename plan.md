@@ -155,6 +155,28 @@ ingress + a plugin-shipped behavior surface.
      the conventions skill, docs sweep. Remaining: the deletion sweep (fleet 6 → 0)
      and the governor thread (plugin admission). -->
 
+### 2026-09-21 — landed: the behavior rename (commits 1–2 of 3)
+
+- **Commit 1 (30a374ad):** the B-tier sweep + the crash event, atomic —
+  *.worker.ts → *.behavior.ts (five behaviors), workers.constants/types →
+  behaviors.*, WORKER_MESSAGE_KINDS → BEHAVIOR_MESSAGE_KINDS (the dead
+  engine-transport kinds trigger/add_threads die with the registry),
+  worker_error → behavior_error (detail field worker → behavior; schemas,
+  synthesis, every spec waitFor), WorkerFamily → Behavior, useBehavioral's
+  `workers` param → `behaviors` (the pilot's line-83 spot). **Honest
+  correction:** commit 98821f9a's claimed deletions never executed — its
+  batch git rm aborted all-or-nothing on a modified use-worker.ts; landed
+  for real here (behavioral.worker.ts, satellite/crash fixtures, four
+  transport specs).
+- **Commit 2 (this):** AGENTS.md boundary rewritten (the process
+  composition: in-process engine, useProcess primitive, process lane,
+  five behaviors), skill-conventions + frontier + mcp-client references +
+  the classifier prompt swept.
+- **Commit 3 (pending, pilot-gated):** the C leftover — the src/workers/
+  DIRECTORY rename (now also housing the wire home, the composition, and
+  the packs — its settled name is the open question: src/behaviors/ vs
+  src/composition/ vs staying).
+
 ### 2026-09-21 — ruled: the families are BEHAVIORS (the naming ruling)
 
 - **THE NAME IS "BEHAVIOR" (pilot):** the spawned capability families

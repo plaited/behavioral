@@ -1,6 +1,6 @@
-# mcp-client — the remote MCP worker family
+# mcp-client — the remote MCP behavior
 
-Remote MCP server operations are a **worker family**, not CLI fleet tools:
+Remote MCP server operations are a spawned **behavior**, not CLI fleet tools:
 `src/workers/mcp-client.worker.ts` (spawned by URL) holds the connections,
 and the engine speaks to it over the behavioral event wire. The
 `src/threads/mcp-client.ts` thread spine orchestrates cross-turn auth
@@ -10,9 +10,9 @@ replay.
 
 | Event | Detail | Direction |
 |-------|--------|-----------|
-| `mcp_request` | `{ id, op, input }` | engine → worker |
-| `mcp_request_result` | `{ id, result }` | worker → engine |
-| `mcp_cancel` | `{ id }` | engine → worker |
+| `mcp_request` | `{ id, op, input }` | program → behavior |
+| `mcp_request_result` | `{ id, result }` | behavior → program |
+| `mcp_cancel` | `{ id }` | program → behavior |
 
 The seven ops (`detail.op`): `discover`, `list-tools`, `call-tool`,
 `list-prompts`, `get-prompt`, `list-resources`, `read-resource`. Each op
