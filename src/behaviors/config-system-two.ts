@@ -30,6 +30,7 @@ import {
   validateSystemTwoRequestEvent,
 } from './behaviors.types.ts'
 import { emit, envData, wireInbound } from './process-lane.ts'
+import { resolveBehaviorEntry } from './resolve-behavior-entry.ts'
 import { validateSystemTwoInput } from './system-two.schemas.ts'
 import {
   SYSTEM_TWO_ENDPOINTS_KEY,
@@ -146,15 +147,18 @@ export const configSystemTwo = (respond: SystemTwoRespond): void => {
  */
 export const useSystemTwo = ({
   endpoints,
-  entry = 'system-two.behavior.ts',
+  entry,
 }: {
   /** Provider label → endpoint config, delivered to the process via environment data. */
   endpoints: SystemTwoEndpoints
-  /** The provider entry file (relative to `src/behaviors`). Defaults to the bundled Open Responses entry. */
+  /**
+   * The provider entry file. Absent keeps the bundled Open Responses entry; absolute
+   * paths are used verbatim; relative paths resolve against the behavioral home.
+   */
   entry?: string
 }) =>
   useBehavior({
-    command: ['bun', 'run', entry],
+    command: ['bun', 'run', resolveBehaviorEntry(entry, 'system-two.behavior.ts')],
     name: 'systemTwo',
     threads: [],
     env: { [SYSTEM_TWO_ENDPOINTS_KEY]: JSON.stringify(endpoints) },

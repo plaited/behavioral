@@ -28,6 +28,7 @@ import {
   validateSystemOneRequestEvent,
 } from './behaviors.types.ts'
 import { emit, envData, wireInbound } from './process-lane.ts'
+import { resolveBehaviorEntry } from './resolve-behavior-entry.ts'
 import { validateSystemOneInput } from './system-one.schemas.ts'
 import {
   SYSTEM_ONE_ENDPOINT_KEY,
@@ -143,15 +144,18 @@ export const configSystemOne = (respond: SystemOneRespond): void => {
  */
 export const useSystemOne = ({
   endpoint,
-  entry = 'system-one.behavior.ts',
+  entry,
 }: {
   /** The provisioned endpoint, delivered to the process via environment data. */
   endpoint: SystemOneEndpointConfig
-  /** The provider entry file (relative to `src/behaviors`). Defaults to the bundled Decisions entry. */
+  /**
+   * The provider entry file. Absent keeps the bundled Decisions entry; absolute
+   * paths are used verbatim; relative paths resolve against the behavioral home.
+   */
   entry?: string
 }) =>
   useBehavior({
-    command: ['bun', 'run', entry],
+    command: ['bun', 'run', resolveBehaviorEntry(entry, 'system-one.behavior.ts')],
     name: 'systemOne',
     threads: [],
     env: { [SYSTEM_ONE_ENDPOINT_KEY]: JSON.stringify(endpoint) },
