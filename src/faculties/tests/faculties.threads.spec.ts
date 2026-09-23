@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { TRACE_MESSAGE_KINDS } from '../../behavioral/behavioral.constants.ts'
 import { behavioral } from '../../behavioral/behavioral.ts'
 import type { FrontierTrace, JsonObject, SelectionTrace, Trace } from '../../behavioral/behavioral.types.ts'
-import { facultiesThreads } from '../faculties.threads.ts'
+import { eventGuardEntries, facultiesThreads } from '../faculties.threads.ts'
 
 const run = (detail: JsonObject) => {
   const traces: Trace[] = []
@@ -31,5 +31,17 @@ describe('facultiesThreads — the root guard pack', () => {
     const { selections, frontiers } = run({ id: 'r1', target: 'main', html: '<p>x</p>', swap: 'innerHTML' })
     expect(selections.some((s) => s.selected.type === 'ui_render')).toBe(true)
     expect(frontiers.some((frontier) => frontier.status === 'ready')).toBe(true)
+  })
+
+  // The review's follow-up 4: a schema without properties.type.const is a
+  // wiring defect — the guard generator must throw, not produce a guard that
+  // can never match.
+  test('eventGuardEntries throws on a schema missing properties.type.const', () => {
+    const schemas = {
+      request: { type: 'object', properties: {} },
+      cancel: { type: 'object', properties: {} },
+      result: { type: 'object', properties: {} },
+    }
+    expect(() => eventGuardEntries(schemas)).toThrow(/missing properties\.type\.const/)
   })
 })

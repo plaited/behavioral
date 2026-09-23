@@ -286,4 +286,26 @@ describe('useFaculty — the spawn-based faculty primitive', () => {
       faculty.terminate()
     }
   })
+
+  // The review's follow-up 4: the pump reads the result schema's type const
+  // as its lane seal — a schema without it computed an undefined seal and
+  // silently dropped EVERY inbound result. A wiring defect this fundamental
+  // must fail at wiring time, same check and message as the guard generator.
+  test('useFaculty fails fast on a result schema missing properties.type.const', () => {
+    const schemas = {
+      request: ShellRequestEventSchema,
+      cancel: ShellCancelEventSchema,
+      result: { type: 'object', properties: {} } as typeof ShellRequestResultEventSchema,
+    }
+    expect(() =>
+      useFaculty({
+        command: ['bun', 'run', 'tests/fixtures/probe.proc.ts'],
+        name: 'probe',
+        threads: [],
+        requestSchema: schemas.request,
+        cancelSchema: schemas.cancel,
+        resultSchema: schemas.result,
+      }),
+    ).toThrow(/missing properties\.type\.const/)
+  })
 })

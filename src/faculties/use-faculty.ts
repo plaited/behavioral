@@ -1,6 +1,7 @@
 import type { JSONSchemaType } from 'ajv'
 import { ajv, type BPEvent, type JsonObject, type Thread } from '../behavioral/behavioral.types.ts'
 import { FACULTY_MESSAGE_KINDS } from './faculties.constants.ts'
+import { eventTypeOf } from './faculties.threads.ts'
 import type { AddThreads } from './faculties.types.ts'
 
 type WireMessage = {
@@ -60,34 +61,37 @@ export type FacultyEventSchemas = {
  * in-flight requests at death simply never answer, which the waitFor pair
  * already covers.
  */
-export const useFaculty =
-  ({
-    command,
-    name,
-    threads,
-    env,
-    requestSchema,
-    cancelSchema,
-    resultSchema,
-  }: {
-    command: string[]
-    name: string
-    threads: Thread[]
-    /** Extra environment for the spawned process, merged over `process.env`. */
-    env?: Record<string, string>
-    /** The outbound request/result/cancel schemas — the faculty's trust boundary, compiled here. */
-    requestSchema: JSONSchemaType<WireMessage>
-    cancelSchema: JSONSchemaType<WireMessage>
-    /** The result schema — returned for the composition's guard derivation. */
-    resultSchema: JSONSchemaType<WireMessage>
-  }) =>
-  (addThreads: AddThreads, space?: string) => {
+export const useFaculty = ({
+  command,
+  name,
+  threads,
+  env,
+  requestSchema,
+  cancelSchema,
+  resultSchema,
+}: {
+  command: string[]
+  name: string
+  threads: Thread[]
+  /** Extra environment for the spawned process, merged over `process.env`. */
+  env?: Record<string, string>
+  /** The outbound request/result/cancel schemas — the faculty's trust boundary, compiled here. */
+  requestSchema: JSONSchemaType<WireMessage>
+  cancelSchema: JSONSchemaType<WireMessage>
+  /** The result schema — returned for the composition's guard derivation. */
+  resultSchema: JSONSchemaType<WireMessage>
+}) => {
+  // The inbound lane's seal: only this faculty's RESULT events re-enter from
+  // its process (the request/cancel types stay outbound-only — a process
+  // cannot inject requests into its own or another faculty's lane).
+  // eventTypeOf throws on a schema missing the const — a wiring defect this
+  // fundamental fails at WIRING time (this, the outer call), never as a
+  // silently-undefined seal that would drop every inbound result.
+  const resultKind = eventTypeOf(resultSchema)
+
+  return (addThreads: AddThreads, space?: string) => {
     const validateRequestEvent = ajv.compile(requestSchema)
     const validateEventCancel = ajv.compile(cancelSchema)
-    // The inbound lane's seal: only this faculty's RESULT events re-enter from
-    // its process (the request/cancel types stay outbound-only — a process
-    // cannot inject requests into its own or another faculty's lane).
-    const resultKind = (resultSchema.properties.type as { const?: string } | undefined)?.const
 
     let proc: Bun.Subprocess<'pipe', 'pipe', 'inherit'> | undefined
     let terminated = false
@@ -211,3 +215,4 @@ export const useFaculty =
       },
     }
   }
+}
