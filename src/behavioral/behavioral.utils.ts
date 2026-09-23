@@ -241,33 +241,68 @@ export const useThread: UseThread = (rules: RulesFunction[], once?: true) =>
         }
       }
 
+const JQ_STARTUP_TIMEOUT_MS = 30_000
 const JQ_EVAL_TIMEOUT_MS = 1000
 const JQ_RESULT_CAP = 64 * 1024
 const jqResultDecoder = new TextDecoder()
 
+// The warm pool of one. The worker and its shared buffer persist across
+// evaluations, so a transform pays worker boot + jq.wasm compile once per
+// process, not per eval. The worker is `unref`'d — it must never hold the
+// host process open (the runtime is `bun run`, which blocks on a live
+// worker). A timeout terminates the worker and the pool respawns lazily on
+// the next evaluation.
+let jqWorker: Bun.Worker | undefined
+let jqBuffer: SharedArrayBuffer | undefined
+let jqHeader: Int32Array | undefined
+
+const spawnJqWorker = () => {
+  jqBuffer = new SharedArrayBuffer(8 + JQ_RESULT_CAP)
+  jqHeader = new Int32Array(jqBuffer, 0, 2)
+  // `lib` loads DOM, so the global `Worker` type is the DOM one — cast to
+  // `Bun.Worker` for `unref`/`ref`.
+  const worker = new Worker(new URL('./jq.worker.ts', import.meta.url)) as Bun.Worker
+  worker.unref()
+  jqWorker = worker
+}
+
+const timeoutJqWorker = (): TransformEvaluation => {
+  jqWorker?.terminate()
+  jqWorker = undefined
+  jqBuffer = undefined
+  jqHeader = undefined
+  return { ok: false, reason: 'jq_timeout' }
+}
+
 /**
- * The jq eval bridge — spawns the `jq.worker.ts` worker per evaluation and blocks the
+ * The jq eval bridge — drives the persistent `jq.worker.ts` pool and blocks the
  * calling thread on `Atomics.wait` (a synchronous syscall, not an async yield —
  * the engine-never-awaits invariant holds). The result travels through the
  * shared buffer, never postMessage: a caller parked in `Atomics.wait` has a
- * frozen event loop and could not receive a message. A never-terminating query
- * is killed by `terminate()` at the timeout — the only interrupt primitive
+ * frozen event loop and could not receive a message. Two waits bound the call:
+ * a startup budget covers worker boot + wasm compile (status 0 → 1), then the
+ * eval timeout covers evaluation (status 1 → 2). A never-terminating query is
+ * killed by `terminate()` at the eval timeout — the only interrupt primitive
  * that exists for a spinning wasm program — and becomes `jq_timeout`
  * errors-as-data, like every other transform failure.
- *
- * MINIMAL: spawn-per-eval — every transform pays worker startup + jq.wasm
- * compile. Upgrade path: a pre-warmed pool of one, replaced on timeout.
  */
 export const evaluateTransform = (query: string, detail: JsonObject | undefined): TransformEvaluation => {
   if (detail === undefined || detail === null) return { ok: false, reason: 'no_detail' }
-  const sab = new SharedArrayBuffer(8 + JQ_RESULT_CAP)
-  const header = new Int32Array(sab, 0, 2)
-  const worker = new Worker(new URL('./jq.worker.ts', import.meta.url))
+  if (!jqWorker) spawnJqWorker()
+  const worker = jqWorker!
+  const sab = jqBuffer!
+  const header = jqHeader!
+  Atomics.store(header, 0, 0) // idle — reset the slot for this round
   worker.postMessage({ sab, query, detail })
-  const woke = Atomics.wait(header, 0, 0, JQ_EVAL_TIMEOUT_MS)
-  if (woke === 'timed-out') {
-    worker.terminate()
-    return { ok: false, reason: 'jq_timeout' }
+  // Boot + compile — a generous budget so a slow CI runner is not a jq timeout.
+  if (Atomics.load(header, 0) === 0) {
+    const booted = Atomics.wait(header, 0, 0, JQ_STARTUP_TIMEOUT_MS)
+    if (booted === 'timed-out') return timeoutJqWorker()
+  }
+  // Evaluation — the query itself is bounded here.
+  if (Atomics.load(header, 0) === 1) {
+    const evaluated = Atomics.wait(header, 0, 1, JQ_EVAL_TIMEOUT_MS)
+    if (evaluated === 'timed-out') return timeoutJqWorker()
   }
   const bytes = new Uint8Array(sab, 8, Atomics.load(header, 1))
   try {

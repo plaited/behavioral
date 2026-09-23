@@ -241,6 +241,56 @@ describe('transform idiom — in-engine jq execution', () => {
     expect(selections.some((s) => s.selected.type === 'ship')).toBe(false)
   })
 
+  test('pool recovery: a timeout is isolated — the next transform in the same program still evaluates', () => {
+    const program = behavioral()
+    const { addThread } = program
+    addThread({
+      label: 'spinner',
+      rules: [{ transform: [{ type: 'spin', query: 'while(true; .)', target: 'never' }] }],
+    })
+    addThread({
+      label: 'shaper',
+      rules: [{ transform: [{ type: 'order', query: '.order', target: 'ship' }] }],
+    })
+
+    const traces: Trace[] = []
+    program.useTrace((msg) => {
+      traces.push(msg)
+    })
+    // The runaway query is killed at the eval timeout…
+    program.trigger({ type: 'spin', detail: { spin: true } })
+    // …and the warm pool respawns, so a later transform still re-enters.
+    program.trigger({ type: 'order', detail: { order: { id: 'o-9', total: 5 } } })
+
+    const errors = traces.filter((t): t is TransformErrorTrace => t.kind === TRACE_MESSAGE_KINDS.transform_error)
+    expect(errors).toHaveLength(1)
+    expect(errors[0]!.reason).toBe('jq_timeout')
+    expect(errors[0]!.transformer.target).toBe('never')
+
+    const selections = traces.filter((t): t is SelectionTrace => t.kind === TRACE_MESSAGE_KINDS.selection)
+    expect(selections.some((s) => s.selected.type === 'never')).toBe(false)
+    const ship = selections.find((s) => s.selected.type === 'ship')
+    expect(ship).toBeDefined()
+    expect(ship!.selected.detail).toEqual({ id: 'o-9', total: 5 })
+  })
+
+  test("the warm pool is unref'd — a process that only ran a transform still exits", () => {
+    // `bun test` force-exits after a run, so a leaked (ref'd) worker would be
+    // invisible here. The real runtime is `bun run` (serve/CLI), which blocks
+    // on a live worker — exercise that boundary in a subprocess.
+    const script = `import { evaluateTransform } from '${new URL('../behavioral.utils.ts', import.meta.url).pathname}'\nconsole.log('done', JSON.stringify(evaluateTransform('.a', { a: 1 })))`
+    const proc = Bun.spawnSync({
+      cmd: [process.execPath, 'run', '-'],
+      stdin: new TextEncoder().encode(script),
+      stdout: 'pipe',
+      stderr: 'pipe',
+      timeout: 15_000,
+      killSignal: 'SIGKILL',
+    })
+    expect(proc.exitCode).toBe(0)
+    expect(new TextDecoder().decode(proc.stdout)).toContain('done')
+  })
+
   test('output_too_large: a result beyond the shared-buffer cap traces and never fires the target', () => {
     const program = behavioral()
     const { addThread } = program
