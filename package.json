@@ -30,7 +30,7 @@
   "main": "./src/main.ts",
   "exports": {
     ".": "./src/main.ts",
-    "./behaviors": "./src/behaviors.ts",
+    "./faculties": "./src/faculties.ts",
     "./controller": "./src/controller.ts",
     "./utils": "./src/utils.ts"
   },

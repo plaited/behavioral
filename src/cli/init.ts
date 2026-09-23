@@ -6,17 +6,17 @@
  * Two surfaces over one runner:
  *
  * - **agents** — the framework-native JSON command: `behavioral init '{...}'`
- *   with `--schema input|output`, `--dry-run`, `--help`. Absent behaviors
- *   default on (TypeSafe/OpenAI urls); `null` omits a behavior; api keys ride as
+ *   with `--schema input|output`, `--dry-run`, `--help`. Absent faculties
+ *   default on (TypeSafe/OpenAI urls); `null` omits a faculty; api keys ride as
  *   env-var-NAME references that fail fast when unset — never literals.
  * - **humans** — with no input and a TTY (or `--interactive`), a prompt tour
  *   collects the same {@link InitInput} through an injectable `ask` seam and
  *   hands it to the same runner.
  *
  * Provider scaffolding writes `<home>/providers/<file>` — a provider entry
- * that imports the behavior factory by bare specifier (resolvable anywhere under
- * the global install) — and points the behavior's `entry` at it (relative paths
- * resolve against the home, per `resolveBehaviorEntry`).
+ * that imports the faculty factory by bare specifier (resolvable anywhere under
+ * the global install) — and points the faculty's `entry` at it (relative paths
+ * resolve against the home, per `resolveFacultyEntry`).
  *
  * @packageDocumentation
  */
@@ -24,7 +24,7 @@
 import { join } from 'node:path'
 import { createInterface } from 'node:readline'
 import type { JSONSchemaType } from 'ajv'
-import { behavioralHome } from '../behaviors/behavioral-home.ts'
+import { behavioralHome } from '../faculties/behavioral-home.ts'
 import { makeCli } from './cli.ts'
 
 // ---------------------------------------------------------------------------
@@ -48,15 +48,15 @@ export type SystemTwoEndpointInit = {
 
 /** A custom provider entry to scaffold under `<home>/providers/`. */
 export type ProviderScaffold = {
-  behavior: 'systemOne' | 'systemTwo'
+  faculty: 'systemOne' | 'systemTwo'
   /** A bare file name (no path components) ending in `.ts`. */
   file: string
 }
 
 export type InitInput = {
-  /** Absent → the default TypeSafe endpoint; `null` → the behavior is omitted. */
+  /** Absent → the default TypeSafe endpoint; `null` → the faculty is omitted. */
   systemOne?: SystemOneEndpointInit | null
-  /** Absent → the default OpenAI endpoint; `null` → the behavior is omitted. */
+  /** Absent → the default OpenAI endpoint; `null` → the faculty is omitted. */
   systemTwo?: { endpoints?: Record<string, SystemTwoEndpointInit> } | null
   providers?: ProviderScaffold[]
   /** Overwrite an existing config (and provider files). */
@@ -130,11 +130,11 @@ export const InitInputSchema = {
       items: {
         type: 'object',
         properties: {
-          behavior: { type: 'string', enum: ['systemOne', 'systemTwo'] },
+          faculty: { type: 'string', enum: ['systemOne', 'systemTwo'] },
           // Bare file names only — no path components, no traversal.
           file: { type: 'string', pattern: '^[A-Za-z0-9][A-Za-z0-9._-]*\\.ts$' },
         },
-        required: ['behavior', 'file'],
+        required: ['faculty', 'file'],
         additionalProperties: false,
       },
     },
@@ -158,15 +158,15 @@ const InitOutputSchema = {
 // Templates
 // ---------------------------------------------------------------------------
 
-const providerTemplate = (behavior: 'systemOne' | 'systemTwo'): string => {
-  const factory = behavior === 'systemOne' ? 'configSystemOne' : 'configSystemTwo'
-  const respondType = behavior === 'systemOne' ? 'SystemOneRespond' : 'SystemTwoRespond'
+const providerTemplate = (faculty: 'systemOne' | 'systemTwo'): string => {
+  const factory = faculty === 'systemOne' ? 'configSystemOne' : 'configSystemTwo'
+  const respondType = faculty === 'systemOne' ? 'SystemOneRespond' : 'SystemTwoRespond'
   return `/**
- * A custom System ${behavior === 'systemOne' ? 'One' : 'Two'} provider entry.
+ * A custom System ${faculty === 'systemOne' ? 'One' : 'Two'} provider entry.
  * ${factory} owns the wire plumbing (inbound lane, result envelope, cancel and
  * timeout); you own only the model call below.
  */
-import { ${factory}, type ${respondType} } from '@behavioral/sh/behaviors'
+import { ${factory}, type ${respondType} } from '@behavioral/sh/faculties'
 
 // MINIMAL: stub transport — replace with your call. Keep the contract: one
 // validated input in; the output shape or { isError: true, message } out.
@@ -202,11 +202,11 @@ const tsObject = (record: Record<string, string>): string =>
 const renderConfig = ({
   systemOne,
   systemTwo,
-  entryByBehavior,
+  entryByFaculty,
 }: {
   systemOne?: Required<Omit<SystemOneEndpointInit, 'headers'>> & { headers?: Record<string, string> }
   systemTwo?: { endpoints: Record<string, SystemTwoEndpointInit> }
-  entryByBehavior: Map<'systemOne' | 'systemTwo', string>
+  entryByFaculty: Map<'systemOne' | 'systemTwo', string>
 }): string => {
   const usesEnv =
     (systemOne !== undefined && systemOne.apiKeyEnv !== undefined) ||
@@ -215,7 +215,7 @@ const renderConfig = ({
   const helpers = useHelpers(systemOne, systemTwo)
   const imports = [
     "import { defineConfig } from '@behavioral/sh'",
-    `import { ${helpers.sort().join(', ')} } from '@behavioral/sh/behaviors'`,
+    `import { ${helpers.sort().join(', ')} } from '@behavioral/sh/faculties'`,
   ]
   const lines: string[] = [
     '// Generated by `behavioral init` — executable config; edit freely.',
@@ -232,7 +232,7 @@ const renderConfig = ({
     if (systemOne.apiKeyEnv !== undefined) lines.push(`      apiKey: env(${ts(systemOne.apiKeyEnv)}),`)
     if (systemOne.headers !== undefined) lines.push(`      headers: ${tsObject(systemOne.headers)},`)
     lines.push('    },')
-    const entry = entryByBehavior.get('systemOne')
+    const entry = entryByFaculty.get('systemOne')
     if (entry !== undefined) lines.push(`    entry: ${ts(entry)},`)
     lines.push('  }),')
   }
@@ -247,7 +247,7 @@ const renderConfig = ({
       lines.push('      },')
     }
     lines.push('    },')
-    const entry = entryByBehavior.get('systemTwo')
+    const entry = entryByFaculty.get('systemTwo')
     if (entry !== undefined) lines.push(`    entry: ${ts(entry)},`)
     lines.push('  }),')
   }
@@ -275,16 +275,16 @@ export const runInit = async (input: InitInput): Promise<InitOutput> => {
   }
 
   // Scaffold provider entries first — the config references their paths.
-  const entryByBehavior = new Map<'systemOne' | 'systemTwo', string>()
+  const entryByFaculty = new Map<'systemOne' | 'systemTwo', string>()
   if (input.providers !== undefined) {
     for (const provider of input.providers) {
-      if (entryByBehavior.has(provider.behavior)) {
-        throw new Error(`only one provider per behavior — a second ${provider.behavior} entry was requested`)
+      if (entryByFaculty.has(provider.faculty)) {
+        throw new Error(`only one provider per faculty — a second ${provider.faculty} entry was requested`)
       }
       const providerPath = `providers/${provider.file}`
-      await Bun.write(join(home, providerPath), providerTemplate(provider.behavior))
+      await Bun.write(join(home, providerPath), providerTemplate(provider.faculty))
       files.push(providerPath)
-      entryByBehavior.set(provider.behavior, providerPath)
+      entryByFaculty.set(provider.faculty, providerPath)
     }
   }
 
@@ -296,7 +296,7 @@ export const runInit = async (input: InitInput): Promise<InitOutput> => {
         ? { endpoints: { [SYSTEM_TWO_DEFAULT_LABEL]: SYSTEM_TWO_DEFAULTS } }
         : { endpoints: input.systemTwo.endpoints }
 
-  await Bun.write(configPath, renderConfig({ systemOne, systemTwo, entryByBehavior }))
+  await Bun.write(configPath, renderConfig({ systemOne, systemTwo, entryByFaculty }))
   files.unshift('config.ts')
   return { home, configPath, files }
 }
@@ -347,11 +347,11 @@ export const collectInitInput = async (ask: Ask): Promise<InitInput> => {
   }
 
   if (answered(await ask('Scaffold a custom provider entry? [y/N]', 'n'), false)) {
-    const behavior = withDefault(await ask('Provider behavior (systemOne | systemTwo)', 'systemOne'), 'systemOne') as
+    const faculty = withDefault(await ask('Provider faculty (systemOne | systemTwo)', 'systemOne'), 'systemOne') as
       | 'systemOne'
       | 'systemTwo'
-    const file = withDefault(await ask('Provider file name', 'my-one.behavior.ts'), 'my-one.behavior.ts')
-    input.providers = [{ behavior, file }]
+    const file = withDefault(await ask('Provider file name', 'my-one.faculty.ts'), 'my-one.faculty.ts')
+    input.providers = [{ faculty, file }]
   }
 
   return input
@@ -365,12 +365,12 @@ const INIT_HELP = `Generate <BEHAVIORAL_HOME>/config.ts (plus optional provider 
 
 Run with no input at a terminal for the interactive tour; piped stdin or a JSON
 positional is the agent path. Input fields (all optional):
-  systemOne  {"url", "model", "apiKeyEnv", "headers"} | null   null omits the behavior
+  systemOne  {"url", "model", "apiKeyEnv", "headers"} | null   null omits the faculty
   systemTwo  {"endpoints": {"<label>": {"url", "apiKeyEnv", "headers"}}} | null
-  providers  [{"behavior": "systemOne" | "systemTwo", "file": "name.behavior.ts"}]
+  providers  [{"faculty": "systemOne" | "systemTwo", "file": "name.faculty.ts"}]
   force      Overwrite an existing config
 
-Absent behaviors default on (TypeSafe + OpenAI urls, env-var-name api keys).`
+Absent faculties default on (TypeSafe + OpenAI urls, env-var-name api keys).`
 
 const command = makeCli({
   name: 'init',

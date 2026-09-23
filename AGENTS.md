@@ -58,11 +58,11 @@ Minimum gate:
 1. `bun --bun tsc --noEmit`
 2. targeted tests for the changed surface
 
-Use broader validation when runtime behavior, tool behavior, schemas/validators, shared
+Use broader validation when runtime faculty, tool faculty, schemas/validators, shared
 infrastructure, or any broad/uncertain surface changes. Use the minimum gate when the change is
 tightly bounded and verified by inspection or code search, or is path-only rename, link/reference
 cleanup, wording-only docs/skills text, or another edit that does not materially change executable
-behavior. If you choose targeted tests, state the scope and why the narrower gate suffices.
+faculty. If you choose targeted tests, state the scope and why the narrower gate suffices.
 
 Broader validation is still area-aware — it does not mean "run unrelated tests." Examples: if
 `skills/<name>/scripts` changed, run that skill's tests plus shared `src/` tests those scripts
@@ -70,24 +70,24 @@ depend on; if a `src/<feature>` CLI command changed, run that feature's tests pl
 tests; if only `src/controller/` changed, run the controller test surfaces; if shared code changed
 and the impact is broad or unclear, expand coverage until the affected surface is credibly covered.
 
-`docs:` and `chore:` commits may skip executable validation when they do not change behavior.
+`docs:` and `chore:` commits may skip executable validation when they do not change faculty.
 
 ## Directory Boundaries
 
-**`src/behaviors/`** — the process layer. Shared modules sit at the top: the
-behavior event wire (`behaviors.types.ts` + `behaviors.constants.ts` — every
-request/result event kind, validators, and the kind registry), the behavior
-wiring primitive (`use-behavior.ts`, `useBehavior` — Bun.spawn processes speaking
-the wire over stdio lines; it compiles the behavior's event schemas and returns
+**`src/faculties/`** — the process layer. Shared modules sit at the top: the
+faculty event wire (`faculties.types.ts` + `faculties.constants.ts` — every
+request/result event kind, validators, and the kind registry), the faculty
+wiring primitive (`use-faculty.ts`, `useFaculty` — Bun.spawn processes speaking
+the wire over stdio lines; it compiles the faculty's event schemas and returns
 them so the composition derives guard threads; exit-code crash synthesis as
-`behavior_error`; respawn on demand), the process lane (`process-lane.ts` — stdio
+`faculty_error`; respawn on demand), the process lane (`process-lane.ts` — stdio
 emit/inbound, the envData bridge, bindEmit for the frontier embed),
-`behavioral-home.ts` (the `BEHAVIORAL_HOME` root), `resolve-behavior-entry.ts`
-(bundled/absolute/home-relative provider-entry paths), and `behaviors.threads.ts`
+`behavioral-home.ts` (the `BEHAVIORAL_HOME` root), `resolve-faculty-entry.ts`
+(bundled/absolute/home-relative provider-entry paths), and `faculties.threads.ts`
 (the composition's root guard pack).
-Each behavior lives in its own subfolder — `behavior.ts` (the process entry),
+Each faculty lives in its own subfolder — `faculty.ts` (the process entry),
 `threads.ts` (its default pack), `types.ts`/`schemas.ts`, `config.ts` (the system
-behaviors), plus its `tests/`:
+faculties), plus its `tests/`:
 - `system-two/` — Open Responses model calls; a provider entry —
   `configSystemTwo(respond)` wires it, `useSystemTwo({ endpoints })` seeds the
   endpoint map
@@ -99,26 +99,26 @@ behaviors), plus its `tests/`:
 - `store/` — durable space-scoped persistence
 - `mcp/` — remote MCP connections/sessions/auth; `keychain-oauth-provider.ts`
   is the MCP OAuth `BunKeychain` over `Bun.secrets` plus the issuer-binding v2
-  provider (behavior-only: nothing outside `mcp/` imports it)
+  provider (faculty-only: nothing outside `mcp/` imports it)
 - `frontier/` — the in-process embed — imported and driven by the composition;
   standalone spawns are a compatibility entry
-Each behavior owns its event types + input boundary; results echo the request
+Each faculty owns its event types + input boundary; results echo the request
 `space`; op runners errors-as-data.
 **`src/tools/`** — deleted (fleet 0): the ICL conversion retired the CLI tool
-fleet. mcp-client is the mcp behavior (`src/behaviors/mcp/behavior.ts`);
-skill/plugin operations are the shell behavior's thread pack
-(`src/behaviors/shell/threads.ts`) + recipes + store, taught by
+fleet. mcp-client is the mcp faculty (`src/faculties/mcp/faculty.ts`);
+skill/plugin operations are the shell faculty's thread pack
+(`src/faculties/shell/threads.ts`) + recipes + store, taught by
 `skills/skill-conventions/`.
-**`src/behaviors.ts`** — the behaviors public surface (package export `./behaviors`): the
-`Behavior` union, the wire types + JSON schemas/validators (`behaviors.types.ts`), the override thread
-packs (`shellThreads`, `mcpThreads`), their schemas/types, `useBehavior`, and the
+**`src/faculties.ts`** — the faculties public surface (package export `./faculties`): the
+`Faculty` union, the wire types + JSON schemas/validators (`faculties.types.ts`), the override thread
+packs (`shellThreads`, `mcpThreads`), their schemas/types, `useFaculty`, and the
 System One/Two config surface (`configSystemOne`/`useSystemOne`,
 `configSystemTwo`/`useSystemTwo`) — what a
-`config.ts` imports to compose. (`behaviorsThreads`, the default root pack, is internal.) The runtime composition itself is `src/cli/b-program.ts`.
+`config.ts` imports to compose. (`facultiesThreads`, the default root pack, is internal.) The runtime composition itself is `src/cli/b-program.ts`.
 **`src/behavioral/`** — the pure language layer: types, constants, utils, the interpreter core
 (`behavioral.ts`), and its internal jq subprocess (`jq.worker.ts` — engine-internal, wire-external;
-nothing outside behavioral/ speaks its wire). Zero process entries that speak the behavior wire —
-dependency arrow is one-way: `src/behaviors/` → `src/behavioral/`.
+nothing outside behavioral/ speaks its wire). Zero process entries that speak the faculty wire —
+dependency arrow is one-way: `src/faculties/` → `src/behavioral/`.
 **`src/controller/`** — the browser Controller: a validation-free dumb relay over an injectable
 Transport, plus `controller.utils.ts` (DelegatedListener, swapBoundary, the deterministic floors
 `isInvalidTrigger`/`detectXssVectors`) and render-time scale error-back. `controller.schemas.ts`
@@ -138,15 +138,15 @@ JSON-RPC IPC host lives here too: `b-program.ts` (the runtime composition, `bPro
 entry — ingress messages → triggers, `ui_*` selections → client notifications, redacted
 traces out), `load-config.ts` (`<BEHAVIORAL_HOME>/config.ts`), and `trace-consumer.ts`.
 **`src/utils/`** — shared pure utilities.
-**`src/behaviors/<behavior>/threads.ts`** — behavior thread packs: `shell/threads.ts`
+**`src/faculties/<faculty>/threads.ts`** — faculty thread packs: `shell/threads.ts`
 (the ICL pack — skill/plugin scans, catalog/manifest schema gates, links dispatchers
 + stored recipes) and `mcp/threads.ts` (the auth replay spine). Packs ship with
-their behavior; `bProgram` mounts a pack when the behavior and its required
-behaviors are on — except `behaviors.threads.ts`, the composition's **root
+their faculty; `bProgram` mounts a pack when the faculty and its required
+faculties are on — except `faculties.threads.ts`, the composition's **root
 pack** (the guard threads), always mounted regardless of the allow-list. The
 former `src/threads/` is dissolved; its engine-layer specs live with their
-behaviors (`src/behaviors/<behavior>/tests/`), while specs for the shared modules
-stay in `src/behaviors/tests/`.
+faculties (`src/faculties/<faculty>/tests/`), while specs for the shared modules
+stay in `src/faculties/tests/`.
 **`tasks/`** — Harbor skill-authoring task specs (challenge content; not shipped, not a plugin).
 **`scripts/`** — repo setup and package-maintenance shell glue.
 **`skills/`** — published reference skills.
@@ -221,24 +221,24 @@ Expand test coverage when the impact is broad, shared, or uncertain.
 **Type over interface** — `type User = {` not `interface User {`
 **No any** — use `unknown` with type guards. At external boundaries (file/network/IPC/event-detail
 payloads), validate with AJV: define a `JSONSchemaType<T>` and compile with `ajv.compile` (the shared
-instance in `src/behavioral/behavioral.types.ts`; thread `detailSchema` gates and behavior-behavior
+instance in `src/behavioral/behavioral.types.ts`; thread `detailSchema` gates and faculty
 input boundaries are the pattern homes). Trust the validated value downstream.
 **PascalCase types** — schemas get `Schema` suffix.
 **Schemas are AJV, not Zod.** Define wire shapes as `JSONSchemaType<T>` and compile with the shared
 `ajv` instance. Prefer structural schemas (`oneOf` branches, strict `additionalProperties: false` at
 every level) so constraints are explicit and JSON-schema replay contracts stay aligned. Do not
 hand-maintain a parallel Zod shape alongside an AJV one. Schema-data is exported for reuse (the
-catalog/manifest/recipe contracts in `src/behaviors/shell/threads.ts`).
+catalog/manifest/recipe contracts in `src/faculties/shell/threads.ts`).
 **No cross-module schema drift.** When a CLI command returns a shape produced by another module,
 the output schema must derive from or reference that module's exported schema —
 not be hand-mirrored. Failure mode: a module's output type changes; a downstream CLI/tool schema
 silently rejects the new field (`additionalProperties: false` bites). Fix: one JSON-schema home for
-the shape (e.g. a behavior's event schema in `src/behaviors/behaviors.types.ts`), consumed
+the shape (e.g. a faculty's event schema in `src/faculties/faculties.types.ts`), consumed
 downstream via `.schema` or export.
 **CLI schema reflection uses AJV.** The `makeCliRouter`/`parseCli` framework in `src/cli/cli.ts`
 reflects command schemas via `--schema input|output` — schemas are `JSONSchemaType<T>` objects,
 so reflection is `JSON.stringify(schema)`. The CLI AJV instance (`useDefaults: true`) matches
-Zod's `.default()` behavior; otherwise it is identical to the shared AJV.
+Zod's `.default()` faculty; otherwise it is identical to the shared AJV.
 **Arrow functions** — `const fn = () =>` over `function fn()`.
 **Object params >2 args** — `fn({ a, b, c }: { ... })`.
 **Private fields** — `#field` (ES2022) not `private field`.

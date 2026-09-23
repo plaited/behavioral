@@ -23,12 +23,12 @@ describe('loadConfig', () => {
   })
 
   test('a present config file yields its default export', async () => {
-    await withConfig(`export default { behaviors: ['shell'] }`, async (file) => {
-      expect(await loadConfig(file)).toEqual({ behaviors: ['shell'] })
+    await withConfig(`export default { faculties: ['shell'] }`, async (file) => {
+      expect(await loadConfig(file)).toEqual({ faculties: ['shell'] })
     })
   })
 
-  test('accepts a useBehavior-style function override', async () => {
+  test('accepts a useFaculty-style function override', async () => {
     await withConfig(`const shell = () => 'wired'\nexport default { shell }`, async (file) => {
       const config = await loadConfig(file)
       expect(typeof config.shell).toBe('function')
@@ -41,9 +41,9 @@ describe('loadConfig', () => {
     })
   })
 
-  test('rejects an unknown behavior name with the allowed set', async () => {
-    await withConfig(`export default { behaviors: ['nope'] }`, async (file) => {
-      await expect(loadConfig(file)).rejects.toThrow(/unknown behavior "nope".*expected one of: shell, store, mcp/)
+  test('rejects an unknown faculty name with the allowed set', async () => {
+    await withConfig(`export default { faculties: ['nope'] }`, async (file) => {
+      await expect(loadConfig(file)).rejects.toThrow(/unknown faculty "nope".*expected one of: shell, store, mcp/)
     })
   })
 
@@ -52,8 +52,8 @@ describe('loadConfig', () => {
     const previous = process.env.BEHAVIORAL_HOME
     process.env.BEHAVIORAL_HOME = home
     try {
-      await Bun.write(join(home, 'config.ts'), `export default { behaviors: ['store'] }`)
-      expect(await loadConfig()).toEqual({ behaviors: ['store'] })
+      await Bun.write(join(home, 'config.ts'), `export default { faculties: ['store'] }`)
+      expect(await loadConfig()).toEqual({ faculties: ['store'] })
     } finally {
       if (previous === undefined) delete process.env.BEHAVIORAL_HOME
       else process.env.BEHAVIORAL_HOME = previous

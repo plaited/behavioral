@@ -10,14 +10,14 @@ import { type Ask, collectInitInput, type InitInput, InitInputSchema, init } fro
  * (makeCli: JSON positional in, validated JSON out), against a temp
  * BEHAVIORAL_HOME. The locked contract:
  *
- * - absent behaviors default on (TypeSafe/OpenAI urls, env-NAME secrets);
- *   `null` omits a behavior; objects customize over the defaults;
+ * - absent faculties default on (TypeSafe/OpenAI urls, env-NAME secrets);
+ *   `null` omits a faculty; objects customize over the defaults;
  * - no literal secrets: api keys ride as `env('<NAME>')` references that fail
  *   fast when the variable is unset;
  * - an existing config is never clobbered without `force`;
  * - provider scaffolding writes `<home>/providers/<file>` (import-safe bare
  *   specifiers, thanks to the global-install resolution) and points the
- *   behavior's `entry` at it.
+ *   faculty's `entry` at it.
  */
 
 describe('behavioral init — the runner', () => {
@@ -48,13 +48,13 @@ describe('behavioral init — the runner', () => {
     return JSON.parse(logs.join('\n')) as { home: string; configPath: string; files: string[] }
   }
 
-  test('an empty input generates the default config — both behaviors, env-name secrets', async () => {
+  test('an empty input generates the default config — both faculties, env-name secrets', async () => {
     const output = await runInit('{}')
     expect(output.configPath).toBe(configPath())
     expect(output.files).toEqual(['config.ts'])
     const content = readConfig()
     expect(content).toContain("import { defineConfig } from '@behavioral/sh'")
-    expect(content).toContain("import { useSystemOne, useSystemTwo } from '@behavioral/sh/behaviors'")
+    expect(content).toContain("import { useSystemOne, useSystemTwo } from '@behavioral/sh/faculties'")
     expect(content).toContain('https://api.typesafe.ai/v1/systemone')
     expect(content).toContain("'jev-latest'")
     expect(content).toContain("apiKey: env('TYPESAFE_API_KEY')")
@@ -64,7 +64,7 @@ describe('behavioral init — the runner', () => {
     expect(content).not.toMatch(/sk-[a-zA-Z0-9]/)
   })
 
-  test('a null behavior is omitted; a custom spec overrides the defaults', async () => {
+  test('a null faculty is omitted; a custom spec overrides the defaults', async () => {
     await runInit(
       JSON.stringify({
         systemOne: { url: 'http://localhost:9999/systemone', model: 'my-model', apiKeyEnv: 'MY_KEY' },
@@ -87,34 +87,34 @@ describe('behavioral init — the runner', () => {
     expect(readConfig()).toContain('defineConfig')
   })
 
-  test('provider scaffolding writes the entry and points the behavior at it', async () => {
+  test('provider scaffolding writes the entry and points the faculty at it', async () => {
     const output = await runInit(
       JSON.stringify({
-        providers: [{ behavior: 'systemOne', file: 'my-one.behavior.ts' }],
+        providers: [{ faculty: 'systemOne', file: 'my-one.faculty.ts' }],
       }),
     )
-    expect(output.files).toContain('providers/my-one.behavior.ts')
-    const entry = readFileSync(join(home, 'providers', 'my-one.behavior.ts'), 'utf8')
+    expect(output.files).toContain('providers/my-one.faculty.ts')
+    const entry = readFileSync(join(home, 'providers', 'my-one.faculty.ts'), 'utf8')
     expect(entry).toContain('configSystemOne')
     expect(entry).toContain('SystemOneRespond')
-    expect(readConfig()).toContain("entry: 'providers/my-one.behavior.ts'")
+    expect(readConfig()).toContain("entry: 'providers/my-one.faculty.ts'")
   })
 
-  test('two providers for one behavior are rejected', async () => {
+  test('two providers for one faculty are rejected', async () => {
     const input = JSON.stringify({
       providers: [
-        { behavior: 'systemOne', file: 'a.behavior.ts' },
-        { behavior: 'systemOne', file: 'b.behavior.ts' },
+        { faculty: 'systemOne', file: 'a.faculty.ts' },
+        { faculty: 'systemOne', file: 'b.faculty.ts' },
       ],
     })
-    await expect(init([input])).rejects.toThrow(/one provider per behavior/)
+    await expect(init([input])).rejects.toThrow(/one provider per faculty/)
   })
 
   test('the input schema rejects path traversal in a provider file name', () => {
     const validate = ajv.compile(InitInputSchema)
-    const bad: InitInput = { providers: [{ behavior: 'systemOne', file: '../evil.ts' }] }
+    const bad: InitInput = { providers: [{ faculty: 'systemOne', file: '../evil.ts' }] }
     expect(validate(bad)).toBe(false)
-    const ok: InitInput = { providers: [{ behavior: 'systemOne', file: 'my-one.behavior.ts' }] }
+    const ok: InitInput = { providers: [{ faculty: 'systemOne', file: 'my-one.faculty.ts' }] }
     expect(validate(ok)).toBe(true)
   })
 })
@@ -138,7 +138,7 @@ describe('behavioral init — the interactive collector', () => {
     expect(input.providers).toBeUndefined()
   })
 
-  test("answering 'n' disables a behavior", async () => {
+  test("answering 'n' disables a faculty", async () => {
     const input = await collectInitInput(scriptedAsk(['n', 'y', '', '', 'n']))
     expect(input.systemOne).toBeNull()
     expect(input.systemTwo).not.toBeNull()
@@ -146,9 +146,9 @@ describe('behavioral init — the interactive collector', () => {
 
   test('the scaffold tour collects the provider', async () => {
     const input = await collectInitInput(
-      scriptedAsk(['', '', '', '', '', '', '', 'y', 'systemTwo', 'my-two.behavior.ts']),
+      scriptedAsk(['', '', '', '', '', '', '', 'y', 'systemTwo', 'my-two.faculty.ts']),
     )
-    expect(input.providers).toEqual([{ behavior: 'systemTwo', file: 'my-two.behavior.ts' }])
+    expect(input.providers).toEqual([{ faculty: 'systemTwo', file: 'my-two.faculty.ts' }])
   })
 })
 

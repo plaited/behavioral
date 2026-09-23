@@ -1,6 +1,6 @@
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { behavioralHome } from '../behaviors/behavioral-home.ts'
+import { behavioralHome } from '../faculties/behavioral-home.ts'
 import type { bProgram } from './b-program.ts'
 
 /**
@@ -11,8 +11,8 @@ import type { bProgram } from './b-program.ts'
  */
 export type BehavioralConfig = Parameters<typeof bProgram>[0]
 
-/** The selectable behaviors a config may enable (mirrors the `Behavior` union). */
-const KNOWN_BEHAVIORS: readonly string[] = ['shell', 'store', 'mcp']
+/** The selectable faculties a config may enable (mirrors the `Faculty` union). */
+const KNOWN_FACULTIES: readonly string[] = ['shell', 'store', 'mcp']
 
 const invalid = (configPath: string, detail: string): never => {
   throw new Error(`invalid config at ${configPath}: ${detail}`)
@@ -21,19 +21,19 @@ const invalid = (configPath: string, detail: string): never => {
 /** Validate the trusted config's shape — fail fast with the path and a fix hint. */
 const validate = (value: unknown, configPath: string): BehavioralConfig => {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    invalid(configPath, 'expected a default-exported object like `export default { behaviors: [...] }`')
+    invalid(configPath, 'expected a default-exported object like `export default { faculties: [...] }`')
   }
   const config = value as Record<string, unknown>
-  if (config.behaviors !== undefined) {
-    const behaviors = config.behaviors
-    if (!Array.isArray(behaviors) || behaviors.some((name) => typeof name !== 'string')) {
-      invalid(configPath, '"behaviors" must be an array of behavior names')
+  if (config.faculties !== undefined) {
+    const faculties = config.faculties
+    if (!Array.isArray(faculties) || faculties.some((name) => typeof name !== 'string')) {
+      invalid(configPath, '"faculties" must be an array of faculty names')
     }
-    const unknown = (behaviors as string[]).filter((name) => !KNOWN_BEHAVIORS.includes(name))
+    const unknown = (faculties as string[]).filter((name) => !KNOWN_FACULTIES.includes(name))
     if (unknown.length > 0) {
       invalid(
         configPath,
-        `unknown behavior ${unknown.map((name) => `"${name}"`).join(', ')} — expected one of: ${KNOWN_BEHAVIORS.join(', ')}`,
+        `unknown faculty ${unknown.map((name) => `"${name}"`).join(', ')} — expected one of: ${KNOWN_FACULTIES.join(', ')}`,
       )
     }
   }
@@ -41,7 +41,7 @@ const validate = (value: unknown, configPath: string): BehavioralConfig => {
     const override = config[key]
     if (override !== undefined && typeof override !== 'function') {
       const got = override === null ? 'null' : typeof override
-      invalid(configPath, `"${key}" must be a useBehavior(...) override (a curried function), got ${got}`)
+      invalid(configPath, `"${key}" must be a useFaculty(...) override (a curried function), got ${got}`)
     }
   }
   return config as BehavioralConfig
@@ -52,8 +52,8 @@ const validate = (value: unknown, configPath: string): BehavioralConfig => {
  *
  * @remarks
  * The file is **executable config** — trusted, user-owned machine state,
- * dynamically imported so it can carry live values (the `behaviors` array and
- * `useBehavior(...)` overrides). A missing file yields the empty config, so the
+ * dynamically imported so it can carry live values (the `faculties` array and
+ * `useFaculty(...)` overrides). A missing file yields the empty config, so the
  * composition defaults apply; an unloadable file or an invalid shape throws
  * with the path and a fix hint.
  *

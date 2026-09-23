@@ -151,8 +151,8 @@ describe('serve entry (stdio)', () => {
     const repoRoot = resolve(import.meta.dir, '../../..')
     const home = mkdtempSync(join(tmpdir(), 'behavioral-serve-'))
     try {
-      // behaviors: [] prunes every behavior process — the engine alone, no spawns.
-      await Bun.write(join(home, 'config.ts'), `export default { behaviors: [] }`)
+      // faculties: [] prunes every faculty process — the engine alone, no spawns.
+      await Bun.write(join(home, 'config.ts'), `export default { faculties: [] }`)
       const proc = Bun.spawn(['bun', 'bin/behavioral.ts', 'serve'], {
         cwd: repoRoot,
         env: { ...process.env, BEHAVIORAL_HOME: home },

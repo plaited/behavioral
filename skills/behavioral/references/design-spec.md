@@ -104,7 +104,7 @@ side; the functional vocabulary lives in the thread layer, which the spec
    `primary`, `secondary`, `danger`, …) and **`feedback:`** (named loop
    response states: `error`, `confirmation`, `pending`, `success`, …) in
    frontmatter. Each is a named token bundle + a prose contract (what it
-   *conveys*, not what behavior must happen). They are vocabulary for
+   *conveys*, not what faculty must happen). They are vocabulary for
    *reusable thread objects*, not HTML attributes. See
    [Functional vocabulary](#functional-vocabulary).
 
@@ -127,7 +127,7 @@ side; the functional vocabulary lives in the thread layer, which the spec
 
 8. **No file-format spec for templates.** Templates are read/written/
    generated `.html` files; composition and inflight attribute patching are
-   agent behaviors. The spec is *aware* of this preferred path (it guides
+   agent faculties. The spec is *aware* of this preferred path (it guides
    how carriers are designed) but does not normativize the file mechanics.
    Out of scope.
 
@@ -211,10 +211,10 @@ work) is that complex interfaces *emerge* from the interaction of simple rules �
 "the front-end emerges as a result of increased complexity on the network,
 instead of being delineated from the top down by a developer." The behavioral
 program is the realization of this: b-threads with simple `request`/`waitFor`/
-`block` rules create complex coordinated behavior through the super-step
+`block` rules create complex coordinated faculty through the super-step
 model. The UI is not top-down-delineated; it *emerges* from the interaction of
 the threads' rules. `verifyFrontiers` / `exploreFrontiers` then verifies the
-emergent behavior doesn't deadlock — something the original modnet had no way
+emergent faculty doesn't deadlock — something the original modnet had no way
 to check. The functional flow's "logic" is a thread *because* the thread's
 simple-rule composition is what makes emergence tractable and verifiable.
 
@@ -310,7 +310,7 @@ places the agent speaks the vocabulary:
 
 Each entry is a **named token bundle + prose contract**: the prose says what
 the affordance/feedback *conveys* (e.g. "danger conveys irreversible
-destruction; use the destructive token bundle"), not what behavior must
+destruction; use the destructive token bundle"), not what faculty must
 happen. The token bundles reference the `'--*': value` declarations. An
 affordance may be a curated *combination* of a pattern + a feedback sequence
 (e.g. "danger" = a confirm-then-act loop rendering into a confirmation

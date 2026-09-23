@@ -1,7 +1,7 @@
 # @behavioral/sh
 
 A behavioral agent harness. The engine is an in-process behavioral-programming
-interpreter; capability behaviors run as processes behind one behavior event
+interpreter; capability faculties run as processes behind one faculty event
 wire; hosts drive the runtime through a `ui_*` egress/ingress vocabulary; and
 validation lives in guard threads whose rejects are visible in the traces.
 
@@ -24,15 +24,15 @@ flowchart TD
   subgraph COMPOSE["COMPOSITION — src/cli/b-program.ts (bProgram)"]
     direction TB
     ENGINE["BEHAVIORAL ENGINE — src/behavioral (in-process, super-step scheduler: request · waitFor · block · transform bids)"]
-    ROUTER["the pump — selected events route to their behavior lane; traces out"]
+    ROUTER["the pump — selected events route to their faculty lane; traces out"]
     GUARDS["guard threads — block malformed events at their schema (detailMatch:false); rejects visible in frontier/pending_bids/deadlock"]
-    PACKS["thread packs — the root guard pack always; shell/mcp packs when their behaviors are on"]
+    PACKS["thread packs — the root guard pack always; shell/mcp packs when their faculties are on"]
     ENGINE --> ROUTER
     GUARDS --> ENGINE
     PACKS --> ENGINE
   end
 
-  subgraph BEHAVIORS["CAPABILITY BEHAVIORS — src/behaviors/&lt;behavior&gt; (Bun.spawn processes, one wire over stdio lines)"]
+  subgraph FACULTIES["CAPABILITY FACULTIES — src/faculties/&lt;faculty&gt; (Bun.spawn processes, one wire over stdio lines)"]
     SHELL["shell — bun-direct script + Bun Shell ops"]
     STORE["store — durable space-scoped persistence"]
     MCP["mcp — remote connections/sessions/auth"]
@@ -49,25 +49,25 @@ flowchart TD
   CONFIG --> COMPOSE
   INGRESS --> COMPOSE
   COMPOSE --> OUT
-  ROUTER -->|"one JSON event per stdin line"| BEHAVIORS
-  BEHAVIORS -->|"result lines re-enter the engine (space preserved)"| ROUTER
+  ROUTER -->|"one JSON event per stdin line"| FACULTIES
+  FACULTIES -->|"result lines re-enter the engine (space preserved)"| ROUTER
   COMPOSE --> EMBED
   COMPOSE <-->|"ui_* wire (dumb relay, schema-gated at threads)"| IPC
 ```
 
-**One wire.** Every behavior speaks the same behavioral event vocabulary
-(`behaviors.types.ts` + `behaviors.constants.ts` — one home for every
+**One wire.** Every faculty speaks the same behavioral event vocabulary
+(`faculties.types.ts` + `faculties.constants.ts` — one home for every
 request/result kind, schema, and validator): requests in as one JSON line,
 results out as one JSON line, `space` preserved end to end. The engine itself is
 generic over events and never imports the wire.
 
-**Behaviors are processes.** Spawned per wiring (per space) via `useBehavior`:
+**Faculties are processes.** Spawned per wiring (per space) via `useFaculty`:
 isolated by OS construction, killable as a process tree, respawned on demand,
-crash-synthesized as exactly one `behavior_error` re-entry. The pump discards
+crash-synthesized as exactly one `faculty_error` re-entry. The pump discards
 only what cannot be this lane's event; a parsed-but-invalid result re-enters and
-is blocked by the behavior guard — visibly, in the traces.
+is blocked by the faculty guard — visibly, in the traces.
 
-**System behaviors are endpoint-carrying overrides.** `systemOne` and `systemTwo`
+**System faculties are endpoint-carrying overrides.** `systemOne` and `systemTwo`
 have no defaults: without an endpoint they are simply absent — no process, no
 route. The config surface (`configSystemOne`/`configSystemOne(respond)` for a
 custom provider entry, `useSystemOne({ endpoint })`/`useSystemTwo({ endpoints })`
@@ -75,7 +75,7 @@ for the host) delivers endpoint config via environment data; secrets never cross
 the wire.
 
 **Validation is threads, not middleware.** Guard threads derive from the same
-schemas `useBehavior` compiles and returns; the controller and the JSON-RPC codec
+schemas `useFaculty` compiles and returns; the controller and the JSON-RPC codec
 are dumb relays. A malformed event is never selected — it is blocked, and the
 reject is observable in the frontier, the pending bids, and the deadlock traces.
 
@@ -83,9 +83,9 @@ reject is observable in the frontier, the pending bids, and the deadlock traces.
 
 - `src/behavioral/` — the pure language layer: types, constants, the
   interpreter core and its trace stream
-- `src/behaviors/` — the process layer. Shared at the top (the wire,
-  `useBehavior`, the process lane, the home); one folder per behavior:
-  `shell/ store/ mcp/ frontier/ system-one/ system-two/` — behavior, threads,
+- `src/faculties/` — the process layer. Shared at the top (the wire,
+  `useFaculty`, the process lane, the home); one folder per faculty:
+  `shell/ store/ mcp/ frontier/ system-one/ system-two/` — faculty, threads,
   types/schemas, and colocated tests
 - `src/cli/` — the composition (`b-program.ts`), `init` (config generation),
   `serve` + the JSON-RPC codec, `load-config`, the trace consumer
@@ -106,11 +106,11 @@ Imported as `@behavioral/sh`:
 // (types it accepts: the bProgram options)
 import { defineConfig } from '@behavioral/sh'
 
-// The behaviors surface — what a config.ts composes with:
-// useBehavior, the Behavior union, wire types + schemas/validators,
+// The faculties surface — what a config.ts composes with:
+// useFaculty, the Faculty union, wire types + schemas/validators,
 // the override thread packs (shellThreads, mcpThreads),
 // and the System One/Two config surface
-import { useSystemOne, useSystemTwo } from '@behavioral/sh/behaviors'
+import { useSystemOne, useSystemTwo } from '@behavioral/sh/faculties'
 
 // Controller — browser-side controller bootstrap
 import { Controller } from '@behavioral/sh/controller'
@@ -123,7 +123,7 @@ import { keyMirror, deepEqual } from '@behavioral/sh/utils'
 
 ```ts
 import { defineConfig } from '@behavioral/sh'
-import { useSystemOne, useSystemTwo } from '@behavioral/sh/behaviors'
+import { useSystemOne, useSystemTwo } from '@behavioral/sh/faculties'
 
 export default defineConfig({
   systemOne: useSystemOne({ endpoint: { url: 'https://api.typesafe.ai/v1/systemone', apiKey: process.env.TYPESAFE_API_KEY, model: 'jev-latest' } }),
@@ -140,7 +140,7 @@ behavioral init '{...}'  # agent JSON — see --schema input
 
 The composition returns `{ trigger, useTrace, start, terminate }`: subscribe
 before `start()` so boot traces are observable; `terminate()` kills every
-behavior process it invoked, overrides included. A custom provider is a
+faculty process it invoked, overrides included. A custom provider is a
 `configSystemOne(respond)` entry file under `<home>/providers/` — the wire
 contract (and therefore the guards) is unchanged.
 

@@ -1,18 +1,18 @@
-# mcp-client — the remote MCP behavior
+# mcp-client — the remote MCP faculty
 
-Remote MCP server operations are a spawned **behavior**, not CLI fleet tools:
-`src/behaviors/mcp/behavior.ts` (a spawned Bun process) holds the connections,
+Remote MCP server operations are a spawned **faculty**, not CLI fleet tools:
+`src/faculties/mcp/faculty.ts` (a spawned Bun process) holds the connections,
 and the engine speaks to it over the behavioral event wire. The
-`src/behaviors/mcp/threads.ts` thread spine orchestrates cross-turn auth
+`src/faculties/mcp/threads.ts` thread spine orchestrates cross-turn auth
 replay.
 
 ## The wire
 
 | Event | Detail | Direction |
 |-------|--------|-----------|
-| `mcp_request` | `{ id, op, input }` | program → behavior |
-| `mcp_request_result` | `{ id, result }` | behavior → program |
-| `mcp_cancel` | `{ id }` | program → behavior |
+| `mcp_request` | `{ id, op, input }` | program → faculty |
+| `mcp_request_result` | `{ id, result }` | faculty → program |
+| `mcp_cancel` | `{ id }` | program → faculty |
 
 The seven ops (`detail.op`): `discover`, `list-tools`, `call-tool`,
 `list-prompts`, `get-prompt`, `list-resources`, `read-resource`. Each op
@@ -40,7 +40,7 @@ call-tool, `name` for get-prompt, `uri` for read-resource) and an optional
 ## Auth
 
 Per-call input credentials are **retired** — the wire carries the server
-URL only. Auth binds at the behavior's module scope: broker env-data
+URL only. Auth binds at the faculty's module scope: broker env-data
 (`MCP_BROKER_URL` + `MCP_BROKER_BOOT_SECRET`, seeded by the spawning host)
 with the OS-keychain floor beneath it. Neither yields a token → the call
 goes unauthenticated → the server's 401 → typed `authorization_required`.
@@ -56,8 +56,8 @@ never touch the store.
 
 ## Composing
 
-Threads request `mcp_request` events like any other behavior; the composition
-spawns it by default (`['bun', 'run', 'mcp/behavior.ts']` over stdio
+Threads request `mcp_request` events like any other faculty; the composition
+spawns it by default (`['bun', 'run', 'mcp/faculty.ts']` over stdio
 lines — same wire, one JSON event per line). Schema-reflect the op inputs via
-`src/behaviors/mcp/types.ts` (`MCP_*_OP_INPUT_SCHEMA`) when model-facing
+`src/faculties/mcp/types.ts` (`MCP_*_OP_INPUT_SCHEMA`) when model-facing
 context is needed.

@@ -3,7 +3,7 @@ import { defineConfig } from '../define-config.ts'
 
 describe('defineConfig', () => {
   test('returns the config unchanged (a typed identity for config.ts authors)', () => {
-    expect(defineConfig({ behaviors: ['store'] })).toEqual({ behaviors: ['store'] })
+    expect(defineConfig({ faculties: ['store'] })).toEqual({ faculties: ['store'] })
   })
 
   test('preserves an override reference', () => {

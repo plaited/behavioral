@@ -117,7 +117,7 @@ The second common mistake: expecting the WebSocket to be manually managed.
 The Controller handles connect, retry (with bounded backoff on codes 1006/
 1012/1013, max 3 retries), and message queuing during disconnect internally.
 Do not wrap it in your own reconnection logic — that duplicates the built-in
-behavior and races with the Controller's own retry.
+faculty and races with the Controller's own retry.
 
 ## See also
 
