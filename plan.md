@@ -154,6 +154,41 @@ ingress + a plugin-shipped behavior surface.
      the conventions skill, docs sweep. Remaining: the deletion sweep (fleet 6 → 0)
      and the governor thread (plugin admission). -->
 
+### 2026-09-21 — ruled: thread admission — the model can mount threads, behind the WIDE guard (Q1/b)
+
+- **THE WIRING GAP NAMED (pilot): threads can only propose events; only the
+  host can addThreads — the self-improving loop's promotion path had no
+  runtime leg. THE DESIGN:** the model's structured response output carries
+  a Thread[] payload; a monitor transform detects the shape and emits
+  `admission_request { threads }`; THE COMPOSITION intercepts it (its first
+  non-forward route — boundary enforcement, not shaping), applies the floor
+  (AJV Thread[] schema + the deterministic vocabulary guard), and posts the
+  add_threads envelope (the management channel already exists; the trailing
+  step runs them), stamped with the admitting request's space.
+- **THE GUARD IS WIDE (Q1/b, pilot ruled):** model-admitted threads may not
+  REQUEST *and* may not waitFor/listen on the family wire vocabulary — they
+  compose the PUBLIC vocabulary; family vocabulary belongs to family packs
+  ("threads arrive with the worker they drive", extended to reads). A
+  narrow guard would leave a data-exfiltration hop: a model thread
+  transform-listening shell_request_result could re-emit what it sees.
+- **Floor/ceiling applies:** the guard + schema are the deterministic floor;
+  frontier-verify (deadlock/livelock of the candidate against the current
+  program) is the safety ceiling at admission (frontier is always-on);
+  frontier-replay usefulness stays in the autoresearch promotion flow.
+- **CONSEQUENCE (design follow-on): the wide guard requires a PUBLIC
+  request/result vocabulary** — links_request's result currently rides
+  shell_request_result (denied under b), and catalog reads ride
+  store_request (denied). The packs become the translation layer:
+  links_request → links_result, catalog_request → catalog_result —
+  pack threads translate family results into public results, one-event
+  interfaces per capability (the attrs-gate route-table law, applied to
+  the model surface).
+- **JSON-RPC/IPC rider logged:** the pasted client's shape = the ruled
+  egress pipe carrier wearing JSON-RPC 2.0 line-framing as a candidate
+  ENCODING (traces as notifications, trigger as requests); not a new
+  server concept. One connection = one turn = one instance — no session to
+  restart. The taskbar slice picks the encoding.
+
 ### 2026-09-21 — landed: the per-space composition — useWorker + useBehavioral recast; the packs move home
 
 - **THE RECAST IS GREEN (235/235 workers tests):** `useBehavioral({ traceListener,
