@@ -76,9 +76,7 @@ and the impact is broad or unclear, expand coverage until the affected surface i
 
 **`src/behaviors/`** — the process layer: the behavior event wire
 (`behaviors.types.ts` + `behaviors.constants.ts` — every request/result event kind,
-validators, and the kind registry), the in-process engine composition
-(`get-behavioral.ts`, `getBehavioral` — behavioral() runs in-process; pack mounts
-defer until the pump subscribes; every re-entry pumps one super-step), the behavior
+validators, and the kind registry), the behavior
 wiring primitive (`use-behavior.ts`, `useBehavior` — Bun.spawn processes speaking the
 wire over stdio lines; exit-code crash synthesis as `behavior_error`; respawn on
 demand), the process lane (`process-lane.ts` — stdio emit/inbound, the envData
@@ -99,6 +97,10 @@ fleet. mcp-client is the mcp behavior (`src/behaviors/mcp-client.behavior.ts`);
 skill/plugin operations are the shell family's thread pack
 (`src/behaviors/shell.threads.ts`) + recipes + store, taught by
 `skills/skill-conventions/`.
+**`src/behaviors.ts`** — the behaviors public surface (package export `./behaviors`): the
+`Behavior` union, the wire types + JSON schemas/validators (`behaviors.types.ts`), the thread
+packs (`behaviorsThreads`, `shellThreads`, `mcpThreads`), and `useBehavior` — what a
+`config.ts` imports to compose. The runtime composition itself is `src/cli/b-program.ts`.
 **`src/behavioral/`** — the pure language layer: types, constants, utils, the interpreter core
 (`behavioral.ts`), and its internal jq subprocess (`jq.worker.ts` — engine-internal, wire-external;
 nothing outside behavioral/ speaks its wire). Zero process entries that speak the behavior wire —
@@ -113,7 +115,8 @@ b-trigger, scale mismatch).
 **`src/cli/`** — the `behavioral` CLI framework (`makeCliRouter`/`parseCli`) and its commands,
 registered in `bin/behavioral.ts`. The `behavioral tools` fleet dispatcher is retired with the
 fleet (0 tools); turn/config commands land here as the composition rulings build out. The
-JSON-RPC IPC host lives here too: `json-rpc.ts` (the line codec), `serve.ts` (the `serve`
+JSON-RPC IPC host lives here too: `b-program.ts` (the runtime composition, `bProgram`),
+`json-rpc.ts` (the line codec), `serve.ts` (the `serve`
 entry — ingress messages → triggers, `ui_*` selections → client notifications, redacted
 traces out), `load-config.ts` (`<BEHAVIORAL_HOME>/config.ts`), and `trace-consumer.ts`.
 **`src/utils/`** — shared pure utilities.

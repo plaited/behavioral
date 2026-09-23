@@ -8,12 +8,16 @@ runtime through an egress/ingress vocabulary, and validation is threads.
 
 The runtime, config, observability, and IPC host are landed.
 
-- **Composition** — `src/behaviors/get-behavioral.ts` (`getBehavioral`): the
+- **Composition** — `src/cli/b-program.ts` (`bProgram`): the
   in-process engine + frontier, the four capability families (shell, store,
   responses, mcp) spawned per space, a `behaviors` allow-list, and shell/store
   overrides. `start()` flushes the deferred pack mounts after subscribers
   attach; `trigger` admits events only; `terminate` kills every family it
   invoked. The process primitive is `useBehavior` (`src/behaviors/use-behavior.ts`).
+- **Public surface** — `src/behaviors.ts` (package export `./behaviors`): the
+  `Behavior` union, the wire types + schemas/validators, the thread packs
+  (`behaviorsThreads`, `shellThreads`, `mcpThreads`), and `useBehavior` — what a
+  `config.ts` imports.
 - **Config & home** — `behavioralHome()` (`src/behaviors/behavioral-home.ts`) is
   the single `.behavioral` root, overridable by `BEHAVIORAL_HOME`.
   `loadConfig()` (`src/cli/load-config.ts`) loads `<home>/config.ts` — executable
