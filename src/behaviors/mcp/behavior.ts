@@ -55,8 +55,8 @@ import {
   validateMcpCancelEvent,
   validateMcpRequestEvent,
 } from '../behaviors.types.ts'
-import { BunKeychain, tokensKey } from '../keychain-oauth-provider.ts'
 import { emit, envData, wireInbound } from '../process-lane.ts'
+import { BunKeychain, tokensKey } from './keychain-oauth-provider.ts'
 import { MCP_BROKER_BOOT_SECRET_KEY, MCP_BROKER_URL_KEY, MCP_OP_INPUT_VALIDATORS } from './types.ts'
 
 // ---------------------------------------------------------------------------

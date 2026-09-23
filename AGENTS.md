@@ -83,9 +83,8 @@ them so the composition derives guard threads; exit-code crash synthesis as
 `behavior_error`; respawn on demand), the process lane (`process-lane.ts` — stdio
 emit/inbound, the envData bridge, bindEmit for the frontier embed),
 `behavioral-home.ts` (the `BEHAVIORAL_HOME` root), `resolve-behavior-entry.ts`
-(bundled/absolute/home-relative provider-entry paths), `keychain-oauth-provider.ts`
-(the MCP OAuth `BunKeychain` over `Bun.secrets` plus the issuer-binding v2
-provider), and `behaviors.threads.ts` (the composition's root guard pack).
+(bundled/absolute/home-relative provider-entry paths), and `behaviors.threads.ts`
+(the composition's root guard pack).
 Each FAMILY lives in its own subfolder — `behavior.ts` (the process entry),
 `threads.ts` (its default pack), `types.ts`/`schemas.ts`, `config.ts` (the system
 families), plus its `tests/`:
@@ -98,7 +97,9 @@ families), plus its `tests/`:
   `shell` op Bun Shell commands through the wrapper; temp-file payloads over
   ~100KB, deleted on every exit
 - `store/` — durable space-scoped persistence
-- `mcp/` — remote MCP connections/sessions/auth
+- `mcp/` — remote MCP connections/sessions/auth; `keychain-oauth-provider.ts`
+  is the MCP OAuth `BunKeychain` over `Bun.secrets` plus the issuer-binding v2
+  provider (family-only: nothing outside `mcp/` imports it)
 - `frontier/` — the in-process embed — imported and driven by the composition;
   standalone spawns are a compatibility entry
 Each behavior owns its event types + input boundary; results echo the request
