@@ -56,8 +56,8 @@ never touch the store.
 
 ## Composing
 
-Threads request `mcp_request` events like any other worker family; hosts
-mount the family by adding `mcp: new Worker(new URL('./mcp-client.worker.ts', import.meta.url))`
-to the `useBehavioral` workers map. Schema-reflect the op inputs via
+Threads request `mcp_request` events like any other behavior; the composition
+spawns it by default (`['bun', 'run', 'mcp-client.behavior.ts']` over stdio
+lines — same wire, one JSON event per line). Schema-reflect the op inputs via
 `src/workers/mcp-client.types.ts` (`MCP_*_OP_INPUT_SCHEMA`) when model-facing
 context is needed.
