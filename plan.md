@@ -155,6 +155,19 @@ ingress + a plugin-shipped behavior surface.
      the conventions skill, docs sweep. Remaining: the deletion sweep (fleet 6 → 0)
      and the governor thread (plugin admission). -->
 
+### 2026-09-22 — landed: cli.ts drops the retired fleet schema machinery
+
+- The `--tool`/`toolSchemas` "fleet command" schema resolution in
+  `src/cli/cli.ts` was residue of the retired fleet (0 tools) and used by no
+  production code; removed (`CliToolSchemas`, `getToolFlag`, the bare-`--schema`
+  index branch) along with its spec block.
+- The router's `--help`/`--schema` tests now assert the real command set
+  (`serve`), so `bun test src/cli/` is fully green (was 2 stale failures that
+  expected `turn`).
+- The JSON-in/out helpers (`parseCli`/`parseCliRequest`/`makeCli`) stay for the
+  imminent `turn`/config commands; their input/output schemas are undecided —
+  they may become the controller `ClientMessage`/`ServerMessage` schemas.
+
 ### 2026-09-22 — landed: serve — the JSON-RPC IPC host
 
 - **`src/cli/json-rpc.ts`** — a line codec: requests (`id`) answered with a
