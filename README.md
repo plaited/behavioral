@@ -14,44 +14,37 @@ the engine's super-step scheduler interprets. Hosts attach ingress through
 ## Architecture
 
 ```mermaid
-block-beta
-  columns 1
-
-  block:HOST["HOST — the consumer"]
-    columns 1
+flowchart TD
+  subgraph HOST["HOST — the consumer"]
+    direction LR
     CONFIG["&lt;BEHAVIORAL_HOME&gt;/config.ts — executable TS (defineConfig)"]
-    INGRESS["ingress: ui_event · ui_form_submit · trigger"]
-    OUT["observation: trace stream via useTrace"]
+    SERVE["serve — src/cli/serve.ts: line-framed JSON-RPC over stdio · ingress → triggers · ui_* selections → client notifications · redacted traces out"]
   end
 
-  block:COMPOSE["COMPOSITION — src/cli/b-program.ts (bProgram)"]
-    columns 1
+  subgraph COMPOSE["COMPOSITION — src/cli/b-program.ts (bProgram)"]
+    direction TB
     GUARDS["guard threads — block malformed events at their schema (detailMatch:false); rejects visible in frontier/pending_bids/deadlock"]
     PACKS["thread packs — the root guard pack always; shell/mcp packs when their faculties are on"]
     ENGINE["BEHAVIORAL ENGINE — src/behavioral (in-process, super-step scheduler: request · waitFor · block · transform bids)"]
     ROUTER["the pump — selected events route to their faculty lane; traces out"]
+    FRONTIER["frontier — the in-process embed: analysis dispatch driven directly, results re-enter via bindEmit"]
+    GUARDS --> ENGINE
+    PACKS --> ENGINE
+    ENGINE --> ROUTER
   end
 
-  block:EMBED["IN-PROCESS EMBED — driven directly by the composition; results re-enter the engine (bindEmit)"]
-    columns 1
-    FRONTIER["frontier — the reachability analysis dispatch (replay · explore · verify)"]
-  end
-
-  block:FACULTIES["CAPABILITY FACULTIES — src/faculties/&lt;faculty&gt; (Bun.spawn processes, one wire over stdio lines — requests in, results re-enter)"]
-    columns 1
+  subgraph FACULTIES["CAPABILITY FACULTIES — src/faculties/&lt;faculty&gt; (Bun.spawn processes, one wire over stdio lines)"]
+    direction LR
     SHELL["shell — bun-direct script + Bun Shell ops"]
     STORE["store — durable space-scoped persistence"]
     MCP["mcp — remote connections/sessions/auth"]
     S1["systemOne — TypeSafe/OpenRouter Decisions (noul · choice · score)"]
-    S2["systemTwo — Open Responses model calls (SSE assembled to terminal results)"]
+    S2["systemTwo — Open Responses model calls (SSE → terminal results)"]
   end
 
-  IPC["SERVE — src/cli/serve.ts: line-framed JSON-RPC over stdio; ingress → triggers, ui_* selections → client notifications, redacted traces out"]
-
-  HOST --> COMPOSE
-  COMPOSE --> EMBED
-  COMPOSE --> FACULTIES
-  COMPOSE --> IPC
+  CONFIG -->|"loadConfig"| COMPOSE
+  SERVE <-->|"ui_* wire (dumb relay, schema-gated at threads)"| COMPOSE
+  COMPOSE <-->|"the stdio wire: one JSON event per line in · results re-enter (space preserved)"| FACULTIES
 ```
 
 **One wire.** Every faculty speaks the same behavioral event vocabulary
