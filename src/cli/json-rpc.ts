@@ -66,7 +66,16 @@ export const createJsonRpcServer = ({
     }
     const method = message.method ?? ''
     if (message.id === undefined) {
-      await onMessage({ method, params: message.params })
+      // A notification has no response channel, so a handler failure can
+      // only be logged — never fatal: one bad notification must not reject
+      // the read loop and kill the host.
+      try {
+        await onMessage({ method, params: message.params })
+      } catch (error) {
+        process.stderr.write(
+          `json-rpc notification '${method}' failed: ${error instanceof Error ? error.message : String(error)}\n`,
+        )
+      }
       return
     }
     try {

@@ -44,6 +44,35 @@ describe('createJsonRpcServer', () => {
     })
   })
 
+  // The review's follow-up 1: a throwing NOTIFICATION must not kill the
+  // codec — there is no response channel for it (no id), so the error goes
+  // to stderr and the loop keeps dispatching what follows.
+  test('a throwing notification is survived — the loop keeps dispatching', async () => {
+    const seen: string[] = []
+    const errors: string[] = []
+    const stderrWrite = process.stderr.write.bind(process.stderr)
+    process.stderr.write = ((chunk: unknown) => {
+      errors.push(String(chunk))
+      return true
+    }) as typeof process.stderr.write
+    try {
+      const out = await run(
+        `${['{"jsonrpc":"2.0","method":"bogus","params":{}}', '{"jsonrpc":"2.0","id":"after","method":"trigger","params":{}}'].join('\n')}\n`,
+        (message) => {
+          seen.push(message.method)
+          if (message.id === undefined) throw new Error('notification blew up')
+          return { ok: true }
+        },
+      )
+      expect(seen).toEqual(['bogus', 'trigger'])
+      expect(errors.length).toBe(1)
+      expect(errors[0]).toContain('notification blew up')
+      expect(JSON.parse(out[0] as string)).toEqual({ jsonrpc: '2.0', id: 'after', result: { ok: true } })
+    } finally {
+      process.stderr.write = stderrWrite
+    }
+  })
+
   test('malformed json answers with a parse error and a null id', async () => {
     const out = await run('not json\n', () => undefined)
     expect(JSON.parse(out[0] as string)).toEqual({
