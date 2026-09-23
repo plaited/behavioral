@@ -162,13 +162,12 @@ ingress + a plugin-shipped behavior surface.
   default db path and `traceLogSink`'s root — so pointing the env var isolates
   a whole harness instance. Both proven at the real process/fs boundary
   (`BEHAVIORAL_HOME=tmp` → `tmp/db.sqlite`, `tmp/traces/...`).
-- **`loadConfig(path)`** (`src/cli/load-config.ts`): dynamic-imports the
-  executable TS config; missing → `{}` (defaults); present → validated default
-  export; non-object / unknown behavior / non-function override → fail fast
-  with the path.
-- Not yet: package boundary exports (family-default data + validators + thread
-  packs) and the assistant skill; CLI flag precedence; wiring `loadConfig` into
-  a host (arrives with serve.ts).
+- **`loadConfig(path = <BEHAVIORAL_HOME>/config.ts)`** (`src/cli/load-config.ts`):
+  dynamic-imports the executable TS config; missing → `{}` (defaults); present →
+  validated default export; non-object / unknown behavior / non-function
+  override / unloadable file → fail fast with the path and a fix hint. No CLI
+  flags — env-only location; the client owns the process lifecycle.
+- Not yet: wiring `loadConfig` into a host (arrives with serve.ts).
 
 ### 2026-09-22 — landed: useBehavior / getBehavioral rename + `useBehavior` env
 
@@ -189,10 +188,13 @@ ingress + a plugin-shipped behavior surface.
   paths (store db, traces, config) resolve from it.
 - **`<home>/config.ts` is executable config, loaded by the host.** TS because
   it carries live values: the `behaviors` array and `shell`/`store` overrides
-  built with `useBehavior(...)`. The package exports the schemas, thread packs,
-  and family-default data so a consumer can build overrides — including new or
-  different threads (a skill will teach this). Absent file → defaults; present →
-  merged; bad → fail fast.
+  built with `useBehavior(...)`, importing the validators and `*.threads.ts`
+  arrays as they exist. No `FAMILY_DEFAULTS` objects — threads are iterated in
+  `*.threads.ts`; skill assistance lives in `skills/`. Absent file → defaults;
+  present → validated; bad → fail fast with the path and a fix hint.
+- **No CLI flags.** The process is a JSON-RPC IPC server; the client owns its
+  lifecycle and `BEHAVIORAL_HOME` (or the default) owns config location, so
+  `loadConfig()` resolves `<home>/config.ts` itself.
 - **Trust boundary:** only the single harness-home config is imported. A space
   is a runtime scope (in cloud it need not be a project folder); it never
   contributes executable config. There is one `.behavioral` folder per harness.
