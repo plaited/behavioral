@@ -6,8 +6,8 @@
  * Spawned by URL (never imported) and speaks the behavioral event wire:
  * `frontier_request` events in (dispatched by `detail.op`: replay / explore /
  * verify), one `frontier_request_result` out with the request `space`
- * echoed. Frontier is its own worker family, like the responses client — it
- * shares no event types with the tools family, and needs no cancel event:
+ * echoed. Frontier is its own worker behavior, like the responses client — it
+ * shares no event types with the tools behavior, and needs no cancel event:
  * analyses are synchronous, nothing is in flight to abort. The analysis
  * engine below is the former fleet tool implementation, moved wholesale;
  * only the boundary changed.

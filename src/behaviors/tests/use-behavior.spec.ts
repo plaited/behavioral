@@ -13,15 +13,15 @@ import {
 import { useBehavior } from '../use-behavior.ts'
 
 /**
- * useBehavior — the spawn-based family primitive — against a real process on
+ * useBehavior — the spawn-based behavior primitive — against a real process on
  * the real wire (the engine runs in-process via behavioral(); the spec plays
  * the composition's pump role: selected request events forward to the
- * family's send, exactly as bProgram does). Process-native behaviors:
+ * behavior's send, exactly as bProgram does). Process-native behaviors:
  *
  * - a request line goes out; the result line re-enters as an event
  * - a crashed process (exit mid-request) synthesizes ONE worker_error
  *   (exit-code crash synthesis)
- * - the family RESPAWNS on demand: the next request completes on a fresh
+ * - the behavior RESPAWNS on demand: the next request completes on a fresh
  *   process
  *
  * The fixture: `probe.proc.ts` — long-running line protocol; the `die` op
@@ -46,7 +46,7 @@ const addThreadsWithStep =
 const spawnProbe = (env?: Record<string, string>) => {
   const program = behavioral()
   const traces: Trace[] = []
-  const family = useBehavior({
+  const behavior = useBehavior({
     command: ['bun', 'run', 'tests/fixtures/probe.proc.ts'],
     name: 'probe',
     threads: [],
@@ -55,7 +55,7 @@ const spawnProbe = (env?: Record<string, string>) => {
     cancelSchema: ShellCancelEventSchema,
     resultSchema: ShellRequestResultEventSchema,
   })(addThreadsWithStep(program))
-  // The composition's pump role: forward selected family requests outbound
+  // The composition's pump role: forward selected behavior requests outbound
   // (the wire-projected event — the selected candidate carries non-wire
   // fields like priority that the boundary schemas reject).
   program.useTrace((trace: Trace) => {
@@ -64,10 +64,10 @@ const spawnProbe = (env?: Record<string, string>) => {
     const selected = (trace as SelectionTrace).selected
     const event = { type: selected.type, detail: selected.detail, space: selected.space } as BPEvent
     if (event.type === BEHAVIOR_MESSAGE_KINDS.shell_request && validateShellRequestEvent(event)) {
-      family.send(event)
+      behavior.send(event)
     }
   })
-  return { program, traces, family }
+  return { program, traces, behavior }
 }
 
 const awaitSelection = async (
@@ -90,20 +90,20 @@ const request = (id: string, op: string): BPEvent => ({
   detail: { id, label: 'probe', input: { op } },
 })
 
-describe('useBehavior — the spawn-based family primitive', () => {
+describe('useBehavior — the spawn-based behavior primitive', () => {
   test('compiles the wiring schemas and returns them (bProgram derives guards from these)', () => {
-    const { family } = spawnProbe()
+    const { behavior } = spawnProbe()
     try {
-      expect(family.schemas.request).toBe(ShellRequestEventSchema)
-      expect(family.schemas.cancel).toBe(ShellCancelEventSchema)
-      expect(family.schemas.result).toBe(ShellRequestResultEventSchema)
+      expect(behavior.schemas.request).toBe(ShellRequestEventSchema)
+      expect(behavior.schemas.cancel).toBe(ShellCancelEventSchema)
+      expect(behavior.schemas.result).toBe(ShellRequestResultEventSchema)
     } finally {
-      family.terminate()
+      behavior.terminate()
     }
   })
 
   test('a request round-trips through the process and its result re-enters', async () => {
-    const { program, traces, family } = spawnProbe()
+    const { program, traces, behavior } = spawnProbe()
     try {
       program.addThread({
         label: 'caller',
@@ -120,12 +120,12 @@ describe('useBehavior — the spawn-based family primitive', () => {
       )
       expect((result.selected.detail as { ok?: boolean } | undefined)?.ok).toBe(true)
     } finally {
-      family.terminate()
+      behavior.terminate()
     }
   })
 
   test('env is merged over the inherited environment for the spawned process', async () => {
-    const { program, traces, family } = spawnProbe({ PROBE_ENV: 'from-env-option' })
+    const { program, traces, behavior } = spawnProbe({ PROBE_ENV: 'from-env-option' })
     try {
       program.addThread({ label: 'env-caller', once: true, rules: [{ request: request('e1', 'env') }] })
       program.trigger({ type: 'probe_pump', detail: {} })
@@ -139,12 +139,12 @@ describe('useBehavior — the spawn-based family primitive', () => {
       const detail = result.selected.detail as { result?: { env?: string } } | undefined
       expect(detail?.result?.env).toBe('from-env-option')
     } finally {
-      family.terminate()
+      behavior.terminate()
     }
   })
 
   test('without a guard, a schema-invalid result line re-enters and is observable — not silently discarded', async () => {
-    const { program, traces, family } = spawnProbe()
+    const { program, traces, behavior } = spawnProbe()
     try {
       program.addThread({
         label: 'malformed-caller',
@@ -172,14 +172,14 @@ describe('useBehavior — the spawn-based family primitive', () => {
         ),
       ).toBe(true)
     } finally {
-      family.terminate()
+      behavior.terminate()
     }
   })
 
-  test('with the family guard mounted, the malformed result is blocked — visible in the frontier, never selected', async () => {
+  test('with the behavior guard mounted, the malformed result is blocked — visible in the frontier, never selected', async () => {
     const program = behavioral()
     const traces: Trace[] = []
-    const family = useBehavior({
+    const behavior = useBehavior({
       command: ['bun', 'run', 'tests/fixtures/probe.proc.ts'],
       name: 'probe',
       threads: [],
@@ -188,8 +188,8 @@ describe('useBehavior — the spawn-based family primitive', () => {
       resultSchema: ShellRequestResultEventSchema,
     })(addThreadsWithStep(program))
     // The composition's own mount: the guard derived from the schemas
-    // useBehavior returned — exactly what bProgram does for a system family.
-    addThreadsWithStep(program)(guardThreads('guard:probe-schema', eventGuardEntries(family.schemas)))
+    // useBehavior returned — exactly what bProgram does for a system behavior.
+    addThreadsWithStep(program)(guardThreads('guard:probe-schema', eventGuardEntries(behavior.schemas)))
     try {
       program.useTrace((trace: Trace) => {
         traces.push(trace)
@@ -197,7 +197,7 @@ describe('useBehavior — the spawn-based family primitive', () => {
         const selected = (trace as SelectionTrace).selected
         const event = { type: selected.type, detail: selected.detail, space: selected.space } as BPEvent
         if (event.type === BEHAVIOR_MESSAGE_KINDS.shell_request && validateShellRequestEvent(event)) {
-          family.send(event)
+          behavior.send(event)
         }
       })
       program.addThread({
@@ -228,12 +228,12 @@ describe('useBehavior — the spawn-based family primitive', () => {
       expect(traces.some((trace) => JSON.stringify(trace).includes('"malformed":true'))).toBe(true)
       expect(traces.some((trace) => trace.kind === TRACE_MESSAGE_KINDS.deadlock)).toBe(true)
     } finally {
-      family.terminate()
+      behavior.terminate()
     }
   })
 
-  test('a crashed process synthesizes ONE worker_error, then the family respawns', async () => {
-    const { program, traces, family } = spawnProbe()
+  test('a crashed process synthesizes ONE worker_error, then the behavior respawns', async () => {
+    const { program, traces, behavior } = spawnProbe()
     try {
       program.addThread({
         label: 'crash-watch',
@@ -287,7 +287,7 @@ describe('useBehavior — the spawn-based family primitive', () => {
         1,
       )
     } finally {
-      family.terminate()
+      behavior.terminate()
     }
   })
 })

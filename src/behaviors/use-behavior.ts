@@ -10,7 +10,7 @@ type WireMessage = {
 }
 
 /**
- * The event-wire schemas a family wiring declares: the request and cancel
+ * The event-wire schemas a behavior wiring declares: the request and cancel
  * schemas own the outbound gate; the result schema owns the inbound lane.
  * `useBehavior` compiles them internally and returns them so the composition
  * can derive guard threads from the same one home.
@@ -22,11 +22,11 @@ export type BehaviorEventSchemas = {
 }
 
 /**
- * The spawn-based family wiring primitive — the process-composition ruling:
- * capability families run as Bun.spawn PROCESSES speaking the unchanged
+ * The spawn-based behavior wiring primitive — the process-composition ruling:
+ * capability behaviors run as Bun.spawn PROCESSES speaking the unchanged
  * behavioral wire over stdio lines (one JSON event per line), one process
- * instance per wiring (per space), replacing the Worker model for
- * shell/store/responses/mcp.
+ * instance per wiring (per space), replacing the Worker model for the
+ * shell/store/mcp and system-one/system-two behaviors.
  *
  * @remarks
  * Why processes over Workers (the ruling's arithmetic): a shared Worker was
@@ -34,7 +34,7 @@ export type BehaviorEventSchemas = {
  * isolates by OS construction, kills via the process tree, and tears down
  * without dead-port stragglers — killing a process closes its pipes.
  *
- * Curried like its Worker ancestor: the initial call captures the family's
+ * Curried like its Worker ancestor: the initial call captures the behavior's
  * command, wire name, thread pack, validators, and an optional `env` override
  * (merged over the inherited environment); the returned function
  * — awaiting `(addThreads, space?)` — wires:
@@ -42,17 +42,17 @@ export type BehaviorEventSchemas = {
  * - **the line pump** — stdout lines parsed and re-entered as once-threads
  *   with `message.space` PRESERVED. The pump discards only what cannot be
  *   this lane's event (non-JSON lines, non-object payloads, any type other
- *   than the family's result kind — the lane stays sealed); schema validity
- *   of the detail is the family guard's job — a parsed-but-invalid result
+ *   than the behavior's result kind — the lane stays sealed); schema validity
+ *   of the detail is the behavior guard's job — a parsed-but-invalid result
  *   re-enters and is blocked VISIBLY (frontier/pending_bids traces) instead
  *   of vanishing;
  * - **crash synthesis** — an unsolicited process death (any exit we did not
  *   cause) re-enters exactly ONE `behavior_error { behavior: name }` event;
  * - **respawn on demand** — the next outbound event spawns a fresh process
- *   after a death; one live process per family wiring at all times;
+ *   after a death; one live process per behavior wiring at all times;
  * - **thread-pack mounting** — stamped with the wiring space only when set.
  *
- * `send(event)` is the family's outbound port: JSON line to the process's
+ * `send(event)` is the behavior's outbound port: JSON line to the process's
  * stdin (spawning if dead). `invalidEventGate` is the routing-side boundary
  * check (request + cancel schemas; type-const discrimination holds). The
  * engine's threads correlate results by id and `waitFor [result,
@@ -75,7 +75,7 @@ export const useBehavior =
     threads: Thread[]
     /** Extra environment for the spawned process, merged over `process.env`. */
     env?: Record<string, string>
-    /** The outbound request/result/cancel schemas — the family's trust boundary, compiled here. */
+    /** The outbound request/result/cancel schemas — the behavior's trust boundary, compiled here. */
     requestSchema: JSONSchemaType<WireMessage>
     cancelSchema: JSONSchemaType<WireMessage>
     /** The result schema — returned for the composition's guard derivation. */
@@ -84,9 +84,9 @@ export const useBehavior =
   (addThreads: AddThreads, space?: string) => {
     const validateRequestEvent = ajv.compile(requestSchema)
     const validateEventCancel = ajv.compile(cancelSchema)
-    // The inbound lane's seal: only this family's RESULT events re-enter from
+    // The inbound lane's seal: only this behavior's RESULT events re-enter from
     // its process (the request/cancel types stay outbound-only — a process
-    // cannot inject requests into its own or another family's lane).
+    // cannot inject requests into its own or another behavior's lane).
     const resultKind = (resultSchema.properties.type as { const?: string } | undefined)?.const
 
     let proc: Bun.Subprocess<'pipe', 'pipe', 'inherit'> | undefined
@@ -121,7 +121,7 @@ export const useBehavior =
       })
     }
 
-    /** Spawn the family process (fresh on first send and after any death). */
+    /** Spawn the behavior process (fresh on first send and after any death). */
     const spawn = (): Bun.Subprocess<'pipe', 'pipe', 'inherit'> => {
       const child = Bun.spawn(command, {
         stdin: 'pipe',
@@ -162,8 +162,8 @@ export const useBehavior =
               continue
             }
             // The pump discards only what cannot be THIS lane's event (non-JSON,
-            // non-object payloads, any type other than the family's result kind).
-            // Schema validity of the DETAIL is the family guard's job — a
+            // non-object payloads, any type other than the behavior's result kind).
+            // Schema validity of the DETAIL is the behavior guard's job — a
             // parsed-but-invalid result re-enters and is blocked VISIBLY
             // (frontier/pending_bids traces) instead of vanishing.
             if (
@@ -181,7 +181,7 @@ export const useBehavior =
       }
     }
 
-    /** The family's outbound port: one JSON line to the process stdin. */
+    /** The behavior's outbound port: one JSON line to the process stdin. */
     const send = (event: BPEvent): void => {
       if (terminated) return
       if (proc === undefined || crashed) {

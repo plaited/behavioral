@@ -17,12 +17,12 @@ import { bProgram } from '../b-program.ts'
 
 /**
  * bProgram — the runtime composition — through its REAL surface: the
- * hook spawns every family itself (engine + frontier router-owned, always
+ * hook spawns every behavior itself (engine + frontier router-owned, always
  * on; mcp/shell/responses/store default-on, pruned by the `behaviors`
  * allow-list). The host attaches ingress and observation through the
  * returned handle — `runtime.trigger(...)` and `runtime.useTrace(...)`.
  * `shell` is the one instance-level override: the pre-curried useBehavior
- * return substituting the default shell family.
+ * return substituting the default shell behavior.
  *
  * Lifecycle note: the composition does NOT flush its deferred pack mounts at
  * construction. The host subscribes (`runtime.useTrace`), then calls
@@ -31,7 +31,7 @@ import { bProgram } from '../b-program.ts'
  * `runtime.trigger` auto-starts (idempotent), so a host that never calls
  * `start()` still boots on its first event.
  *
- * The default thread packs are family-shipped: the shell pack
+ * The default thread packs are behavior-shipped: the shell pack
  * (shell/threads.ts — skill/plugin scans + links) mounts with shell+store
  * on; the mcp spine (mcp.threads.ts) mounts with store+mcp on.
  */
@@ -69,7 +69,7 @@ const startRuntime = (options: Parameters<typeof bProgram>[0] = {}) => {
 }
 
 describe('bProgram — the runtime composition', () => {
-  test('the shell pack ships with the shell family: the skill scan self-starts through the composition', async () => {
+  test('the shell pack ships with the shell behavior: the skill scan self-starts through the composition', async () => {
     const { runtime, traces } = startRuntime()
     try {
       // The skill scan boot is part of the shell pack — starting the
@@ -126,7 +126,7 @@ describe('bProgram — the runtime composition', () => {
     }
   })
 
-  test('the mcp spine ships with the mcp family: granted ingress fires the store get', async () => {
+  test('the mcp spine ships with the mcp behavior: granted ingress fires the store get', async () => {
     const { runtime, traces } = startRuntime()
     try {
       // No capture exists, so the get returns nothing and the spine waits —
@@ -142,7 +142,7 @@ describe('bProgram — the runtime composition', () => {
     }
   })
 
-  test('the behaviors allow-list prunes families: without shell, the shell pack does not mount', async () => {
+  test('the behaviors allow-list prunes behaviors: without shell, the shell pack does not mount', async () => {
     const { runtime, traces } = startRuntime({ behaviors: ['store'] })
     try {
       // No shell → no scan boot, no shell_request ever. Settle past any
@@ -156,13 +156,13 @@ describe('bProgram — the runtime composition', () => {
     }
   })
 
-  test('the mcp family responds through the composition (real loopback server)', async () => {
+  test('the mcp behavior responds through the composition (real loopback server)', async () => {
     const { runtime, traces } = startRuntime()
     const server = await startMcpServer()
     const loopback = Bun.serve({ port: 0, fetch: (req) => server.fetch(req.url, req) })
     try {
-      // Drive the mcp family via the spine's replay path: granted → get →
-      // (empty capture) → nothing. Instead, assert family presence through
+      // Drive the mcp behavior via the spine's replay path: granted → get →
+      // (empty capture) → nothing. Instead, assert behavior presence through
       // a direct trigger-shaped caller: the composition mounts the spine,
       // and the spine's auth-retry fires the get — already covered above.
       // Here: the honest direct check — the fixture loopback round-trip is
@@ -181,7 +181,7 @@ describe('bProgram — the runtime composition', () => {
     }
   })
 
-  test('shell overrides the default family — a host-constructed shell takes the route', async () => {
+  test('shell overrides the default behavior — a host-constructed shell takes the route', async () => {
     const hostShell = useBehavior({
       command: ['bun', 'run', 'tests/fixtures/probe.proc.ts'],
       name: 'shell',
@@ -267,7 +267,7 @@ describe('bProgram — the runtime composition', () => {
     }
   })
 
-  test('terminate kills overridden families too — the composition owns every process it invokes', async () => {
+  test('terminate kills overridden behaviors too — the composition owns every process it invokes', async () => {
     const factory = useBehavior({
       command: ['bun', 'run', 'tests/fixtures/probe.proc.ts'],
       name: 'shell',
@@ -352,7 +352,7 @@ describe('bProgram — the runtime composition', () => {
     }
   })
 
-  test('a malformed system_two_request is blocked by the family guard — never selected', async () => {
+  test('a malformed system_two_request is blocked by the behavior guard — never selected', async () => {
     const server = await startOpenResponsesServer()
     const { runtime, traces } = startRuntime({ systemTwo: useSystemTwo({ endpoints: { mock: { url: server.url } } }) })
     try {
@@ -406,7 +406,7 @@ describe('bProgram — the runtime composition', () => {
     }
   })
 
-  test('a malformed system_one_request is blocked by the family guard — never selected', async () => {
+  test('a malformed system_one_request is blocked by the behavior guard — never selected', async () => {
     const server = await startDecisionsServer()
     const { runtime, traces } = startRuntime({
       systemOne: useSystemOne({ endpoint: { url: server.url, model: 'jev-latest' } }),

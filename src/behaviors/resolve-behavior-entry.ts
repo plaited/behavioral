@@ -2,7 +2,7 @@ import { isAbsolute, resolve } from 'node:path'
 import { behavioralHome } from './behavioral-home.ts'
 
 /**
- * Resolve a system family's provider entry path for its spawn command.
+ * Resolve a system behavior's provider entry path for its spawn command.
  *
  * @remarks
  * Three cases, in order: no `entry` keeps the bundled provider (this package's

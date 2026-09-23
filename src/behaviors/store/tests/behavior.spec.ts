@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import type { JsonObject } from '../../../behavioral/behavioral.types.ts'
 import { BEHAVIOR_MESSAGE_KINDS } from '../../behaviors.constants.ts'
 import type { StoreOp } from '../../behaviors.types.ts'
-import { spawnFamily } from '../../tests/family-harness.ts'
+import { spawnBehavior } from '../../tests/behavior-harness.ts'
 import { STORE_DB_PATH_KEY } from '../types.ts'
 
 /**
@@ -29,9 +29,9 @@ type WireResult = {
   space?: string
 }
 
-/** Spawn the store family PROCESS and expose the same wire harness API. */
+/** Spawn the store behavior PROCESS and expose the same wire harness API. */
 const spawnStoreWorker = (dbPath = ':memory:') => {
-  const family = spawnFamily({
+  const behavior = spawnBehavior({
     file: 'store/behavior.ts',
     requestType: BEHAVIOR_MESSAGE_KINDS.store_request,
     resultType: BEHAVIOR_MESSAGE_KINDS.store_request_result,
@@ -39,13 +39,13 @@ const spawnStoreWorker = (dbPath = ':memory:') => {
     env: { [STORE_DB_PATH_KEY]: dbPath },
   })
   const call = (id: string, op: StoreOp, input: unknown, space?: string): void => {
-    family.call({ id, op, input } as JsonObject, space)
+    behavior.call({ id, op, input } as JsonObject, space)
   }
   const resultFor = async (id: string): Promise<WireResult> => {
-    const raw = await family.resultFor(id)
+    const raw = await behavior.resultFor(id)
     return { ...raw.detail, id: raw.id, space: raw.space } as WireResult
   }
-  return { call, resultFor, terminate: (): void => family.terminate() }
+  return { call, resultFor, terminate: (): void => behavior.terminate() }
 }
 
 describe('store worker — event wire', () => {
@@ -283,19 +283,19 @@ describe('store worker — persistence', () => {
   test('defaults the db path to $BEHAVIORAL_HOME/db.sqlite when no key is seeded', async () => {
     const home = mkdtempSync(join(tmpdir(), 'behavioral-home-'))
     // No STORE_DB_PATH_KEY: BEHAVIORAL_HOME alone must drive the db path.
-    const family = spawnFamily({
+    const behavior = spawnBehavior({
       file: 'store/behavior.ts',
       requestType: BEHAVIOR_MESSAGE_KINDS.store_request,
       resultType: BEHAVIOR_MESSAGE_KINDS.store_request_result,
       env: { BEHAVIORAL_HOME: home },
     })
     try {
-      family.call({ id: 'h1', op: 'put', input: { collection: 'runs', key: 'r', value: { turn: 1 } } })
-      const { detail } = await family.resultFor('h1')
+      behavior.call({ id: 'h1', op: 'put', input: { collection: 'runs', key: 'r', value: { turn: 1 } } })
+      const { detail } = await behavior.resultFor('h1')
       expect(detail.ok).toBe(true)
       expect(await Bun.file(join(home, 'db.sqlite')).exists()).toBe(true)
     } finally {
-      family.terminate()
+      behavior.terminate()
       rmSync(home, { recursive: true, force: true })
     }
   })

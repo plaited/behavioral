@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import type { JsonObject } from '../../../behavioral/behavioral.types.ts'
 import { BEHAVIOR_MESSAGE_KINDS } from '../../behaviors.constants.ts'
-import { spawnFamily } from '../../tests/family-harness.ts'
+import { spawnBehavior } from '../../tests/behavior-harness.ts'
 import { validateSystemOneInput } from '../schemas.ts'
 import { SYSTEM_ONE_ENDPOINT_KEY } from '../types.ts'
 import { DECISIONS_MODEL, startDecisionsServer } from './fixtures/decisions-server.ts'
@@ -11,7 +11,7 @@ import { DECISIONS_MODEL, startDecisionsServer } from './fixtures/decisions-serv
 // ================================================================
 
 const spawnSystemOne = (endpoint: { url: string; apiKey?: string; model?: string }) =>
-  spawnFamily({
+  spawnBehavior({
     file: 'system-one/behavior.ts',
     requestType: BEHAVIOR_MESSAGE_KINDS.system_one_request,
     resultType: BEHAVIOR_MESSAGE_KINDS.system_one_request_result,

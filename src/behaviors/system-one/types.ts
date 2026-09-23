@@ -1,5 +1,5 @@
 /**
- * Wire and option types for the System One family (the TypeSafe "Decisions"
+ * Wire and option types for the System One behavior (the TypeSafe "Decisions"
  * API and its OpenRouter-compatible sibling).
  *
  * @remarks

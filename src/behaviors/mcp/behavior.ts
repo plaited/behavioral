@@ -28,7 +28,7 @@
  *
  * One connection per call (cold-per-turn: sessions die with the worker);
  * the envelope deadline (`input.timeoutMs`, default 30s) and `mcp_cancel`
- * are the two stop doors — remote MCP calls are the one family where
+ * are the two stop doors — remote MCP calls are the one behavior where
  * "hangs indefinitely" is a real third-party failure mode.
  *
  * MINIMAL: a stop closes the in-flight client but cannot abort the SDK's

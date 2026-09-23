@@ -16,7 +16,7 @@ import { useSystemTwo } from '../system-two/config.ts'
  * - a RELATIVE entry resolves against BEHAVIORAL_HOME (where `init` scaffolds
  *   user provider entries), not the package's spawn cwd;
  * - an ABSOLUTE entry is used verbatim;
- * - absent entry keeps the bundled provider (covered by the family specs).
+ * - absent entry keeps the bundled provider (covered by the behavior specs).
  *
  * Each case runs a real provider entry process (a custom `respond` returning a
  * marker answer) through the real host helper — the wire contract is unchanged.
@@ -32,8 +32,8 @@ const addThreadsWithStep =
     program.step()
   }
 
-/** One family's wiring: the request kind, the host helper, and a valid request input. */
-const FAMILY = {
+/** One behavior's wiring: the request kind, the host helper, and a valid request input. */
+const BEHAVIOR = {
   systemOne: {
     kind: BEHAVIOR_MESSAGE_KINDS.system_one_request,
     input: { state: 'x', questions: { q: { type: 'noul', instructions: 'x' } } },
@@ -51,34 +51,34 @@ const FAMILY = {
 } as const
 
 /** Write a custom provider entry returning a marker answer; returns its home-relative path. */
-const writeCustomEntry = (home: string, file: string, respondLine: string, family: keyof typeof FAMILY): string => {
+const writeCustomEntry = (home: string, file: string, respondLine: string, behavior: keyof typeof BEHAVIOR): string => {
   mkdirSync(join(home, 'providers'), { recursive: true })
   // The import spec is an absolute file URL — robust in any environment (no
   // global-link assumption in the test runner).
-  const target = resolve(import.meta.dir, '..', FAMILY[family].module)
+  const target = resolve(import.meta.dir, '..', BEHAVIOR[behavior].module)
   writeFileSync(
     join(home, 'providers', file),
     [
-      `import { ${FAMILY[family].factory} } from '${pathToFileURL(target).href}'`,
+      `import { ${BEHAVIOR[behavior].factory} } from '${pathToFileURL(target).href}'`,
       `const respond = async () => (${respondLine})`,
-      `if (import.meta.main) ${FAMILY[family].factory}(respond)`,
+      `if (import.meta.main) ${BEHAVIOR[behavior].factory}(respond)`,
       '',
     ].join('\n'),
   )
   return `providers/${file}`
 }
 
-/** Wire the family through the real host helper, send one request, await its result. */
+/** Wire the behavior through the real host helper, send one request, await its result. */
 const spawnAndCall = async ({
   entry,
-  family,
+  behavior,
 }: {
   entry: string
-  family: keyof typeof FAMILY
+  behavior: keyof typeof BEHAVIOR
 }): Promise<{ ok?: boolean; result?: { model?: string }; error?: { message?: string } }> => {
   const program = behavioral()
   const traces: Trace[] = []
-  const { kind, input, wire } = FAMILY[family]
+  const { kind, input, wire } = BEHAVIOR[behavior]
   const handle = wire(entry)(addThreadsWithStep(program))
   try {
     program.useTrace((trace: Trace) => {
@@ -138,7 +138,7 @@ describe('config helpers — custom provider entry resolution', () => {
       "{ model: 'custom-one', answers: { marker: { type: 'noul', noul: 0.5 } } }",
       'systemOne',
     )
-    const detail = await spawnAndCall({ entry, family: 'systemOne' })
+    const detail = await spawnAndCall({ entry, behavior: 'systemOne' })
     expect(detail.ok).toBe(true)
     expect(detail.result?.model).toBe('custom-one')
   })
@@ -150,14 +150,14 @@ describe('config helpers — custom provider entry resolution', () => {
       "{ model: 'abs-one', answers: { marker: { type: 'noul', noul: 0.5 } } }",
       'systemOne',
     )
-    const detail = await spawnAndCall({ entry: resolve(home, entry), family: 'systemOne' })
+    const detail = await spawnAndCall({ entry: resolve(home, entry), behavior: 'systemOne' })
     expect(detail.ok).toBe(true)
     expect(detail.result?.model).toBe('abs-one')
   })
 
   test('systemTwo resolves a relative entry against the home too', async () => {
     const entry = writeCustomEntry(home, 'my-two.behavior.ts', "{ model: 'custom-two', answers: {} }", 'systemTwo')
-    const detail = await spawnAndCall({ entry, family: 'systemTwo' })
+    const detail = await spawnAndCall({ entry, behavior: 'systemTwo' })
     expect(detail.ok).toBe(true)
     expect(detail.result?.model).toBe('custom-two')
   })

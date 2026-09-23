@@ -3,8 +3,8 @@ import { CONTROLLER_DETAIL_SCHEMAS } from '../controller/controller.schemas.ts'
 
 /**
  * The composition's root thread pack — the default threads, always mounted
- * (independent of the family allow-list) — plus the guard generator every
- * mounted family reuses.
+ * (independent of the behavior allow-list) — plus the guard generator every
+ * mounted behavior reuses.
  *
  * @remarks
  * A guard thread `block`s every message whose `detail` does not conform to its
@@ -15,7 +15,7 @@ import { CONTROLLER_DETAIL_SCHEMAS } from '../controller/controller.schemas.ts'
  * is active every super-step.
  *
  * `guardThreads` is the one generator: the controller vocabulary
- * (`ui_render`/`ui_event`/…) and every mounted family's request/cancel/result
+ * (`ui_render`/`ui_event`/…) and every mounted behavior's request/cancel/result
  * events derive their guard rules from the same schema homes that `useBehavior`
  * compiles — validation lives in threads, and no hand-maintained guard list
  * can drift from the wire contract.
@@ -46,7 +46,7 @@ export const guardThreads = (label: string, entries: GuardEntry[]): Thread[] => 
 ]
 
 /**
- * Extract guard entries from a family's three event schemas (the same object
+ * Extract guard entries from a behavior's three event schemas (the same object
  * `useBehavior` compiles): the `type` constant and the `detail` sub-schema.
  */
 export const eventGuardEntries = (schemas: { request: unknown; cancel: unknown; result: unknown }): GuardEntry[] =>

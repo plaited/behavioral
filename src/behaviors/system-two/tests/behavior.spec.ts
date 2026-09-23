@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import type { JsonObject } from '../../../behavioral/behavioral.types.ts'
 import { BEHAVIOR_MESSAGE_KINDS } from '../../behaviors.constants.ts'
-import { spawnFamily } from '../../tests/family-harness.ts'
+import { spawnBehavior } from '../../tests/behavior-harness.ts'
 import {
   AudioContentSchema,
   CompactionItemSchema,
@@ -40,12 +40,12 @@ type WireResult = {
   space?: string
 }
 
-/** Spawn the responses family PROCESS and expose the same wire harness API. */
+/** Spawn the responses behavior PROCESS and expose the same wire harness API. */
 const spawnModelBehavior = (endpoints: SystemTwoEndpoints) => {
   // Endpoint config seeds the spawn ENV (the provisioning contract): the
   // process reads it once at startup and no secret ever crosses the message
   // boundary. Env vars cross Bun.spawn; worker-thread env-data does not.
-  const behavior = spawnFamily({
+  const behavior = spawnBehavior({
     file: 'system-two/behavior.ts',
     requestType: BEHAVIOR_MESSAGE_KINDS.system_two_request,
     resultType: BEHAVIOR_MESSAGE_KINDS.system_two_request_result,

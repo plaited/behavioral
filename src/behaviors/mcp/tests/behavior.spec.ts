@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import type { JsonObject } from '../../../behavioral/behavioral.types.ts'
 import { BEHAVIOR_MESSAGE_KINDS } from '../../behaviors.constants.ts'
-import { spawnFamily } from '../../tests/family-harness.ts'
+import { spawnBehavior } from '../../tests/behavior-harness.ts'
 import { startMcpServer } from './fixtures/mcp-server-fixture.ts'
 
 /**
@@ -32,9 +32,9 @@ type WireResult = {
   space?: string
 }
 
-/** Spawn the mcp family PROCESS and expose the same wire harness API. */
+/** Spawn the mcp behavior PROCESS and expose the same wire harness API. */
 const spawnMcpWorker = () => {
-  const worker = spawnFamily({
+  const worker = spawnBehavior({
     file: 'mcp/behavior.ts',
     requestType: BEHAVIOR_MESSAGE_KINDS.mcp_request,
     resultType: BEHAVIOR_MESSAGE_KINDS.mcp_request_result,

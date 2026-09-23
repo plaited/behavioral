@@ -10,14 +10,14 @@ import { type Ask, collectInitInput, type InitInput, InitInputSchema, init } fro
  * (makeCli: JSON positional in, validated JSON out), against a temp
  * BEHAVIORAL_HOME. The locked contract:
  *
- * - absent families default on (TypeSafe/OpenAI urls, env-NAME secrets);
- *   `null` omits a family; objects customize over the defaults;
+ * - absent behaviors default on (TypeSafe/OpenAI urls, env-NAME secrets);
+ *   `null` omits a behavior; objects customize over the defaults;
  * - no literal secrets: api keys ride as `env('<NAME>')` references that fail
  *   fast when the variable is unset;
  * - an existing config is never clobbered without `force`;
  * - provider scaffolding writes `<home>/providers/<file>` (import-safe bare
  *   specifiers, thanks to the global-install resolution) and points the
- *   family's `entry` at it.
+ *   behavior's `entry` at it.
  */
 
 describe('behavioral init — the runner', () => {
@@ -48,7 +48,7 @@ describe('behavioral init — the runner', () => {
     return JSON.parse(logs.join('\n')) as { home: string; configPath: string; files: string[] }
   }
 
-  test('an empty input generates the default config — both families, env-name secrets', async () => {
+  test('an empty input generates the default config — both behaviors, env-name secrets', async () => {
     const output = await runInit('{}')
     expect(output.configPath).toBe(configPath())
     expect(output.files).toEqual(['config.ts'])
@@ -64,7 +64,7 @@ describe('behavioral init — the runner', () => {
     expect(content).not.toMatch(/sk-[a-zA-Z0-9]/)
   })
 
-  test('a null family is omitted; a custom spec overrides the defaults', async () => {
+  test('a null behavior is omitted; a custom spec overrides the defaults', async () => {
     await runInit(
       JSON.stringify({
         systemOne: { url: 'http://localhost:9999/systemone', model: 'my-model', apiKeyEnv: 'MY_KEY' },
@@ -87,10 +87,10 @@ describe('behavioral init — the runner', () => {
     expect(readConfig()).toContain('defineConfig')
   })
 
-  test('provider scaffolding writes the entry and points the family at it', async () => {
+  test('provider scaffolding writes the entry and points the behavior at it', async () => {
     const output = await runInit(
       JSON.stringify({
-        providers: [{ family: 'systemOne', file: 'my-one.behavior.ts' }],
+        providers: [{ behavior: 'systemOne', file: 'my-one.behavior.ts' }],
       }),
     )
     expect(output.files).toContain('providers/my-one.behavior.ts')
@@ -100,21 +100,21 @@ describe('behavioral init — the runner', () => {
     expect(readConfig()).toContain("entry: 'providers/my-one.behavior.ts'")
   })
 
-  test('two providers for one family are rejected', async () => {
+  test('two providers for one behavior are rejected', async () => {
     const input = JSON.stringify({
       providers: [
-        { family: 'systemOne', file: 'a.behavior.ts' },
-        { family: 'systemOne', file: 'b.behavior.ts' },
+        { behavior: 'systemOne', file: 'a.behavior.ts' },
+        { behavior: 'systemOne', file: 'b.behavior.ts' },
       ],
     })
-    await expect(init([input])).rejects.toThrow(/one provider per family/)
+    await expect(init([input])).rejects.toThrow(/one provider per behavior/)
   })
 
   test('the input schema rejects path traversal in a provider file name', () => {
     const validate = ajv.compile(InitInputSchema)
-    const bad: InitInput = { providers: [{ family: 'systemOne', file: '../evil.ts' }] }
+    const bad: InitInput = { providers: [{ behavior: 'systemOne', file: '../evil.ts' }] }
     expect(validate(bad)).toBe(false)
-    const ok: InitInput = { providers: [{ family: 'systemOne', file: 'my-one.behavior.ts' }] }
+    const ok: InitInput = { providers: [{ behavior: 'systemOne', file: 'my-one.behavior.ts' }] }
     expect(validate(ok)).toBe(true)
   })
 })
@@ -138,7 +138,7 @@ describe('behavioral init — the interactive collector', () => {
     expect(input.providers).toBeUndefined()
   })
 
-  test("answering 'n' disables a family", async () => {
+  test("answering 'n' disables a behavior", async () => {
     const input = await collectInitInput(scriptedAsk(['n', 'y', '', '', 'n']))
     expect(input.systemOne).toBeNull()
     expect(input.systemTwo).not.toBeNull()
@@ -148,7 +148,7 @@ describe('behavioral init — the interactive collector', () => {
     const input = await collectInitInput(
       scriptedAsk(['', '', '', '', '', '', '', 'y', 'systemTwo', 'my-two.behavior.ts']),
     )
-    expect(input.providers).toEqual([{ family: 'systemTwo', file: 'my-two.behavior.ts' }])
+    expect(input.providers).toEqual([{ behavior: 'systemTwo', file: 'my-two.behavior.ts' }])
   })
 })
 

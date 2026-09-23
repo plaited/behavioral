@@ -3,7 +3,7 @@ import { readdirSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import type { JsonObject } from '../../../behavioral/behavioral.types.ts'
 import { BEHAVIOR_MESSAGE_KINDS } from '../../behaviors.constants.ts'
-import { type FamilyResult, spawnFamily } from '../../tests/family-harness.ts'
+import { type BehaviorResult, spawnBehavior } from '../../tests/behavior-harness.ts'
 import type { ShellError, ShellSuccess } from '../types.ts'
 
 /**
@@ -31,15 +31,15 @@ type WireResult =
   | { id: string; ok: false; error: ShellError; space?: string }
 
 /** Spawn the shell worker and expose an event-wire harness over it. */
-/** Spawn the shell family PROCESS and expose the same wire harness API. */
+/** Spawn the shell behavior PROCESS and expose the same wire harness API. */
 const spawnShellWorker = () => {
-  const family = spawnFamily({
+  const behavior = spawnBehavior({
     file: 'shell/behavior.ts',
     requestType: BEHAVIOR_MESSAGE_KINDS.shell_request,
     resultType: BEHAVIOR_MESSAGE_KINDS.shell_request_result,
   })
   const results: WireResult[] = []
-  const observe = (raw: FamilyResult): void => {
+  const observe = (raw: BehaviorResult): void => {
     const d = raw.detail as { ok: boolean; result?: ShellSuccess; error?: ShellError }
     results.push({
       id: raw.id,
@@ -49,18 +49,18 @@ const spawnShellWorker = () => {
     } as WireResult)
   }
   // The harness's resultFor observes every result once; tests use the wrapper.
-  const rawFor = family.resultFor
+  const rawFor = behavior.resultFor
   void rawFor
   const run = (id: string, script: string, extra?: Record<string, unknown>, space?: string): void => {
-    void family
-    family.call({ id, label: 'test-run', input: { op: 'run', script, ...extra } } as JsonObject, space)
+    void behavior
+    behavior.call({ id, label: 'test-run', input: { op: 'run', script, ...extra } } as JsonObject, space)
   }
   const sh = (id: string, command: string, extra?: Record<string, unknown>, space?: string): void => {
-    void family
-    family.call({ id, label: 'test-sh', input: { op: 'shell', command, ...extra } } as JsonObject, space)
+    void behavior
+    behavior.call({ id, label: 'test-sh', input: { op: 'shell', command, ...extra } } as JsonObject, space)
   }
   const cancel = (id: string): void => {
-    family.post({ type: BEHAVIOR_MESSAGE_KINDS.shell_cancel, detail: { id } } as never)
+    behavior.post({ type: BEHAVIOR_MESSAGE_KINDS.shell_cancel, detail: { id } } as never)
   }
   /** ok-branch payload or throws — error paths use errorFor. */
   const payloadFor = async (id: string): Promise<ShellSuccess> => {
@@ -75,7 +75,7 @@ const spawnShellWorker = () => {
     return r.error
   }
   const resultFor = async (id: string): Promise<WireResult> => {
-    const raw = await family.resultFor(id)
+    const raw = await behavior.resultFor(id)
     observe(raw)
     const found = results.find((r) => r.id === id)
     if (found !== undefined) return found
@@ -83,7 +83,7 @@ const spawnShellWorker = () => {
     // results whose detail the pump dropped.
     return { id: raw.id, ok: true, result: {} as ShellSuccess, space: raw.space }
   }
-  return { run, sh, cancel, resultFor, payloadFor, errorFor, terminate: (): void => family.terminate() }
+  return { run, sh, cancel, resultFor, payloadFor, errorFor, terminate: (): void => behavior.terminate() }
 }
 
 /** Leftover payload temp files in the OS tmpdir (the cleanup observable). */

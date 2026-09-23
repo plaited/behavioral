@@ -1,5 +1,5 @@
 /**
- * The System One family's config surface.
+ * The System One behavior's config surface.
  *
  * @remarks
  * `configSystemOne` is the PROCESS-SIDE factory, invoked at the top of a
@@ -139,7 +139,7 @@ export const configSystemOne = (respond: SystemOneRespond): void => {
 }
 
 /**
- * The host-side helper: wire the System One family process. `endpoint` is
+ * The host-side helper: wire the System One behavior process. `endpoint` is
  * delivered as environment data (the secret never crosses the wire).
  */
 export const useSystemOne = ({

@@ -1,5 +1,5 @@
 /**
- * The System Two family's config surface — the two halves that make the family
+ * The System Two behavior's config surface — the two halves that make the behavior
  * pluggable without changing its wire contract.
  *
  * @remarks
@@ -13,7 +13,7 @@
  * `useSystemTwo` is the HOST-SIDE helper: it references a provider entry file
  * (default: the bundled Open Responses entry) and wires `useBehavior`, seeding
  * the endpoint map as environment data. Its return is what `bProgram` takes as
- * `systemTwo` — no default exists, because a System Two family without an
+ * `systemTwo` — no default exists, because a System Two behavior without an
  * endpoint is simply absent.
  *
  * @packageDocumentation
@@ -142,7 +142,7 @@ export const configSystemTwo = (respond: SystemTwoRespond): void => {
 }
 
 /**
- * The host-side helper: wire the System Two family process for a provider entry.
+ * The host-side helper: wire the System Two behavior process for a provider entry.
  * `endpoints` is delivered as environment data (secrets never cross the wire).
  */
 export const useSystemTwo = ({

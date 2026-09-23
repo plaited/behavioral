@@ -1,6 +1,6 @@
 /**
- * The shell family's default thread pack — the ICL thread libraries that
- * ship with the family ("threads arrive with the worker they drive"):
+ * The shell behavior's default thread pack — the ICL thread libraries that
+ * ship with the behavior ("threads arrive with the worker they drive"):
  *
  * - `skill-scan` boot + catalog transform (schema-gated) — the skills
  *   catalog store tenant;
@@ -12,8 +12,8 @@
  *
  * Composed contents of the former src/threads/{skill-client,
  * plugin-client, skill-links}.ts, moved wholesale when the packs became
- * family-shipped. The pack requires the shell family (its executor) and
- * the store family (its tenants) — bProgram mounts it only when both
+ * behavior-shipped. The pack requires the shell behavior (its executor) and
+ * the store behavior (its tenants) — bProgram mounts it only when both
  * are on.
  *
  * @packageDocumentation
@@ -57,7 +57,7 @@ export const SKILL_CATALOG_RECORD_SCHEMA = {
  * catalog transform's detailSchema BEFORE the put — validate-before-put as a
  * hard gate. A malformed catalog fails the whole put (fail-closed), never
  * partial admission. Strictness is scoped to `jsonData`; the surrounding
- * ShellResult fields stay loose (their schema home is the shell family).
+ * ShellResult fields stay loose (their schema home is the shell behavior).
  */
 export const SKILL_CATALOG_SCHEMA = {
   type: 'object',
@@ -258,7 +258,7 @@ export const PLUGIN_MANIFEST_SCHEMA = {
  * the manifests transform's detailSchema BEFORE the put — validate-before-put
  * as a hard gate (fail-closed, never partial admission). Strictness is scoped
  * to `jsonData`; the surrounding ShellResult fields stay loose (their schema
- * home is the shell family).
+ * home is the shell behavior).
  */
 export const PLUGIN_MANIFESTS_SCHEMA = {
   type: 'object',
@@ -938,7 +938,7 @@ const dispatcherValidate: Thread = {
 /** The skill-links thread library — add to the program alongside the satellites. */
 export const skillLinksThreads: Thread[] = [linksSeeder, dispatcherExtract, dispatcherValidate]
 
-// ── The family pack ───────────────────────────────────────────────────────────
+// ── The behavior pack ───────────────────────────────────────────────────────────
 
-/** The shell family's default thread pack — scans, catalog/manifest gates, links. */
+/** The shell behavior's default thread pack — scans, catalog/manifest gates, links. */
 export const shellThreads: Thread[] = [...skillThreads, ...pluginThreads, ...skillLinksThreads]

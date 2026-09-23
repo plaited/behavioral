@@ -1,7 +1,7 @@
 # @behavioral/sh
 
 A behavioral agent harness. The engine is an in-process behavioral-programming
-interpreter; capability families run as processes behind one behavior event
+interpreter; capability behaviors run as processes behind one behavior event
 wire; hosts drive the runtime through a `ui_*` egress/ingress vocabulary; and
 validation lives in guard threads whose rejects are visible in the traces.
 
@@ -24,15 +24,15 @@ flowchart TD
   subgraph COMPOSE["COMPOSITION — src/cli/b-program.ts (bProgram)"]
     direction TB
     ENGINE["BEHAVIORAL ENGINE — src/behavioral (in-process, super-step scheduler: request · waitFor · block · transform bids)"]
-    ROUTER["the pump — selected events route to their family lane; traces out"]
+    ROUTER["the pump — selected events route to their behavior lane; traces out"]
     GUARDS["guard threads — block malformed events at their schema (detailMatch:false); rejects visible in frontier/pending_bids/deadlock"]
-    PACKS["thread packs — the root guard pack always; shell/mcp packs when their families are on"]
+    PACKS["thread packs — the root guard pack always; shell/mcp packs when their behaviors are on"]
     ENGINE --> ROUTER
     GUARDS --> ENGINE
     PACKS --> ENGINE
   end
 
-  subgraph FAMILIES["CAPABILITY FAMILIES — src/behaviors/&lt;family&gt; (Bun.spawn processes, one wire over stdio lines)"]
+  subgraph BEHAVIORS["CAPABILITY BEHAVIORS — src/behaviors/&lt;behavior&gt; (Bun.spawn processes, one wire over stdio lines)"]
     SHELL["shell — bun-direct script + Bun Shell ops"]
     STORE["store — durable space-scoped persistence"]
     MCP["mcp — remote connections/sessions/auth"]
@@ -49,25 +49,25 @@ flowchart TD
   CONFIG --> COMPOSE
   INGRESS --> COMPOSE
   COMPOSE --> OUT
-  ROUTER -->|"one JSON event per stdin line"| FAMILIES
-  FAMILIES -->|"result lines re-enter the engine (space preserved)"| ROUTER
+  ROUTER -->|"one JSON event per stdin line"| BEHAVIORS
+  BEHAVIORS -->|"result lines re-enter the engine (space preserved)"| ROUTER
   COMPOSE --> EMBED
   COMPOSE <-->|"ui_* wire (dumb relay, schema-gated at threads)"| IPC
 ```
 
-**One wire.** Every family speaks the same behavioral event vocabulary
+**One wire.** Every behavior speaks the same behavioral event vocabulary
 (`behaviors.types.ts` + `behaviors.constants.ts` — one home for every
 request/result kind, schema, and validator): requests in as one JSON line,
 results out as one JSON line, `space` preserved end to end. The engine itself is
 generic over events and never imports the wire.
 
-**Families are processes.** Spawned per wiring (per space) via `useBehavior`:
+**Behaviors are processes.** Spawned per wiring (per space) via `useBehavior`:
 isolated by OS construction, killable as a process tree, respawned on demand,
 crash-synthesized as exactly one `behavior_error` re-entry. The pump discards
 only what cannot be this lane's event; a parsed-but-invalid result re-enters and
-is blocked by the family guard — visibly, in the traces.
+is blocked by the behavior guard — visibly, in the traces.
 
-**System families are endpoint-carrying overrides.** `systemOne` and `systemTwo`
+**System behaviors are endpoint-carrying overrides.** `systemOne` and `systemTwo`
 have no defaults: without an endpoint they are simply absent — no process, no
 route. The config surface (`configSystemOne`/`configSystemOne(respond)` for a
 custom provider entry, `useSystemOne({ endpoint })`/`useSystemTwo({ endpoints })`
@@ -84,7 +84,7 @@ reject is observable in the frontier, the pending bids, and the deadlock traces.
 - `src/behavioral/` — the pure language layer: types, constants, the
   interpreter core and its trace stream
 - `src/behaviors/` — the process layer. Shared at the top (the wire,
-  `useBehavior`, the process lane, the home); one folder per family:
+  `useBehavior`, the process lane, the home); one folder per behavior:
   `shell/ store/ mcp/ frontier/ system-one/ system-two/` — behavior, threads,
   types/schemas, and colocated tests
 - `src/cli/` — the composition (`b-program.ts`), `init` (config generation),
@@ -140,7 +140,7 @@ behavioral init '{...}'  # agent JSON — see --schema input
 
 The composition returns `{ trigger, useTrace, start, terminate }`: subscribe
 before `start()` so boot traces are observable; `terminate()` kills every
-family process it invoked, overrides included. A custom provider is a
+behavior process it invoked, overrides included. A custom provider is a
 `configSystemOne(respond)` entry file under `<home>/providers/` — the wire
 contract (and therefore the guards) is unchanged.
 

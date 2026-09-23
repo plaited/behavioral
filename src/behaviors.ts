@@ -12,7 +12,7 @@
  * @packageDocumentation
  */
 
-/** The selectable capability families (the `bProgram` allow-list). */
+/** The selectable capability behaviors (the `bProgram` allow-list). */
 export type Behavior = 'shell' | 'store' | 'mcp'
 
 export * from './behaviors/behaviors.types.ts'

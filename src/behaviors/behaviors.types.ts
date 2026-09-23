@@ -3,18 +3,18 @@ import { ajv, type JsonObject, type Thread } from '../behavioral/behavioral.type
 import { BEHAVIOR_MESSAGE_KINDS } from './behaviors.constants.ts'
 
 /*
- * Worker event-wire vocabulary — every request/result event family plus validators.
+ * Worker event-wire vocabulary — every request/result event behavior plus validators.
  *
- * Behavioral defines the protocol; worker families adapt to speak it. These are
+ * Behavioral defines the protocol; worker behaviors adapt to speak it. These are
  * the events the router moves between the engine port and the satellite worker
  * ports — the engine itself is generic over BPEvent and never imports these.
  *
  * Shape rules settled in the router design:
  * - correlation id lives INSIDE `detail` (no wire envelope) — threads match
  *   their results via listener `detailSchema` on `detail.id`
- * - requests carry `{ id, input }` (the shell family adds an optional `label`); results carry `{ id, result }`; cancels `{ id }`
+ * - requests carry `{ id, input }` (the shell behavior adds an optional `label`); results carry `{ id, result }`; cancels `{ id }`
  * - `input`/`result` are loose JsonObject payloads: their strict schemas keep
- *   their one home in the worker families (no cross-module drift)
+ *   their one home in the worker behaviors (no cross-module drift)
  * - `ingress` never survives the boundary: routed events are synthesized by
  *   behavior files, and `additionalProperties: false` rejects its presence (proven in
  *   the spec) — so the field is deliberately absent from the types
@@ -78,13 +78,13 @@ export type ShellCancelEvent = {
 }
 
 /**
- * The uniform result detail — every family's `*_result` event carries this
+ * The uniform result detail — every behavior's `*_result` event carries this
  * two-branch shape (modified-B envelope, ruled 2026-09-21): the `ok`
  * discriminant sits at detail level beside the correlation id; `result` and
- * `error` are XOR branches (oneOf on the ok const). Family statuses ride as
+ * `error` are XOR branches (oneOf on the ok const). Behavior statuses ride as
  * `error.code` (mcp's typed `authorization_required` included — first-class
  * preserved, its request echo rides inside `error`); success payloads ride
- * `result` verbatim. Uniform gate across every family: `select($d.ok)`.
+ * `result` verbatim. Uniform gate across every behavior: `select($d.ok)`.
  */
 export type WorkerResultOk = {
   id: string
@@ -95,11 +95,11 @@ export type WorkerResultOk = {
 export type WorkerResultError = {
   id: string
   ok: false
-  /** The family failure payload — code (the family status enum), message, and any diagnostics. */
+  /** The behavior failure payload — code (the behavior status enum), message, and any diagnostics. */
   error: { code: string; message?: string } & JsonObject
 }
 
-/** The `detail` of every `*_result` event — one shape across all five families. */
+/** The `detail` of every `*_result` event — one shape across all five behaviors. */
 export type WorkerResultDetail = WorkerResultOk | WorkerResultError
 
 export type BehaviorErrorEvent = {
@@ -108,12 +108,12 @@ export type BehaviorErrorEvent = {
   space?: string
 }
 
-/** Frontier operations — its own worker family, like the responses client. */
+/** Frontier operations — its own worker behavior, like the responses client. */
 export type FrontierOp = 'replay' | 'explore' | 'verify'
 
 export type FrontierRequestEvent = {
   type: typeof BEHAVIOR_MESSAGE_KINDS.frontier_request
-  /** `op` selects the analysis; the worker shares no event types with the tools family. */
+  /** `op` selects the analysis; the worker shares no event types with the tools behavior. */
   detail: { id: string; op: FrontierOp; input: JsonObject }
   space?: string
 }
@@ -141,7 +141,7 @@ export type StoreRequestResultEvent = {
   space?: string
 }
 
-/** MCP operations — its own worker family, like frontier and store. */
+/** MCP operations — its own worker behavior, like frontier and store. */
 export type McpOp =
   | 'discover'
   | 'list-tools'
@@ -165,7 +165,7 @@ export type McpRequestResultEvent = {
 }
 
 // Remote MCP calls can hang indefinitely (third-party servers) — the async
-// families keep their cancels (shell, response, mcp; frontier/store ops are
+// behaviors keep their cancels (shell, response, mcp; frontier/store ops are
 // short-lived and have none).
 export type McpCancelEvent = {
   type: typeof BEHAVIOR_MESSAGE_KINDS.mcp_cancel
@@ -220,7 +220,7 @@ const workerResultErrorBranch = {
         message: { type: 'string', nullable: true },
       },
       required: ['code'],
-      // Family diagnostics ride along (request echoes, exit codes, stderr…).
+      // Behavior diagnostics ride along (request echoes, exit codes, stderr…).
       additionalProperties: true,
     },
   },
@@ -228,7 +228,7 @@ const workerResultErrorBranch = {
   additionalProperties: false,
 } as const
 
-/** Build one family's `*_result` event schema over the shared detail branches. */
+/** Build one behavior's `*_result` event schema over the shared detail branches. */
 const resultEventSchema = (typeConst: string) =>
   ({
     type: 'object',
@@ -425,7 +425,7 @@ export const validateMcpRequestEvent = ajv.compile(McpRequestEventSchema)
 export const validateMcpRequestResultEvent = ajv.compile(McpRequestResultEventSchema)
 export const validateMcpCancelEvent = ajv.compile(McpCancelEventSchema)
 // No frontier cancel event: analyses are synchronous — nothing is in flight
-// to abort (the async families keep their cancels).
+// to abort (the async behaviors keep their cancels).
 export const FrontierRequestEventSchema: JSONSchemaType<FrontierRequestEvent> = {
   type: 'object',
   properties: {

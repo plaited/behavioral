@@ -974,7 +974,7 @@ const DetailedSVGAttributesSchema = {
     'flood-color': { type: 'string' },
     'flood-opacity': { anyOf: [{ type: 'number' }, { type: 'string' }] },
     focusable: { anyOf: [BooleanishSchema, { type: 'string', enum: ['auto'] }] },
-    'font-family': { type: 'string' },
+    'font-behavior': { type: 'string' },
     'font-size': { type: 'string' },
     'font-size-adjust': { type: 'string' },
     'font-stretch': { type: 'string' },

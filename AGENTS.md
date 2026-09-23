@@ -78,16 +78,16 @@ and the impact is broad or unclear, expand coverage until the affected surface i
 behavior event wire (`behaviors.types.ts` + `behaviors.constants.ts` — every
 request/result event kind, validators, and the kind registry), the behavior
 wiring primitive (`use-behavior.ts`, `useBehavior` — Bun.spawn processes speaking
-the wire over stdio lines; it compiles the family's event schemas and returns
+the wire over stdio lines; it compiles the behavior's event schemas and returns
 them so the composition derives guard threads; exit-code crash synthesis as
 `behavior_error`; respawn on demand), the process lane (`process-lane.ts` — stdio
 emit/inbound, the envData bridge, bindEmit for the frontier embed),
 `behavioral-home.ts` (the `BEHAVIORAL_HOME` root), `resolve-behavior-entry.ts`
 (bundled/absolute/home-relative provider-entry paths), and `behaviors.threads.ts`
 (the composition's root guard pack).
-Each FAMILY lives in its own subfolder — `behavior.ts` (the process entry),
+Each behavior lives in its own subfolder — `behavior.ts` (the process entry),
 `threads.ts` (its default pack), `types.ts`/`schemas.ts`, `config.ts` (the system
-families), plus its `tests/`:
+behaviors), plus its `tests/`:
 - `system-two/` — Open Responses model calls; a provider entry —
   `configSystemTwo(respond)` wires it, `useSystemTwo({ endpoints })` seeds the
   endpoint map
@@ -99,14 +99,14 @@ families), plus its `tests/`:
 - `store/` — durable space-scoped persistence
 - `mcp/` — remote MCP connections/sessions/auth; `keychain-oauth-provider.ts`
   is the MCP OAuth `BunKeychain` over `Bun.secrets` plus the issuer-binding v2
-  provider (family-only: nothing outside `mcp/` imports it)
+  provider (behavior-only: nothing outside `mcp/` imports it)
 - `frontier/` — the in-process embed — imported and driven by the composition;
   standalone spawns are a compatibility entry
 Each behavior owns its event types + input boundary; results echo the request
 `space`; op runners errors-as-data.
 **`src/tools/`** — deleted (fleet 0): the ICL conversion retired the CLI tool
 fleet. mcp-client is the mcp behavior (`src/behaviors/mcp/behavior.ts`);
-skill/plugin operations are the shell family's thread pack
+skill/plugin operations are the shell behavior's thread pack
 (`src/behaviors/shell/threads.ts`) + recipes + store, taught by
 `skills/skill-conventions/`.
 **`src/behaviors.ts`** — the behaviors public surface (package export `./behaviors`): the
@@ -138,14 +138,14 @@ JSON-RPC IPC host lives here too: `b-program.ts` (the runtime composition, `bPro
 entry — ingress messages → triggers, `ui_*` selections → client notifications, redacted
 traces out), `load-config.ts` (`<BEHAVIORAL_HOME>/config.ts`), and `trace-consumer.ts`.
 **`src/utils/`** — shared pure utilities.
-**`src/behaviors/<family>/threads.ts`** — behavior thread packs: `shell/threads.ts`
+**`src/behaviors/<behavior>/threads.ts`** — behavior thread packs: `shell/threads.ts`
 (the ICL pack — skill/plugin scans, catalog/manifest schema gates, links dispatchers
 + stored recipes) and `mcp/threads.ts` (the auth replay spine). Packs ship with
-their family; `bProgram` mounts a pack when the family and its required
-families are on — except `behaviors.threads.ts`, the composition's **root
+their behavior; `bProgram` mounts a pack when the behavior and its required
+behaviors are on — except `behaviors.threads.ts`, the composition's **root
 pack** (the guard threads), always mounted regardless of the allow-list. The
 former `src/threads/` is dissolved; its engine-layer specs live with their
-families (`src/behaviors/<family>/tests/`), while specs for the shared modules
+behaviors (`src/behaviors/<behavior>/tests/`), while specs for the shared modules
 stay in `src/behaviors/tests/`.
 **`tasks/`** — Harbor skill-authoring task specs (challenge content; not shipped, not a plugin).
 **`scripts/`** — repo setup and package-maintenance shell glue.
@@ -221,7 +221,7 @@ Expand test coverage when the impact is broad, shared, or uncertain.
 **Type over interface** — `type User = {` not `interface User {`
 **No any** — use `unknown` with type guards. At external boundaries (file/network/IPC/event-detail
 payloads), validate with AJV: define a `JSONSchemaType<T>` and compile with `ajv.compile` (the shared
-instance in `src/behavioral/behavioral.types.ts`; thread `detailSchema` gates and behavior-family
+instance in `src/behavioral/behavioral.types.ts`; thread `detailSchema` gates and behavior-behavior
 input boundaries are the pattern homes). Trust the validated value downstream.
 **PascalCase types** — schemas get `Schema` suffix.
 **Schemas are AJV, not Zod.** Define wire shapes as `JSONSchemaType<T>` and compile with the shared

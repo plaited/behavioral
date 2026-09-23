@@ -11,7 +11,7 @@
  * The endpoint is read once from environment data by `configSystemOne`; the
  * secret never enters a request message. Retries cover the API's rate-limit
  * statuses (429/529), honoring `retry-after` when present — the behavior the
- * vendor SDKs provide, implemented here so the family owns its transport.
+ * vendor SDKs provide, implemented here so the behavior owns its transport.
  *
  * @packageDocumentation
  */

@@ -2,22 +2,22 @@ import { getEnvironmentData } from 'node:worker_threads'
 import type { JsonObject } from '../behavioral/behavioral.types.ts'
 
 /**
- * The process emit lane — family processes speak the unchanged behavioral
+ * The process emit lane — behavior processes speak the unchanged behavioral
  * wire over stdio: one JSON event per stdout line, one JSON request per
  * stdin line. Workers are retired from the composition (the process-
  * composition ruling); this lane is unconditionally stdio — no mode
  * detection (plain Bun globalThis carries postMessage, so detection lies).
  *
- * `emit` is the only outbound surface family code needs; `wireInbound`
+ * `emit` is the only outbound surface behavior code needs; `wireInbound`
  * wires the inbound line loop; `envData` bridges the two env-data worlds —
  * worker-thread environment data (tests may set it) with process env vars
- * (spawns inherit them), so config flows to family processes unchanged.
+ * (spawns inherit them), so config flows to behavior processes unchanged.
  */
 type EmitFn = (event: { type: string; detail: JsonObject; space?: string }) => void
 
 // The in-process embed seam: engine-owned modules imported by the composition
 // (frontier today) bind their emit to the composition's reenter — otherwise
-// their results would write to the HOST's stdout. Family processes never
+// their results would write to the HOST's stdout. Behavior processes never
 // rebind; their emit is the stdout line, always.
 let emitImpl: EmitFn = (event) => {
   process.stdout.write(`${JSON.stringify(event)}\n`)
@@ -33,7 +33,7 @@ export const emit = (event: { type: string; detail: JsonObject; space?: string }
   emitImpl(event)
 }
 
-/** Wire the inbound lane: the family's handler over stdio lines (standalone only — an in-process import never wires the host's stdin). */
+/** Wire the inbound lane: the behavior's handler over stdio lines (standalone only — an in-process import never wires the host's stdin). */
 export const wireInbound = (handler: (message: unknown) => void | Promise<void>): void => {
   // The stdio line loop: one JSON request per line; malformed lines discarded
   // (the line protocol's rule); EOF ends the process.
@@ -64,7 +64,7 @@ export const wireInbound = (handler: (message: unknown) => void | Promise<void>)
 
 /**
  * The env-data bridge: worker-thread environment data first, process env
- * second. Worker-thread data does NOT cross Bun.spawn boundaries — family
+ * second. Worker-thread data does NOT cross Bun.spawn boundaries — behavior
  * processes read their config as env VARS (the spawn inherits them), while
  * hosts embedding the module in-process may still use setEnvironmentData.
  * Objects stay objects; strings that look like JSON parse (endpoints ride

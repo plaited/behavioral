@@ -27,7 +27,7 @@ import type { Behavior } from '../behaviors.ts'
  * useTrace with zero postMessage hops (the engine-never-awaits invariant is
  * what makes this safe on the main thread). Frontier is the in-process embed:
  * its analysis dispatch is imported and driven directly, its emit lane bound
- * to the composition's reenter. The capability families — shell, store, and
+ * to the composition's reenter. The capability behaviors — shell, store, and
  * mcp as default processes; system One/Two as endpoint-carrying overrides —
  * are Bun.spawn PROCESSES speaking the unchanged wire over stdio lines —
  * per-space isolatable, abort-able, head-of-line-free — wired by the useBehavior
@@ -39,15 +39,15 @@ import type { Behavior } from '../behaviors.ts'
  * now.
  *
  * `behaviors` is the allow-list (unset = shell/store/mcp on); `shell` and
- * `store` are the two default-family instance overrides, and `systemTwo` (and
+ * `store` are the two default-behavior instance overrides, and `systemTwo` (and
  * later `systemOne`) is an endpoint-carrying override with no default — all
- * pre-curried useBehavior returns for host-constructed families.
- * for host-constructed families (sandboxed shell, durable store). The
+ * pre-curried useBehavior returns for host-constructed behaviors.
+ * for host-constructed behaviors (sandboxed shell, durable store). The
  * composition invokes every factory and owns the resulting process
  * lifecycles, overrides included (the host hands over a factory, not a
  * handle).
  *
- * The lifecycle is explicit: construction wires the engine, families, and
+ * The lifecycle is explicit: construction wires the engine, behaviors, and
  * routes but does NOT flush the deferred pack mounts. The host subscribes
  * (`runtime.useTrace`) first, then calls `runtime.start()` — the boot
  * cascade runs after subscribers attach, so boot traces are observable.
@@ -55,8 +55,8 @@ import type { Behavior } from '../behaviors.ts'
  * lifecycle, never the event lane's.
  */
 
-/** The in-process frontier embed family: the dispatch driven directly, emit bound to reenter. */
-const frontierFamily = (
+/** The in-process frontier embed behavior: the dispatch driven directly, emit bound to reenter. */
+const frontierBehavior = (
   addThreads: (threads: Thread[]) => void,
 ): {
   send: (event: BPEvent) => void
@@ -90,25 +90,25 @@ export const bProgram = ({
 }: {
   /** Allow-list: unset = all default behaviors on; set = only the named behaviors spawn. */
   behaviors?: Behavior[]
-  /** The shell family override: a pre-curried useBehavior return (sandboxed shell). */
+  /** The shell behavior override: a pre-curried useBehavior return (sandboxed shell). */
   shell?: ReturnType<typeof useBehavior>
-  /** The store family override: a pre-curried useBehavior return (durable store). */
+  /** The store behavior override: a pre-curried useBehavior return (durable store). */
   store?: ReturnType<typeof useBehavior>
   /**
-   * The System One family override (e.g. `useSystemOne({ endpoint })`). No
-   * default: with no override the family carries no endpoint, so it is simply
+   * The System One behavior override (e.g. `useSystemOne({ endpoint })`). No
+   * default: with no override the behavior carries no endpoint, so it is simply
    * absent — no process, no route.
    */
   systemOne?: ReturnType<typeof useBehavior>
   /**
-   * The System Two family override (e.g. `useSystemTwo({ endpoints })`). No
-   * default: with no override the family carries no endpoint, so it is simply
+   * The System Two behavior override (e.g. `useSystemTwo({ endpoints })`). No
+   * default: with no override the behavior carries no endpoint, so it is simply
    * absent — no process, no route.
    */
   systemTwo?: ReturnType<typeof useBehavior>
 }) => {
   const enabled = new Set<Behavior>(behaviors === undefined ? ['shell', 'store', 'mcp'] : behaviors)
-  const has = (family: Behavior): boolean => enabled.has(family)
+  const has = (behavior: Behavior): boolean => enabled.has(behavior)
 
   // ── The engine, in-process ────────────────────────────────────────────────
 
@@ -120,7 +120,7 @@ export const bProgram = ({
     step()
   }
 
-  // Boot-order law: pack mounts (and any family construction's thread
+  // Boot-order law: pack mounts (and any behavior construction's thread
   // additions) are DEFERRED until the pump is subscribed and the routes are
   // registered — the Worker world got this for free (the engine subscribed at
   // spawn, before any add_threads); in-process, the first step's selections
@@ -128,16 +128,16 @@ export const bProgram = ({
   // results, crash synthesis) go live immediately after the flush.
   const pendingThreads: Thread[] = []
   let mounting = true
-  const familyAddThreads = (threads: Thread[]): void => {
+  const behaviorAddThreads = (threads: Thread[]): void => {
     if (mounting) pendingThreads.push(...threads)
     else addThreads(threads)
   }
 
-  // ── Family wiring: frontier in-process; four families as processes ───────
+  // ── Behavior wiring: frontier in-process; four behaviors as processes ───────
 
-  const frontier = frontierFamily(familyAddThreads)
+  const frontier = frontierBehavior(behaviorAddThreads)
 
-  // The shell family: a host override (pre-curried useBehavior return) is
+  // The shell behavior: a host override (pre-curried useBehavior return) is
   // invoked with OUR addThreads — the host never touches the program port;
   // a default construction runs otherwise. The pack requires shell + store —
   // the selector gates the mount; a pruned shell still routes but mounts no
@@ -151,16 +151,16 @@ export const bProgram = ({
           requestSchema: ShellRequestEventSchema,
           cancelSchema: ShellCancelEventSchema,
           resultSchema: ShellRequestResultEventSchema,
-        })(familyAddThreads)
-      : shellOverride(familyAddThreads)
+        })(behaviorAddThreads)
+      : shellOverride(behaviorAddThreads)
 
-  // The system families: no default. A host override (a config helper
+  // The system behaviors: no default. A host override (a config helper
   // return — `useSystemTwo({ endpoints })`) carries the endpoint it needs;
-  // without one the family is simply absent.
-  const systemOne = systemOneOverride?.(familyAddThreads)
-  const systemTwo = systemTwoOverride?.(familyAddThreads)
+  // without one the behavior is simply absent.
+  const systemOne = systemOneOverride?.(behaviorAddThreads)
+  const systemTwo = systemTwoOverride?.(behaviorAddThreads)
 
-  // The store family: a host override is invoked with OUR addThreads (the
+  // The store behavior: a host override is invoked with OUR addThreads (the
   // durable-db seam — the default is :memory: via env-data); the default
   // construction runs otherwise.
   const store =
@@ -172,8 +172,8 @@ export const bProgram = ({
           requestSchema: StoreRequestEventSchema,
           cancelSchema: StoreRequestEventSchema, // no cancel; the request schema is the gate
           resultSchema: StoreRequestResultEventSchema,
-        })(familyAddThreads)
-      : storeOverride(familyAddThreads)
+        })(behaviorAddThreads)
+      : storeOverride(behaviorAddThreads)
 
   const mcp = useBehavior({
     command: ['bun', 'run', 'mcp/behavior.ts'],
@@ -183,17 +183,17 @@ export const bProgram = ({
     requestSchema: McpRequestEventSchema,
     cancelSchema: McpCancelEventSchema,
     resultSchema: McpRequestResultEventSchema,
-  })(familyAddThreads)
+  })(behaviorAddThreads)
 
-  // ── Routing: event type → family lane (the only family knowledge) ────────
+  // ── Routing: event type → behavior lane (the only behavior knowledge) ────────
 
   // The root guard pack is always mounted, independent of the allow-list.
-  familyAddThreads(behaviorsThreads)
+  behaviorAddThreads(behaviorsThreads)
 
-  type FamilyPort = { send: (event: BPEvent) => void; gate: (event: BPEvent) => boolean }
-  const families: Record<string, FamilyPort> = {}
-  const route = (types: string[], family: FamilyPort): void => {
-    for (const type of types) families[type] = family
+  type BehaviorPort = { send: (event: BPEvent) => void; gate: (event: BPEvent) => boolean }
+  const lanes: Record<string, BehaviorPort> = {}
+  const route = (types: string[], behavior: BehaviorPort): void => {
+    for (const type of types) lanes[type] = behavior
   }
 
   route([BEHAVIOR_MESSAGE_KINDS.shell_request, BEHAVIOR_MESSAGE_KINDS.shell_cancel], {
@@ -201,20 +201,20 @@ export const bProgram = ({
     gate: (event: BPEvent): boolean => shell.invalidEventGate(event),
   })
   if (systemOne !== undefined) {
-    // The family's request/cancel/result guard derives from the same schemas
+    // The behavior's request/cancel/result guard derives from the same schemas
     // useBehavior compiled — a malformed system_one event is blocked (visible
     // in the frontier traces), not silently dropped.
-    familyAddThreads(guardThreads(`guard:${systemOne.name}-schema`, eventGuardEntries(systemOne.schemas)))
+    behaviorAddThreads(guardThreads(`guard:${systemOne.name}-schema`, eventGuardEntries(systemOne.schemas)))
     route([BEHAVIOR_MESSAGE_KINDS.system_one_request, BEHAVIOR_MESSAGE_KINDS.system_one_cancel], {
       send: (event: BPEvent): void => systemOne.send(event),
       gate: (event: BPEvent): boolean => systemOne.invalidEventGate(event),
     })
   }
   if (systemTwo !== undefined) {
-    // The family's request/cancel/result guard derives from the same schemas
+    // The behavior's request/cancel/result guard derives from the same schemas
     // useBehavior compiled — a malformed system_two event is blocked (visible
     // in the frontier traces), not silently dropped.
-    familyAddThreads(guardThreads(`guard:${systemTwo.name}-schema`, eventGuardEntries(systemTwo.schemas)))
+    behaviorAddThreads(guardThreads(`guard:${systemTwo.name}-schema`, eventGuardEntries(systemTwo.schemas)))
     route([BEHAVIOR_MESSAGE_KINDS.system_two_request, BEHAVIOR_MESSAGE_KINDS.system_two_cancel], {
       send: (event: BPEvent): void => systemTwo.send(event),
       gate: (event: BPEvent): boolean => systemTwo.invalidEventGate(event),
@@ -234,25 +234,25 @@ export const bProgram = ({
     })
   }
 
-  // ── The engine pump: traces out, gated events to their family lanes ─────
+  // ── The engine pump: traces out, gated events to their behavior lanes ─────
 
   useTrace((trace: Trace) => {
     if (trace.kind !== TRACE_MESSAGE_KINDS.selection) return
     const candidate = (trace as SelectionTrace).selected
     const event = { type: candidate.type, detail: candidate.detail, space: candidate.space } as BPEvent
-    const family = families[event.type]
-    if (family === undefined) return
-    // The trust boundary for events crossing into family processes: only
-    // events passing the owning family's own gate route.
-    if (family.gate(event)) return
-    family.send(event)
+    const behavior = lanes[event.type]
+    if (behavior === undefined) return
+    // The trust boundary for events crossing into behavior processes: only
+    // events passing the owning behavior's own gate route.
+    if (behavior.gate(event)) return
+    behavior.send(event)
   })
 
   // ── The explicit start: flush the deferred pack mounts ────────────────
 
   // Construction wires the pump and routes but does not flush. The host
   // subscribes (useTrace) FIRST, then calls start() — the boot cascade
-  // (scan boots → shell_requests → family processes) runs in a world whose
+  // (scan boots → shell_requests → behavior processes) runs in a world whose
   // subscribers are attached, so boot traces are observable. Idempotent;
   // start/terminate are the host's lifecycle, never the event lane's.
   let started = false
@@ -265,7 +265,7 @@ export const bProgram = ({
 
   // ── The runtime handle ────────────────────────────────────────────────────
 
-  // The composition owns every family process it invoked — overrides
+  // The composition owns every behavior process it invoked — overrides
   // included: the host hands over a curried factory, the composition holds
   // the only `terminate` handle. (The engine and frontier are in-process:
   // nothing to terminate, they end with the host process.)

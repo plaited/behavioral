@@ -1,28 +1,28 @@
 import type { JsonObject } from '../../behavioral/behavioral.types.ts'
 
 /**
- * The family-process spec harness — every family spec's spawn shape: the
- * family runs as a Bun.spawn PROCESS speaking the unchanged wire over stdio
+ * The behavior-process spec harness — every behavior spec's spawn shape: the
+ * behavior runs as a Bun.spawn PROCESS speaking the unchanged wire over stdio
  * lines (one JSON event per line), exactly as the composition spawns it.
  *
  * - `call(id, detail)` writes a request line (the request's `type` rides the
  *   caller's event shape — pass the full detail; the request type is the
- *   family's)
+ *   behavior's)
  * - `resultFor(id)` polls the stdout line stream for the correlated result
  * - `post(event)` writes any wire event (cancels)
  * - `terminate()` kills the process (the spec owns the lifecycle)
  *
- * `env` carries the family's env-data (the bridge: env vars, not
+ * `env` carries the behavior's env-data (the bridge: env vars, not
  * setEnvironmentData — spawned processes inherit env vars only).
  */
 
-export type FamilyResult = {
+export type BehaviorResult = {
   id: string
   detail: Record<string, unknown>
   space?: string
 }
 
-export const spawnFamily = ({
+export const spawnBehavior = ({
   file,
   requestType,
   resultType,
@@ -40,7 +40,7 @@ export const spawnFamily = ({
     cwd: `${import.meta.dir}/..`,
     ...(env === undefined ? {} : { env: { ...process.env, ...env } }),
   })
-  const results: FamilyResult[] = []
+  const results: BehaviorResult[] = []
   const pump = (async () => {
     const reader = proc.stdout.getReader()
     const decoder = new TextDecoder()
@@ -79,7 +79,7 @@ export const spawnFamily = ({
       write({ type: requestType, detail, ...(space === undefined ? {} : { space }) })
     },
     post: write,
-    resultFor: async (id: string): Promise<FamilyResult> => {
+    resultFor: async (id: string): Promise<BehaviorResult> => {
       const deadline = Date.now() + 10_000
       for (;;) {
         const found = results.find((r) => r.id === id)
