@@ -11,7 +11,7 @@
  */
 
 import type { Thread } from '../behavioral/behavioral.types.ts'
-import { WORKER_MESSAGE_KINDS } from './workers.constants.ts'
+import { BEHAVIOR_MESSAGE_KINDS } from './behaviors.constants.ts'
 
 // ── Vocabulary ───────────────────────────────────────────────────────────────
 
@@ -44,9 +44,9 @@ const authCapture: Thread = {
     {
       transform: [
         {
-          type: WORKER_MESSAGE_KINDS.mcp_request_result,
+          type: BEHAVIOR_MESSAGE_KINDS.mcp_request_result,
           query: `. as $d | select($d.ok == false and $d.error.code? == "authorization_required") | {id: $d.id, op: "put", input: {collection: "${MCP_CALLS_COLLECTION}", key: $d.id, value: $d.error.request}}`,
-          target: WORKER_MESSAGE_KINDS.store_request,
+          target: BEHAVIOR_MESSAGE_KINDS.store_request,
           detailSchema: MCP_RESULT_DETAIL,
         },
       ],
@@ -61,7 +61,7 @@ const authSurfacer: Thread = {
     {
       transform: [
         {
-          type: WORKER_MESSAGE_KINDS.mcp_request_result,
+          type: BEHAVIOR_MESSAGE_KINDS.mcp_request_result,
           query:
             '. as $d | select($d.ok == false and $d.error.code? == "authorization_required") | {id: $d.id, reason: "mcp call requires authorization"}',
           target: MCP_EVENT_TYPES.authorizationRequired,
@@ -81,7 +81,7 @@ const authRetry: Thread = {
         {
           type: MCP_EVENT_TYPES.authorizationGranted,
           query: '. as $d | {id: $d.id, op: "get", input: {collection: "mcp-calls", key: $d.id}}',
-          target: WORKER_MESSAGE_KINDS.store_request,
+          target: BEHAVIOR_MESSAGE_KINDS.store_request,
           detailSchema: {
             type: 'object',
             properties: { id: { type: 'string', minLength: 1 } },
@@ -100,10 +100,10 @@ const replayer: Thread = {
     {
       transform: [
         {
-          type: WORKER_MESSAGE_KINDS.store_request_result,
+          type: BEHAVIOR_MESSAGE_KINDS.store_request_result,
           query:
             '. as $d | select($d.result.value.op != null) | {id: ($d.id + "-retry"), op: $d.result.value.op, input: $d.result.value.input}',
-          target: WORKER_MESSAGE_KINDS.mcp_request,
+          target: BEHAVIOR_MESSAGE_KINDS.mcp_request,
           detailSchema: {
             type: 'object',
             properties: { id: { type: 'string', minLength: 1 }, result: { type: 'object' } },
@@ -111,10 +111,10 @@ const replayer: Thread = {
           },
         },
         {
-          type: WORKER_MESSAGE_KINDS.store_request_result,
+          type: BEHAVIOR_MESSAGE_KINDS.store_request_result,
           query:
             '. as $d | select($d.result.value.op != null) | {id: $d.id, op: "delete", input: {collection: "mcp-calls", key: $d.id}}',
-          target: WORKER_MESSAGE_KINDS.store_request,
+          target: BEHAVIOR_MESSAGE_KINDS.store_request,
           detailSchema: {
             type: 'object',
             properties: { id: { type: 'string', minLength: 1 }, result: { type: 'object' } },

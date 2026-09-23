@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import type { JsonObject } from '../../behavioral/behavioral.types.ts'
+import { BEHAVIOR_MESSAGE_KINDS } from '../behaviors.constants.ts'
 import {
   AudioContentSchema,
   CompactionItemSchema,
@@ -24,7 +25,6 @@ import {
   validateModelRespondOutput,
 } from '../responses-client.schemas.ts'
 import { MODEL_ENDPOINTS_KEY, type ModelEndpoints, type ModelRespondOutput } from '../responses-client.types.ts'
-import { WORKER_MESSAGE_KINDS } from '../workers.constants.ts'
 import { spawnFamily } from './family-harness.ts'
 import { ASSISTANT_TEXT, startOpenResponsesServer } from './fixtures/model-server.ts'
 
@@ -41,37 +41,37 @@ type WireResult = {
 }
 
 /** Spawn the responses family PROCESS and expose the same wire harness API. */
-const spawnModelWorker = (endpoints: ModelEndpoints) => {
+const spawnModelBehavior = (endpoints: ModelEndpoints) => {
   // Endpoint config seeds the spawn ENV (the provisioning contract): the
   // process reads it once at startup and no secret ever crosses the message
   // boundary. Env vars cross Bun.spawn; worker-thread env-data does not.
-  const worker = spawnFamily({
-    file: 'responses-client.worker.ts',
-    requestType: WORKER_MESSAGE_KINDS.response_request,
-    resultType: WORKER_MESSAGE_KINDS.response_request_result,
+  const behavior = spawnFamily({
+    file: 'responses-client.behavior.ts',
+    requestType: BEHAVIOR_MESSAGE_KINDS.response_request,
+    resultType: BEHAVIOR_MESSAGE_KINDS.response_request_result,
     env: { [MODEL_ENDPOINTS_KEY]: JSON.stringify(endpoints) },
   })
   const messages: { type?: string; detail?: unknown; space?: string }[] = []
   const respond = (id: string, input: unknown, space?: string): void => {
-    worker.call({ id, input } as JsonObject, space)
+    behavior.call({ id, input } as JsonObject, space)
   }
   const cancel = (id: string): void => {
-    worker.post({ type: WORKER_MESSAGE_KINDS.response_cancel, detail: { id } } as never)
+    behavior.post({ type: BEHAVIOR_MESSAGE_KINDS.response_cancel, detail: { id } } as never)
   }
   const resultFor = async (id: string): Promise<WireResult> => {
-    const raw = await worker.resultFor(id)
-    messages.push({ type: WORKER_MESSAGE_KINDS.response_request_result, detail: raw.detail, space: raw.space })
+    const raw = await behavior.resultFor(id)
+    messages.push({ type: BEHAVIOR_MESSAGE_KINDS.response_request_result, detail: raw.detail, space: raw.space })
     return { ...raw.detail, id: raw.id, space: raw.space } as WireResult
   }
-  return { respond, cancel, resultFor, messages, terminate: (): void => worker.terminate() }
+  return { respond, cancel, resultFor, messages, terminate: (): void => behavior.terminate() }
 }
 
 const userMessage = { type: 'message', role: 'user', content: 'Say hello' } as const
 
-describe('model worker — non-streaming respond', () => {
+describe('model behavior — non-streaming respond', () => {
   test('round-trips a JSON ResponseResource as a result event', async () => {
     const server = await startOpenResponsesServer()
-    const model = spawnModelWorker({ mock: { url: server.url } })
+    const model = spawnModelBehavior({ mock: { url: server.url } })
     try {
       model.respond('call_1', {
         provider: 'mock',
@@ -98,10 +98,10 @@ describe('model worker — non-streaming respond', () => {
   })
 })
 
-describe('model worker — streaming respond', () => {
+describe('model behavior — streaming respond', () => {
   test('streams are assembled internally; the only message is the terminal result event', async () => {
     const server = await startOpenResponsesServer()
-    const model = spawnModelWorker({ mock: { url: server.url } })
+    const model = spawnModelBehavior({ mock: { url: server.url } })
     try {
       model.respond('call_1', {
         provider: 'mock',
@@ -130,7 +130,7 @@ describe('model worker — streaming respond', () => {
       expect(text).toBe(ASSISTANT_TEXT)
       // The DELTA wire kind is dead: nothing but the result event is posted.
       expect(model.messages).toHaveLength(1)
-      expect(model.messages[0]?.type).toBe(WORKER_MESSAGE_KINDS.response_request_result)
+      expect(model.messages[0]?.type).toBe(BEHAVIOR_MESSAGE_KINDS.response_request_result)
     } finally {
       model.terminate()
       await server.close()
@@ -138,10 +138,10 @@ describe('model worker — streaming respond', () => {
   })
 })
 
-describe('model worker — endpoint config via environment data', () => {
+describe('model behavior — endpoint config via environment data', () => {
   test('the provisioned apiKey reaches the wire as a bearer header', async () => {
     const server = await startOpenResponsesServer({ apiKey: 'secret-token' })
-    const model = spawnModelWorker({ mock: { url: server.url, apiKey: 'secret-token' } })
+    const model = spawnModelBehavior({ mock: { url: server.url, apiKey: 'secret-token' } })
     try {
       model.respond('call_1', {
         provider: 'mock',
@@ -158,7 +158,7 @@ describe('model worker — endpoint config via environment data', () => {
   })
 
   test('an unknown provider is error data, never a throw', async () => {
-    const model = spawnModelWorker({})
+    const model = spawnModelBehavior({})
     try {
       model.respond('call_1', {
         provider: 'nope',
@@ -174,10 +174,10 @@ describe('model worker — endpoint config via environment data', () => {
   })
 })
 
-describe('model worker — failures are data', () => {
+describe('model behavior — failures are data', () => {
   test('a non-2xx response is error data carrying the structured message', async () => {
     const server = await startOpenResponsesServer()
-    const model = spawnModelWorker({ mock: { url: server.url } })
+    const model = spawnModelBehavior({ mock: { url: server.url } })
     try {
       model.respond('call_1', { provider: 'mock', modelId: 'mock-model', input: [] })
       const { ok, error } = await model.resultFor('call_1')
@@ -190,7 +190,7 @@ describe('model worker — failures are data', () => {
   })
 })
 
-describe('model worker — cancellation', () => {
+describe('model behavior — cancellation', () => {
   test('a response_cancel event aborts an in-flight streamed call as error data', async () => {
     const encoder = new TextEncoder()
     // A real server that emits one event and then never closes the stream.
@@ -212,7 +212,7 @@ describe('model worker — cancellation', () => {
         ),
     })
 
-    const model = spawnModelWorker({ mock: { url: `http://localhost:${server.port}` } })
+    const model = spawnModelBehavior({ mock: { url: `http://localhost:${server.port}` } })
     try {
       model.respond('call_1', {
         provider: 'mock',
@@ -232,9 +232,9 @@ describe('model worker — cancellation', () => {
   })
 })
 
-describe('model worker — event wire', () => {
+describe('model behavior — event wire', () => {
   test('a request space is echoed on the result event', async () => {
-    const model = spawnModelWorker({})
+    const model = spawnModelBehavior({})
     try {
       model.respond('call_1', { provider: 'nope', modelId: 'm', input: [] }, 's1')
       const { space } = await model.resultFor('call_1')
@@ -245,7 +245,7 @@ describe('model worker — event wire', () => {
   })
 
   test('a request without space returns a result without space', async () => {
-    const model = spawnModelWorker({})
+    const model = spawnModelBehavior({})
     try {
       model.respond('call_1', { provider: 'nope', modelId: 'm', input: [] })
       const { space } = await model.resultFor('call_1')
@@ -256,7 +256,7 @@ describe('model worker — event wire', () => {
   })
 
   test('input that fails the boundary schema is error data', async () => {
-    const model = spawnModelWorker({})
+    const model = spawnModelBehavior({})
     try {
       model.respond('call_1', { modelId: 'm', input: [] })
       const { ok, error } = await model.resultFor('call_1')
@@ -268,7 +268,7 @@ describe('model worker — event wire', () => {
   })
 
   test('an event failing the shared event schema is dropped — no result', async () => {
-    const model = spawnModelWorker({})
+    const model = spawnModelBehavior({})
     try {
       // No id: fails the trust boundary, nothing to correlate a result to.
       model.respond('', { provider: 'nope', modelId: 'm', input: [] })
@@ -996,10 +996,10 @@ describe('respond input schema — contract', () => {
   })
 })
 
-describe('model worker — passthrough to the wire', () => {
+describe('model behavior — passthrough to the wire', () => {
   test('extras are inert body data and never reconfigure the endpoint', async () => {
     const server = await startOpenResponsesServer({ apiKey: 'real-key' })
-    const model = spawnModelWorker({ mock: { url: server.url, apiKey: 'real-key' } })
+    const model = spawnModelBehavior({ mock: { url: server.url, apiKey: 'real-key' } })
     try {
       model.respond('call_1', {
         provider: 'mock',
@@ -1026,7 +1026,7 @@ describe('model worker — passthrough to the wire', () => {
 
   test('extra key-values pass through validation and reach the wire verbatim', async () => {
     const server = await startOpenResponsesServer()
-    const model = spawnModelWorker({ mock: { url: server.url } })
+    const model = spawnModelBehavior({ mock: { url: server.url } })
     try {
       model.respond('call_1', {
         provider: 'mock',
@@ -1050,10 +1050,10 @@ describe('model worker — passthrough to the wire', () => {
   })
 })
 
-describe('model worker — output conformance', () => {
+describe('model behavior — output conformance', () => {
   test('the terminal result satisfies the output schema', async () => {
     const server = await startOpenResponsesServer()
-    const model = spawnModelWorker({ mock: { url: server.url } })
+    const model = spawnModelBehavior({ mock: { url: server.url } })
     try {
       model.respond('call_1', { provider: 'mock', modelId: 'mock-model', input: [userMessage] })
       const { result } = await model.resultFor('call_1')

@@ -49,16 +49,16 @@ import type { ValidateFunction } from 'ajv'
 import { ajv, type JsonObject } from '../behavioral/behavioral.types.ts'
 import { BunKeychain } from '../oauth/keychain.ts'
 import { tokensKey } from '../oauth/keychain-oauth-provider.ts'
-import { MCP_BROKER_BOOT_SECRET_KEY, MCP_BROKER_URL_KEY, MCP_OP_INPUT_VALIDATORS } from './mcp-client.types.ts'
-import { emit, envData, wireInbound } from './process-lane.ts'
-import { WORKER_MESSAGE_KINDS } from './workers.constants.ts'
+import { BEHAVIOR_MESSAGE_KINDS } from './behaviors.constants.ts'
 import {
   type McpCancelEvent,
   type McpOp,
   type McpRequestEvent,
   validateMcpCancelEvent,
   validateMcpRequestEvent,
-} from './workers.types.ts'
+} from './behaviors.types.ts'
+import { MCP_BROKER_BOOT_SECRET_KEY, MCP_BROKER_URL_KEY, MCP_OP_INPUT_VALIDATORS } from './mcp-client.types.ts'
+import { emit, envData, wireInbound } from './process-lane.ts'
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -266,7 +266,7 @@ const postResult = ({
   space?: string
 }): void => {
   emit({
-    type: WORKER_MESSAGE_KINDS.mcp_request_result,
+    type: BEHAVIOR_MESSAGE_KINDS.mcp_request_result,
     detail: (error === undefined
       ? { id, ok: true, result: payload ?? {} }
       : { id, ok: false, error: error as JsonObject }) as JsonObject & { id: string },

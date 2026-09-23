@@ -38,7 +38,7 @@ export type ModelEndpointConfig = {
   headers?: Record<string, string>
 }
 
-/** Provider label → endpoint config. Delivered to the worker via environment data. */
+/** Provider label → endpoint config. Delivered to the behavior via environment data. */
 export type ModelEndpoints = Record<string, ModelEndpointConfig>
 
 /** Environment-data key for the provisioned endpoint map (host seeds, worker reads). */

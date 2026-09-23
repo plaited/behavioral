@@ -29,7 +29,7 @@
 
 import type { JSONSchemaType } from 'ajv'
 import { ajv, type JsonObject } from '../behavioral/behavioral.types.ts'
-import type { McpOp } from './workers.types.ts'
+import type { McpOp } from './behaviors.types.ts'
 
 // ---------------------------------------------------------------------------
 // Env-data — the worker's auth binding (the injection law one level down)

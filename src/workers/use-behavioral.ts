@@ -1,12 +1,7 @@
 import { TRACE_MESSAGE_KINDS } from '../behavioral/behavioral.constants.ts'
 import { behavioral } from '../behavioral/behavioral.ts'
 import type { BPEvent, Thread, Trace, TraceListener, Trigger } from '../behavioral/behavioral.types.ts'
-import { handleFrontierMessage } from './frontier.worker.ts'
-import { mcpThreads } from './mcp.threads.ts'
-import { bindEmit } from './process-lane.ts'
-import { shellThreads } from './shell.threads.ts'
-import { useProcess } from './use-process.ts'
-import { WORKER_MESSAGE_KINDS } from './workers.constants.ts'
+import { BEHAVIOR_MESSAGE_KINDS } from './behaviors.constants.ts'
 import {
   validateFrontierRequestEvent,
   validateMcpCancelEvent,
@@ -20,7 +15,12 @@ import {
   validateShellRequestResultEvent,
   validateStoreRequestEvent,
   validateStoreRequestResultEvent,
-} from './workers.types.ts'
+} from './behaviors.types.ts'
+import { handleFrontierMessage } from './frontier.behavior.ts'
+import { mcpThreads } from './mcp.threads.ts'
+import { bindEmit } from './process-lane.ts'
+import { shellThreads } from './shell.threads.ts'
+import { useProcess } from './use-process.ts'
 
 /*
  * The runtime composition — IN-PROCESS. The engine is behavioral() in the
@@ -38,14 +38,14 @@ import {
  * This was the engine transport's trailing step; it is the composition's
  * now.
  *
- * `workers` is the allow-list (unset = all four families on); `shell` and
+ * `behaviors` is the allow-list (unset = all four behaviors on); `shell` and
  * `store` are the two instance overrides — pre-curried useProcess returns
  * for host-constructed families (sandboxed shell, durable store); the host
  * owns those processes' lifecycles.
  */
 
 /** The selectable worker families (engine and frontier are never selectable — always on). */
-export type WorkerFamily = 'shell' | 'responses' | 'store' | 'mcp'
+export type Behavior = 'shell' | 'responses' | 'store' | 'mcp'
 
 /** The in-process frontier embed family: the dispatch driven directly, emit bound to reenter. */
 const frontierFamily = (
@@ -80,21 +80,21 @@ const frontierFamily = (
 export const useBehavioral = ({
   traceListener,
   useTrigger,
-  workers,
+  behaviors,
   shell: shellOverride,
   store: storeOverride,
 }: {
   traceListener: TraceListener
   useTrigger: (trigger: Trigger) => void
-  /** Allow-list: unset = all default families on; set = only the named families spawn. */
-  workers?: WorkerFamily[]
+  /** Allow-list: unset = all default behaviors on; set = only the named behaviors spawn. */
+  behaviors?: Behavior[]
   /** The shell family override: a pre-curried useProcess return (sandboxed shell). */
   shell?: ReturnType<typeof useProcess>
   /** The store family override: a pre-curried useProcess return (durable store). */
   store?: ReturnType<typeof useProcess>
 }) => {
-  const enabled = new Set<WorkerFamily>(workers === undefined ? ['shell', 'responses', 'store', 'mcp'] : workers)
-  const has = (family: WorkerFamily): boolean => enabled.has(family)
+  const enabled = new Set<Behavior>(behaviors === undefined ? ['shell', 'responses', 'store', 'mcp'] : behaviors)
+  const has = (family: Behavior): boolean => enabled.has(family)
 
   // ── The engine, in-process ────────────────────────────────────────────────
 
@@ -131,7 +131,7 @@ export const useBehavioral = ({
   const shell =
     shellOverride === undefined
       ? useProcess({
-          command: ['bun', 'run', 'shell.worker.ts'],
+          command: ['bun', 'run', 'shell.behavior.ts'],
           name: 'shell',
           threads: has('shell') && has('store') ? shellThreads : [],
           validateRequestEvent: validateShellRequestEvent,
@@ -141,7 +141,7 @@ export const useBehavioral = ({
       : shellOverride(familyAddThreads)
 
   const responses = useProcess({
-    command: ['bun', 'run', 'responses-client.worker.ts'],
+    command: ['bun', 'run', 'responses-client.behavior.ts'],
     name: 'responses',
     threads: [],
     validateRequestEvent: validateResponseRequestEvent,
@@ -155,7 +155,7 @@ export const useBehavioral = ({
   const store =
     storeOverride === undefined
       ? useProcess({
-          command: ['bun', 'run', 'store.worker.ts'],
+          command: ['bun', 'run', 'store.behavior.ts'],
           name: 'store',
           threads: [],
           validateRequestEvent: validateStoreRequestEvent,
@@ -165,7 +165,7 @@ export const useBehavioral = ({
       : storeOverride(familyAddThreads)
 
   const mcp = useProcess({
-    command: ['bun', 'run', 'mcp-client.worker.ts'],
+    command: ['bun', 'run', 'mcp-client.behavior.ts'],
     name: 'mcp',
     // The spine requires mcp + store.
     threads: has('mcp') && has('store') ? mcpThreads : [],
@@ -182,25 +182,25 @@ export const useBehavioral = ({
     for (const type of types) families[type] = family
   }
 
-  route([WORKER_MESSAGE_KINDS.shell_request, WORKER_MESSAGE_KINDS.shell_cancel], {
+  route([BEHAVIOR_MESSAGE_KINDS.shell_request, BEHAVIOR_MESSAGE_KINDS.shell_cancel], {
     send: (event: BPEvent): void => shell.send(event),
     gate: (event: BPEvent): boolean => shell.invalidEventGate(event),
   })
   if (has('responses')) {
-    route([WORKER_MESSAGE_KINDS.response_request, WORKER_MESSAGE_KINDS.response_cancel], {
+    route([BEHAVIOR_MESSAGE_KINDS.response_request, BEHAVIOR_MESSAGE_KINDS.response_cancel], {
       send: (event: BPEvent): void => responses.send(event),
       gate: (event: BPEvent): boolean => responses.invalidEventGate(event),
     })
   }
-  route([WORKER_MESSAGE_KINDS.frontier_request], { send: frontier.send, gate: frontier.gate })
+  route([BEHAVIOR_MESSAGE_KINDS.frontier_request], { send: frontier.send, gate: frontier.gate })
   if (has('store')) {
-    route([WORKER_MESSAGE_KINDS.store_request], {
+    route([BEHAVIOR_MESSAGE_KINDS.store_request], {
       send: (event: BPEvent): void => store.send(event),
       gate: (event: BPEvent): boolean => store.invalidEventGate(event),
     })
   }
   if (has('mcp')) {
-    route([WORKER_MESSAGE_KINDS.mcp_request, WORKER_MESSAGE_KINDS.mcp_cancel], {
+    route([BEHAVIOR_MESSAGE_KINDS.mcp_request, BEHAVIOR_MESSAGE_KINDS.mcp_cancel], {
       send: (event: BPEvent): void => mcp.send(event),
       gate: (event: BPEvent): boolean => mcp.invalidEventGate(event),
     })

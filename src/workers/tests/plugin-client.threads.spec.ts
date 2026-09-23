@@ -13,6 +13,7 @@ import { join } from 'node:path'
 import { TRACE_MESSAGE_KINDS } from '../../behavioral/behavioral.constants.ts'
 import { behavioral } from '../../behavioral/behavioral.ts'
 import type { BPEvent, JsonObject, SelectionTrace, Trace } from '../../behavioral/behavioral.types.ts'
+import { BEHAVIOR_MESSAGE_KINDS } from '../behaviors.constants.ts'
 import {
   PLUGIN_MANIFESTS_COLLECTION,
   PLUGIN_MANIFESTS_KEY,
@@ -20,7 +21,6 @@ import {
   PLUGIN_SCAN_SCRIPT,
   pluginThreads,
 } from '../shell.threads.ts'
-import { WORKER_MESSAGE_KINDS } from '../workers.constants.ts'
 
 type Selected = { type: string; detail: Record<string, unknown> | undefined }
 
@@ -51,7 +51,7 @@ describe('plugin threads — scan boot', () => {
   test('boot requests the plugin-scan shell_request: the run op carries the recipe, json format', () => {
     const selected = runProgram([])
     const call = selected.find(
-      (s) => s.type === WORKER_MESSAGE_KINDS.shell_request && s.detail?.id === PLUGIN_SCAN_CALL_ID,
+      (s) => s.type === BEHAVIOR_MESSAGE_KINDS.shell_request && s.detail?.id === PLUGIN_SCAN_CALL_ID,
     )
     expect(call).toBeDefined()
     expect(call?.detail?.label).toBe('plugin-scan')
@@ -67,7 +67,7 @@ describe('plugin threads — scan boot', () => {
   test('boot fires once — a second pump adds no duplicate call', () => {
     const selected = runProgram([])
     const calls = selected.filter(
-      (s) => s.type === WORKER_MESSAGE_KINDS.shell_request && s.detail?.id === PLUGIN_SCAN_CALL_ID,
+      (s) => s.type === BEHAVIOR_MESSAGE_KINDS.shell_request && s.detail?.id === PLUGIN_SCAN_CALL_ID,
     )
     expect(calls).toHaveLength(1)
   })
@@ -90,11 +90,11 @@ describe('plugin threads — manifests transform', () => {
     }
     const selected = runProgram([
       {
-        type: WORKER_MESSAGE_KINDS.shell_request_result,
+        type: BEHAVIOR_MESSAGE_KINDS.shell_request_result,
         detail: { id: PLUGIN_SCAN_CALL_ID, result: { status: 'completed', jsonData: manifests } },
       },
     ])
-    const put = selected.find((s) => s.type === WORKER_MESSAGE_KINDS.store_request && s.detail?.op === 'put')
+    const put = selected.find((s) => s.type === BEHAVIOR_MESSAGE_KINDS.store_request && s.detail?.op === 'put')
     expect(put).toBeDefined()
     const input = put?.detail?.input as JsonObject
     expect(input.collection).toBe(PLUGIN_MANIFESTS_COLLECTION)
@@ -105,11 +105,11 @@ describe('plugin threads — manifests transform', () => {
   test('a result without manifests does not put', () => {
     const selected = runProgram([
       {
-        type: WORKER_MESSAGE_KINDS.shell_request_result,
+        type: BEHAVIOR_MESSAGE_KINDS.shell_request_result,
         detail: { id: 'other-call', result: { status: 'completed', lines: ['x'], totalLines: 1 } },
       },
     ])
-    expect(selected.some((s) => s.type === WORKER_MESSAGE_KINDS.store_request)).toBe(false)
+    expect(selected.some((s) => s.type === BEHAVIOR_MESSAGE_KINDS.store_request)).toBe(false)
   })
 
   test('a malformed manifest set fails the detailSchema gate — fail-closed, never partial admission', () => {
@@ -118,11 +118,11 @@ describe('plugin threads — manifests transform', () => {
     const malformed = { plugins: 'not-an-array', warnings: [] }
     const selected = runProgram([
       {
-        type: WORKER_MESSAGE_KINDS.shell_request_result,
+        type: BEHAVIOR_MESSAGE_KINDS.shell_request_result,
         detail: { id: PLUGIN_SCAN_CALL_ID, result: { status: 'completed', jsonData: malformed } },
       },
     ])
-    expect(selected.some((s) => s.type === WORKER_MESSAGE_KINDS.store_request)).toBe(false)
+    expect(selected.some((s) => s.type === BEHAVIOR_MESSAGE_KINDS.store_request)).toBe(false)
   })
 })
 

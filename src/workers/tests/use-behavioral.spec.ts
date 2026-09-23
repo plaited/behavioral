@@ -1,14 +1,14 @@
 import { describe, expect, test } from 'bun:test'
 import { TRACE_MESSAGE_KINDS } from '../../behavioral/behavioral.constants.ts'
 import type { SelectionTrace, Trace, Trigger } from '../../behavioral/behavioral.types.ts'
-import { useBehavioral } from '../use-behavioral.ts'
-import { useProcess } from '../use-process.ts'
-import { WORKER_MESSAGE_KINDS } from '../workers.constants.ts'
+import { BEHAVIOR_MESSAGE_KINDS } from '../behaviors.constants.ts'
 import {
   validateShellCancelEvent,
   validateShellRequestEvent,
   validateShellRequestResultEvent,
-} from '../workers.types.ts'
+} from '../behaviors.types.ts'
+import { useBehavioral } from '../use-behavioral.ts'
+import { useProcess } from '../use-process.ts'
 import { startMcpServer } from './mcp-server-fixture.ts'
 
 /**
@@ -42,7 +42,7 @@ const waitForTraces = async (traces: Trace[], until: (selections: SelectionTrace
 /** Find a selected store_request by op and collection. */
 const storeRequest = (traces: Trace[], op: string, collection: string): SelectionTrace | undefined =>
   selectionsOf(traces).find((t) => {
-    if (t.selected.type !== WORKER_MESSAGE_KINDS.store_request) return false
+    if (t.selected.type !== BEHAVIOR_MESSAGE_KINDS.store_request) return false
     const detail = t.selected.detail as { op?: string; input?: { collection?: string } } | undefined
     return detail?.op === op && detail?.input?.collection === collection
   })
@@ -63,7 +63,7 @@ describe('useBehavioral — the runtime composition', () => {
       await waitForTraces(traces, (s) =>
         s.some(
           (t) =>
-            t.selected.type === WORKER_MESSAGE_KINDS.shell_request &&
+            t.selected.type === BEHAVIOR_MESSAGE_KINDS.shell_request &&
             (t.selected.detail as { id?: string } | undefined)?.id === 'skill-scan-catalog',
         ),
       )
@@ -101,13 +101,13 @@ describe('useBehavioral — the runtime composition', () => {
       await waitForTraces(traces, (s) =>
         s.some(
           (t) =>
-            t.selected.type === WORKER_MESSAGE_KINDS.shell_request_result &&
+            t.selected.type === BEHAVIOR_MESSAGE_KINDS.shell_request_result &&
             (t.selected.detail as { id?: string } | undefined)?.id === 'l1',
         ),
       )
       const result = selectionsOf(traces).find(
         (t) =>
-          t.selected.type === WORKER_MESSAGE_KINDS.shell_request_result &&
+          t.selected.type === BEHAVIOR_MESSAGE_KINDS.shell_request_result &&
           (t.selected.detail as { id?: string } | undefined)?.id === 'l1',
       )
       const detail = result?.selected.detail as
@@ -149,7 +149,7 @@ describe('useBehavioral — the runtime composition', () => {
   test('the workers allow-list prunes families: without shell, the shell pack does not mount', async () => {
     const traces: Trace[] = []
     const runtime = useBehavioral({
-      workers: ['responses'],
+      behaviors: ['responses'],
       traceListener: (trace) => {
         traces.push(trace)
       },
@@ -159,7 +159,7 @@ describe('useBehavioral — the runtime composition', () => {
       // No shell → no scan boot, no shell_request ever. Settle past any
       // boot cascade the packs could have run.
       await Bun.sleep(500)
-      expect(selectionsOf(traces).some((t) => t.selected.type === WORKER_MESSAGE_KINDS.shell_request)).toBe(false)
+      expect(selectionsOf(traces).some((t) => t.selected.type === BEHAVIOR_MESSAGE_KINDS.shell_request)).toBe(false)
       expect(storeRequest(selectionsOf(traces), 'put', 'skills')).toBeUndefined()
       expect(storeRequest(selectionsOf(traces), 'put', 'skill-recipes')).toBeUndefined()
     } finally {
@@ -193,7 +193,7 @@ describe('useBehavioral — the runtime composition', () => {
       trigger!({ type: 'mcp_authorization_required_probe', detail: {} })
       await Bun.sleep(200)
       const types = new Set(selectionsOf(traces).map((t) => t.selected.type))
-      expect(types.has(WORKER_MESSAGE_KINDS.mcp_request)).toBe(false) // no capture → no replay
+      expect(types.has(BEHAVIOR_MESSAGE_KINDS.mcp_request)).toBe(false) // no capture → no replay
       expect(true).toBe(true)
     } finally {
       runtime.terminate()
@@ -229,13 +229,13 @@ describe('useBehavioral — the runtime composition', () => {
       // REAL shell never produces. Its arrival proves the override took the
       // shell route. (The pack rides the host's threads — [] here by choice.)
       trigger!({
-        type: WORKER_MESSAGE_KINDS.shell_request,
+        type: BEHAVIOR_MESSAGE_KINDS.shell_request,
         detail: { id: 'ov1', label: 'probe', input: { op: 'echo' } },
       })
       await waitForTraces(traces, (s) =>
         s.some(
           (t) =>
-            t.selected.type === WORKER_MESSAGE_KINDS.shell_request_result &&
+            t.selected.type === BEHAVIOR_MESSAGE_KINDS.shell_request_result &&
             (t.selected.detail as { ok?: boolean } | undefined)?.ok === true,
         ),
       )
@@ -268,12 +268,12 @@ describe('useBehavioral — the runtime composition', () => {
       expect(trigger).toBeDefined()
       // The crash fixture throws on its FIRST message — drive one into it.
       trigger!({
-        type: WORKER_MESSAGE_KINDS.shell_request,
+        type: BEHAVIOR_MESSAGE_KINDS.shell_request,
         detail: { id: 'c1', label: 'probe', input: { op: 'die' } },
       })
-      await waitForTraces(traces, (s) => s.some((t) => t.selected.type === WORKER_MESSAGE_KINDS.worker_error))
-      const crash = selectionsOf(traces).find((t) => t.selected.type === WORKER_MESSAGE_KINDS.worker_error)
-      expect((crash?.selected.detail as { worker?: string } | undefined)?.worker).toBe('shell')
+      await waitForTraces(traces, (s) => s.some((t) => t.selected.type === BEHAVIOR_MESSAGE_KINDS.behavior_error))
+      const crash = selectionsOf(traces).find((t) => t.selected.type === BEHAVIOR_MESSAGE_KINDS.behavior_error)
+      expect((crash?.selected.detail as { behavior?: string } | undefined)?.behavior).toBe('shell')
     } finally {
       runtime.terminate()
     }

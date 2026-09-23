@@ -1,6 +1,6 @@
 import type { JSONSchemaType } from 'ajv'
 import { ajv, type JsonObject, type Thread } from '../behavioral/behavioral.types.ts'
-import { WORKER_MESSAGE_KINDS } from './workers.constants.ts'
+import { BEHAVIOR_MESSAGE_KINDS } from './behaviors.constants.ts'
 
 /*
  * Worker event-wire vocabulary — every request/result event family plus validators.
@@ -23,38 +23,38 @@ import { WORKER_MESSAGE_KINDS } from './workers.constants.ts'
  */
 
 export type ResponseRequestEvent = {
-  type: typeof WORKER_MESSAGE_KINDS.response_request
+  type: typeof BEHAVIOR_MESSAGE_KINDS.response_request
   detail: { id: string; input: JsonObject }
   space?: string
 }
 
 export type ResponseRequestResultEvent = {
-  type: typeof WORKER_MESSAGE_KINDS.response_request_result
+  type: typeof BEHAVIOR_MESSAGE_KINDS.response_request_result
   detail: WorkerResultDetail
   space?: string
 }
 
 export type ResponseCancelEvent = {
-  type: typeof WORKER_MESSAGE_KINDS.response_cancel
+  type: typeof BEHAVIOR_MESSAGE_KINDS.response_cancel
   detail: { id: string }
   space?: string
 }
 
 export type ShellRequestEvent = {
-  type: typeof WORKER_MESSAGE_KINDS.shell_request
+  type: typeof BEHAVIOR_MESSAGE_KINDS.shell_request
   /** `label` is an optional trace annotation (logical names like 'skill-scan') — no routing weight. */
   detail: { id: string; label?: string; input: JsonObject }
   space?: string
 }
 
 export type ShellRequestResultEvent = {
-  type: typeof WORKER_MESSAGE_KINDS.shell_request_result
+  type: typeof BEHAVIOR_MESSAGE_KINDS.shell_request_result
   detail: WorkerResultDetail
   space?: string
 }
 
 export type ShellCancelEvent = {
-  type: typeof WORKER_MESSAGE_KINDS.shell_cancel
+  type: typeof BEHAVIOR_MESSAGE_KINDS.shell_cancel
   detail: { id: string }
   space?: string
 }
@@ -84,9 +84,9 @@ export type WorkerResultError = {
 /** The `detail` of every `*_result` event — one shape across all five families. */
 export type WorkerResultDetail = WorkerResultOk | WorkerResultError
 
-export type WorkerErrorEvent = {
-  type: typeof WORKER_MESSAGE_KINDS.worker_error
-  detail: { worker: string; message: string }
+export type BehaviorErrorEvent = {
+  type: typeof BEHAVIOR_MESSAGE_KINDS.behavior_error
+  detail: { behavior: string; message: string }
   space?: string
 }
 
@@ -94,14 +94,14 @@ export type WorkerErrorEvent = {
 export type FrontierOp = 'replay' | 'explore' | 'verify'
 
 export type FrontierRequestEvent = {
-  type: typeof WORKER_MESSAGE_KINDS.frontier_request
+  type: typeof BEHAVIOR_MESSAGE_KINDS.frontier_request
   /** `op` selects the analysis; the worker shares no event types with the tools family. */
   detail: { id: string; op: FrontierOp; input: JsonObject }
   space?: string
 }
 
 export type FrontierRequestResultEvent = {
-  type: typeof WORKER_MESSAGE_KINDS.frontier_request_result
+  type: typeof BEHAVIOR_MESSAGE_KINDS.frontier_request_result
   detail: WorkerResultDetail
   space?: string
 }
@@ -110,7 +110,7 @@ export type FrontierRequestResultEvent = {
 export type StoreOp = 'put' | 'get' | 'delete' | 'query'
 
 export type StoreRequestEvent = {
-  type: typeof WORKER_MESSAGE_KINDS.store_request
+  type: typeof BEHAVIOR_MESSAGE_KINDS.store_request
   /** `op` selects the store operation; the backing schema lives inside the worker — schema churn never becomes protocol churn. */
   detail: { id: string; op: StoreOp; input: JsonObject }
   space?: string
@@ -118,7 +118,7 @@ export type StoreRequestEvent = {
 
 // No store cancel: ops are short-lived (frontier rule).
 export type StoreRequestResultEvent = {
-  type: typeof WORKER_MESSAGE_KINDS.store_request_result
+  type: typeof BEHAVIOR_MESSAGE_KINDS.store_request_result
   detail: WorkerResultDetail
   space?: string
 }
@@ -134,14 +134,14 @@ export type McpOp =
   | 'read-resource'
 
 export type McpRequestEvent = {
-  type: typeof WORKER_MESSAGE_KINDS.mcp_request
+  type: typeof BEHAVIOR_MESSAGE_KINDS.mcp_request
   /** `op` selects the MCP client operation; the backing schema lives in `src/workers/mcp-client.types.ts`. */
   detail: { id: string; op: McpOp; input: JsonObject }
   space?: string
 }
 
 export type McpRequestResultEvent = {
-  type: typeof WORKER_MESSAGE_KINDS.mcp_request_result
+  type: typeof BEHAVIOR_MESSAGE_KINDS.mcp_request_result
   detail: WorkerResultDetail
   space?: string
 }
@@ -150,7 +150,7 @@ export type McpRequestResultEvent = {
 // families keep their cancels (shell, response, mcp; frontier/store ops are
 // short-lived and have none).
 export type McpCancelEvent = {
-  type: typeof WORKER_MESSAGE_KINDS.mcp_cancel
+  type: typeof BEHAVIOR_MESSAGE_KINDS.mcp_cancel
   detail: { id: string }
   space?: string
 }
@@ -170,7 +170,7 @@ export type WorkerEvent =
   | FrontierRequestResultEvent
   | StoreRequestEvent
   | StoreRequestResultEvent
-  | WorkerErrorEvent
+  | BehaviorErrorEvent
 
 const jsonObjectSchema = { type: 'object', required: [], additionalProperties: true } as const
 
@@ -223,7 +223,7 @@ const resultEventSchema = (typeConst: string) =>
 export const ResponseRequestEventSchema: JSONSchemaType<ResponseRequestEvent> = {
   type: 'object',
   properties: {
-    type: { type: 'string', const: WORKER_MESSAGE_KINDS.response_request },
+    type: { type: 'string', const: BEHAVIOR_MESSAGE_KINDS.response_request },
     detail: {
       type: 'object',
       properties: { id: { type: 'string', minLength: 1 }, input: jsonObjectSchema },
@@ -236,12 +236,12 @@ export const ResponseRequestEventSchema: JSONSchemaType<ResponseRequestEvent> = 
   additionalProperties: false,
 }
 
-export const ResponseRequestResultEventSchema = resultEventSchema(WORKER_MESSAGE_KINDS.response_request_result)
+export const ResponseRequestResultEventSchema = resultEventSchema(BEHAVIOR_MESSAGE_KINDS.response_request_result)
 
 export const ResponseCancelEventSchema: JSONSchemaType<ResponseCancelEvent> = {
   type: 'object',
   properties: {
-    type: { type: 'string', const: WORKER_MESSAGE_KINDS.response_cancel },
+    type: { type: 'string', const: BEHAVIOR_MESSAGE_KINDS.response_cancel },
     detail: {
       type: 'object',
       properties: { id: { type: 'string', minLength: 1 } },
@@ -257,7 +257,7 @@ export const ResponseCancelEventSchema: JSONSchemaType<ResponseCancelEvent> = {
 export const ShellRequestEventSchema: JSONSchemaType<ShellRequestEvent> = {
   type: 'object',
   properties: {
-    type: { type: 'string', const: WORKER_MESSAGE_KINDS.shell_request },
+    type: { type: 'string', const: BEHAVIOR_MESSAGE_KINDS.shell_request },
     detail: {
       type: 'object',
       properties: {
@@ -274,12 +274,12 @@ export const ShellRequestEventSchema: JSONSchemaType<ShellRequestEvent> = {
   additionalProperties: false,
 }
 
-export const ShellRequestResultEventSchema = resultEventSchema(WORKER_MESSAGE_KINDS.shell_request_result)
+export const ShellRequestResultEventSchema = resultEventSchema(BEHAVIOR_MESSAGE_KINDS.shell_request_result)
 
 export const ShellCancelEventSchema: JSONSchemaType<ShellCancelEvent> = {
   type: 'object',
   properties: {
-    type: { type: 'string', const: WORKER_MESSAGE_KINDS.shell_cancel },
+    type: { type: 'string', const: BEHAVIOR_MESSAGE_KINDS.shell_cancel },
     detail: {
       type: 'object',
       properties: { id: { type: 'string', minLength: 1 } },
@@ -295,7 +295,7 @@ export const ShellCancelEventSchema: JSONSchemaType<ShellCancelEvent> = {
 export const McpRequestEventSchema: JSONSchemaType<McpRequestEvent> = {
   type: 'object',
   properties: {
-    type: { type: 'string', const: WORKER_MESSAGE_KINDS.mcp_request },
+    type: { type: 'string', const: BEHAVIOR_MESSAGE_KINDS.mcp_request },
     detail: {
       type: 'object',
       properties: {
@@ -323,12 +323,12 @@ export const McpRequestEventSchema: JSONSchemaType<McpRequestEvent> = {
   additionalProperties: false,
 }
 
-export const McpRequestResultEventSchema = resultEventSchema(WORKER_MESSAGE_KINDS.mcp_request_result)
+export const McpRequestResultEventSchema = resultEventSchema(BEHAVIOR_MESSAGE_KINDS.mcp_request_result)
 
 export const McpCancelEventSchema: JSONSchemaType<McpCancelEvent> = {
   type: 'object',
   properties: {
-    type: { type: 'string', const: WORKER_MESSAGE_KINDS.mcp_cancel },
+    type: { type: 'string', const: BEHAVIOR_MESSAGE_KINDS.mcp_cancel },
     detail: {
       type: 'object',
       properties: { id: { type: 'string', minLength: 1 } },
@@ -341,14 +341,14 @@ export const McpCancelEventSchema: JSONSchemaType<McpCancelEvent> = {
   additionalProperties: false,
 }
 
-export const WorkerErrorEventSchema: JSONSchemaType<WorkerErrorEvent> = {
+export const BehaviorErrorEventSchema: JSONSchemaType<BehaviorErrorEvent> = {
   type: 'object',
   properties: {
-    type: { type: 'string', const: WORKER_MESSAGE_KINDS.worker_error },
+    type: { type: 'string', const: BEHAVIOR_MESSAGE_KINDS.behavior_error },
     detail: {
       type: 'object',
-      properties: { worker: { type: 'string' }, message: { type: 'string' } },
-      required: ['worker', 'message'],
+      properties: { behavior: { type: 'string' }, message: { type: 'string' } },
+      required: ['behavior', 'message'],
       additionalProperties: false,
     },
     space: { type: 'string', nullable: true },
@@ -371,7 +371,7 @@ export const validateMcpCancelEvent = ajv.compile(McpCancelEventSchema)
 export const FrontierRequestEventSchema: JSONSchemaType<FrontierRequestEvent> = {
   type: 'object',
   properties: {
-    type: { type: 'string', const: WORKER_MESSAGE_KINDS.frontier_request },
+    type: { type: 'string', const: BEHAVIOR_MESSAGE_KINDS.frontier_request },
     detail: {
       type: 'object',
       properties: {
@@ -388,13 +388,13 @@ export const FrontierRequestEventSchema: JSONSchemaType<FrontierRequestEvent> = 
   additionalProperties: false,
 }
 
-export const FrontierRequestResultEventSchema = resultEventSchema(WORKER_MESSAGE_KINDS.frontier_request_result)
+export const FrontierRequestResultEventSchema = resultEventSchema(BEHAVIOR_MESSAGE_KINDS.frontier_request_result)
 
 // No store cancel: ops are short-lived (same rule as frontier).
 export const StoreRequestEventSchema: JSONSchemaType<StoreRequestEvent> = {
   type: 'object',
   properties: {
-    type: { type: 'string', const: WORKER_MESSAGE_KINDS.store_request },
+    type: { type: 'string', const: BEHAVIOR_MESSAGE_KINDS.store_request },
     detail: {
       type: 'object',
       properties: {
@@ -411,9 +411,9 @@ export const StoreRequestEventSchema: JSONSchemaType<StoreRequestEvent> = {
   additionalProperties: false,
 }
 
-export const StoreRequestResultEventSchema = resultEventSchema(WORKER_MESSAGE_KINDS.store_request_result)
+export const StoreRequestResultEventSchema = resultEventSchema(BEHAVIOR_MESSAGE_KINDS.store_request_result)
 
-export const validateWorkerErrorEvent = ajv.compile(WorkerErrorEventSchema)
+export const validateBehaviorErrorEvent = ajv.compile(BehaviorErrorEventSchema)
 export const validateFrontierRequestEvent = ajv.compile(FrontierRequestEventSchema)
 export const validateFrontierRequestResultEvent = ajv.compile(FrontierRequestResultEventSchema)
 export const validateStoreRequestEvent = ajv.compile(StoreRequestEventSchema)

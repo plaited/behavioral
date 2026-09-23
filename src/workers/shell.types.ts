@@ -41,11 +41,11 @@ export type ShellStatus = 'completed' | 'timeout' | 'line_quota' | 'canceled' | 
  * reported in {@link ShellSuccess.clamped}.
  */
 export type ShellOptions = {
-  /** Working directory for the execution. Defaults to the worker's `cwd`. */
+  /** Working directory for the execution. Defaults to the behavior's `cwd`. */
   cwd?: string
   /** Environment overrides merged over `process.env`. */
   env?: Record<string, string>
-  /** Host-only payload written to the executed command's stdin (shell op only — channeled by the worker). */
+  /** Host-only payload written to the executed command's stdin (shell op only — channeled by the behavior). */
   stdin?: string
   /** Output representation. @default 'paged' */
   format?: ShellFormat
@@ -53,9 +53,9 @@ export type ShellOptions = {
   offset?: number
   /** Maximum lines to capture into the result. @default 50 */
   limit?: number
-  /** Wall-clock deadline; the worker group-kills on expiry. @default 30_000 */
+  /** Wall-clock deadline; the behavior group-kills on expiry. @default 30_000 */
   timeoutMs?: number
-  /** Total stdout+stderr lines allowed before the worker group-kills. @default 250 */
+  /** Total stdout+stderr lines allowed before the behavior group-kills. @default 250 */
   maxLines?: number
   /** Character bound for `raw`/`json`/`stderr` output. @default 8_000 */
   maxCharacters?: number

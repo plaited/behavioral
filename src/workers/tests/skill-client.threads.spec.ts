@@ -14,8 +14,8 @@ import { join } from 'node:path'
 import { TRACE_MESSAGE_KINDS } from '../../behavioral/behavioral.constants.ts'
 import { behavioral } from '../../behavioral/behavioral.ts'
 import type { BPEvent, JsonObject, SelectionTrace, Trace } from '../../behavioral/behavioral.types.ts'
+import { BEHAVIOR_MESSAGE_KINDS } from '../behaviors.constants.ts'
 import { SKILL_SCAN_CALL_ID, SKILL_SCAN_SCRIPT, skillThreads } from '../shell.threads.ts'
-import { WORKER_MESSAGE_KINDS } from '../workers.constants.ts'
 
 type Selected = { type: string; detail: Record<string, unknown> | undefined }
 
@@ -43,7 +43,7 @@ describe('skill threads — scan boot', () => {
   test('boot requests the skill-scan shell_request: the run op carries the recipe, json format', () => {
     const selected = runProgram([])
     const call = selected.find(
-      (s) => s.type === WORKER_MESSAGE_KINDS.shell_request && s.detail?.id === SKILL_SCAN_CALL_ID,
+      (s) => s.type === BEHAVIOR_MESSAGE_KINDS.shell_request && s.detail?.id === SKILL_SCAN_CALL_ID,
     )
     expect(call).toBeDefined()
     expect(call?.detail?.label).toBe('skill-scan')
@@ -59,7 +59,7 @@ describe('skill threads — scan boot', () => {
   test('boot fires once — a second pump adds no duplicate call', () => {
     const selected = runProgram([])
     const calls = selected.filter(
-      (s) => s.type === WORKER_MESSAGE_KINDS.shell_request && s.detail?.id === SKILL_SCAN_CALL_ID,
+      (s) => s.type === BEHAVIOR_MESSAGE_KINDS.shell_request && s.detail?.id === SKILL_SCAN_CALL_ID,
     )
     expect(calls).toHaveLength(1)
   })
@@ -73,11 +73,11 @@ describe('skill threads — catalog transform', () => {
     }
     const selected = runProgram([
       {
-        type: WORKER_MESSAGE_KINDS.shell_request_result,
+        type: BEHAVIOR_MESSAGE_KINDS.shell_request_result,
         detail: { id: SKILL_SCAN_CALL_ID, result: { status: 'completed', jsonData: catalog } },
       },
     ])
-    const put = selected.find((s) => s.type === WORKER_MESSAGE_KINDS.store_request && s.detail?.op === 'put')
+    const put = selected.find((s) => s.type === BEHAVIOR_MESSAGE_KINDS.store_request && s.detail?.op === 'put')
     expect(put).toBeDefined()
     const input = put?.detail?.input as JsonObject
     expect(input.collection).toBe('skills')
@@ -88,11 +88,11 @@ describe('skill threads — catalog transform', () => {
   test('a result without a catalog does not put', () => {
     const selected = runProgram([
       {
-        type: WORKER_MESSAGE_KINDS.shell_request_result,
+        type: BEHAVIOR_MESSAGE_KINDS.shell_request_result,
         detail: { id: 'other-call', result: { status: 'completed', lines: ['x'], totalLines: 1 } },
       },
     ])
-    expect(selected.some((s) => s.type === WORKER_MESSAGE_KINDS.store_request)).toBe(false)
+    expect(selected.some((s) => s.type === BEHAVIOR_MESSAGE_KINDS.store_request)).toBe(false)
   })
 
   test('a malformed catalog fails the detailSchema gate — fail-closed, never partial admission', () => {
@@ -101,11 +101,11 @@ describe('skill threads — catalog transform', () => {
     const malformed = { skills: 'not-an-array', warnings: [] }
     const selected = runProgram([
       {
-        type: WORKER_MESSAGE_KINDS.shell_request_result,
+        type: BEHAVIOR_MESSAGE_KINDS.shell_request_result,
         detail: { id: SKILL_SCAN_CALL_ID, result: { status: 'completed', jsonData: malformed } },
       },
     ])
-    expect(selected.some((s) => s.type === WORKER_MESSAGE_KINDS.store_request)).toBe(false)
+    expect(selected.some((s) => s.type === BEHAVIOR_MESSAGE_KINDS.store_request)).toBe(false)
   })
 })
 

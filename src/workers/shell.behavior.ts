@@ -45,6 +45,8 @@ import * as path from 'node:path'
 import type { ValidateFunction } from 'ajv'
 import type { JsonObject } from '../behavioral/behavioral.types.ts'
 import { ajv } from '../behavioral/behavioral.types.ts'
+import { BEHAVIOR_MESSAGE_KINDS } from './behaviors.constants.ts'
+import { type ShellRequestEvent, validateShellCancelEvent, validateShellRequestEvent } from './behaviors.types.ts'
 import { emit, wireInbound } from './process-lane.ts'
 import {
   type ShellCallInput,
@@ -54,8 +56,6 @@ import {
   type ShellStatus,
   type ShellSuccess,
 } from './shell.types.ts'
-import { WORKER_MESSAGE_KINDS } from './workers.constants.ts'
-import { type ShellRequestEvent, validateShellCancelEvent, validateShellRequestEvent } from './workers.types.ts'
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -520,7 +520,7 @@ const postResult = ({
   space?: string
 }): void => {
   emit({
-    type: WORKER_MESSAGE_KINDS.shell_request_result,
+    type: BEHAVIOR_MESSAGE_KINDS.shell_request_result,
     detail: (error === undefined
       ? { id, ok: true, result: (payload ?? {}) as unknown as JsonObject }
       : { id, ok: false, error: error as unknown as JsonObject }) as JsonObject & { id: string },
@@ -547,7 +547,7 @@ const errorInterior = ({ message }: { message: string }): ShellError => ({
 /** Route one inbound event. */
 const handleInbound = async (message: unknown): Promise<void> => {
   if (validateShellCancelEvent(message)) {
-    const cancel = message as import('./workers.types.ts').ShellCancelEvent
+    const cancel = message as import('./behaviors.types.ts').ShellCancelEvent
     const execution = active.get(cancel.detail.id)
     if (execution !== undefined) stopExecution({ execution, reason: 'canceled' })
     return

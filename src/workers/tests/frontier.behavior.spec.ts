@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 import type { Thread } from '../../behavioral/behavioral.types.ts'
-import { handleFrontierMessage } from '../frontier.worker.ts'
+import { BEHAVIOR_MESSAGE_KINDS } from '../behaviors.constants.ts'
+import { handleFrontierMessage } from '../frontier.behavior.ts'
 import { bindEmit } from '../process-lane.ts'
-import { WORKER_MESSAGE_KINDS } from '../workers.constants.ts'
 
 /**
  * Frontier worker integration tests — exercised through the real worker
@@ -30,14 +30,14 @@ type WireResult = {
 const spawnFrontierWorker = () => {
   const results: WireResult[] = []
   bindEmit((event) => {
-    if (event.type === WORKER_MESSAGE_KINDS.frontier_request_result) {
+    if (event.type === BEHAVIOR_MESSAGE_KINDS.frontier_request_result) {
       const detail = event.detail as { id: string; ok: boolean; result?: unknown; error?: Record<string, unknown> }
       results.push({ ...detail, id: detail.id, space: event.space } as WireResult)
     }
   })
   const call = (id: string, op: string, input: unknown, space?: string): void => {
     handleFrontierMessage({
-      type: WORKER_MESSAGE_KINDS.frontier_request,
+      type: BEHAVIOR_MESSAGE_KINDS.frontier_request,
       detail: { id, op, input },
       ...(space === undefined ? {} : { space }),
     })

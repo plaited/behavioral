@@ -1,13 +1,11 @@
 import { keyMirror } from '../utils.ts'
 
 /**
- * Discriminant values for the worker event wire — every `*_request` /
- * `*_request_result` pair a satellite family speaks, plus the engine
- * transport kinds and the crash event. The wire layer's registry.
+ * Discriminant values for the behavior event wire — every `*_request` /
+ * `*_request_result` pair a behavior speaks, plus the crash event. The
+ * wire layer's registry.
  */
-export const WORKER_MESSAGE_KINDS = keyMirror(
-  'trigger',
-  'add_threads',
+export const BEHAVIOR_MESSAGE_KINDS = keyMirror(
   'response_request',
   'response_request_result',
   'response_cancel',
@@ -21,5 +19,5 @@ export const WORKER_MESSAGE_KINDS = keyMirror(
   'frontier_request_result',
   'store_request',
   'store_request_result',
-  'worker_error',
+  'behavior_error',
 )

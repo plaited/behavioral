@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import type { JsonObject } from '../../behavioral/behavioral.types.ts'
-import { WORKER_MESSAGE_KINDS } from '../workers.constants.ts'
+import { BEHAVIOR_MESSAGE_KINDS } from '../behaviors.constants.ts'
 import { spawnFamily } from './family-harness.ts'
 import { startMcpServer } from './mcp-server-fixture.ts'
 
@@ -35,15 +35,15 @@ type WireResult = {
 /** Spawn the mcp family PROCESS and expose the same wire harness API. */
 const spawnMcpWorker = () => {
   const worker = spawnFamily({
-    file: 'mcp-client.worker.ts',
-    requestType: WORKER_MESSAGE_KINDS.mcp_request,
-    resultType: WORKER_MESSAGE_KINDS.mcp_request_result,
+    file: 'mcp-client.behavior.ts',
+    requestType: BEHAVIOR_MESSAGE_KINDS.mcp_request,
+    resultType: BEHAVIOR_MESSAGE_KINDS.mcp_request_result,
   })
   const call = (id: string, op: string, input: unknown, space?: string): void => {
     worker.call({ id, op, input } as JsonObject, space)
   }
   const cancel = (id: string): void => {
-    worker.post({ type: WORKER_MESSAGE_KINDS.mcp_cancel, detail: { id } } as never)
+    worker.post({ type: BEHAVIOR_MESSAGE_KINDS.mcp_cancel, detail: { id } } as never)
   }
   const resultFor = async (id: string): Promise<WireResult> => {
     const raw = await worker.resultFor(id)

@@ -2,8 +2,8 @@ import { describe, expect, test } from 'bun:test'
 import { readdirSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import type { JsonObject } from '../../behavioral/behavioral.types.ts'
+import { BEHAVIOR_MESSAGE_KINDS } from '../behaviors.constants.ts'
 import type { ShellError, ShellSuccess } from '../shell.types.ts'
-import { WORKER_MESSAGE_KINDS } from '../workers.constants.ts'
 import { type FamilyResult, spawnFamily } from './family-harness.ts'
 
 /**
@@ -34,9 +34,9 @@ type WireResult =
 /** Spawn the shell family PROCESS and expose the same wire harness API. */
 const spawnShellWorker = () => {
   const family = spawnFamily({
-    file: 'shell.worker.ts',
-    requestType: WORKER_MESSAGE_KINDS.shell_request,
-    resultType: WORKER_MESSAGE_KINDS.shell_request_result,
+    file: 'shell.behavior.ts',
+    requestType: BEHAVIOR_MESSAGE_KINDS.shell_request,
+    resultType: BEHAVIOR_MESSAGE_KINDS.shell_request_result,
   })
   const results: WireResult[] = []
   const observe = (raw: FamilyResult): void => {
@@ -60,7 +60,7 @@ const spawnShellWorker = () => {
     family.call({ id, label: 'test-sh', input: { op: 'shell', command, ...extra } } as JsonObject, space)
   }
   const cancel = (id: string): void => {
-    family.post({ type: WORKER_MESSAGE_KINDS.shell_cancel, detail: { id } } as never)
+    family.post({ type: BEHAVIOR_MESSAGE_KINDS.shell_cancel, detail: { id } } as never)
   }
   /** ok-branch payload or throws — error paths use errorFor. */
   const payloadFor = async (id: string): Promise<ShellSuccess> => {

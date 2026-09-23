@@ -1,7 +1,7 @@
 import type { ValidateFunction } from 'ajv'
 import type { BPEvent, Thread } from '../behavioral/behavioral.types.ts'
-import { WORKER_MESSAGE_KINDS } from './workers.constants.ts'
-import type { AddThreads } from './workers.types.ts'
+import { BEHAVIOR_MESSAGE_KINDS } from './behaviors.constants.ts'
+import type { AddThreads } from './behaviors.types.ts'
 
 type WireMessage = {
   type: string
@@ -30,7 +30,7 @@ type WireMessage = {
  *   (the RESULT validator owns the inbound lane), re-entered as once-threads
  *   with `message.space` PRESERVED;
  * - **crash synthesis** — an unsolicited process death (any exit we did not
- *   cause) re-enters exactly ONE `worker_error { worker: name }` event;
+ *   cause) re-enters exactly ONE `behavior_error { behavior: name }` event;
  *   malformed lines are discarded (the pasted JSON-RPC client's rule);
  * - **respawn on demand** — the next outbound event spawns a fresh process
  *   after a death; one live process per family wiring at all times;
@@ -84,10 +84,10 @@ export const useProcess =
       if (terminated) return
       crashed = true
       reenter({
-        type: WORKER_MESSAGE_KINDS.worker_error,
+        type: BEHAVIOR_MESSAGE_KINDS.behavior_error,
         detail: {
           id: `crash_${name}_${crypto.randomUUID()}`,
-          worker: name,
+          behavior: name,
           message: `process exited (${code ?? 'signal'})`,
         },
       })

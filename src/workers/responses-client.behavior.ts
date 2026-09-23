@@ -29,6 +29,12 @@
  */
 
 import type { JsonObject } from '../behavioral/behavioral.types.ts'
+import { BEHAVIOR_MESSAGE_KINDS } from './behaviors.constants.ts'
+import {
+  type ResponseRequestEvent,
+  validateResponseCancelEvent,
+  validateResponseRequestEvent,
+} from './behaviors.types.ts'
 import { emit, envData, wireInbound } from './process-lane.ts'
 import {
   ErrorSchema,
@@ -51,12 +57,6 @@ import {
   type ModelRespondInput,
   type ModelRespondOutput,
 } from './responses-client.types.ts'
-import { WORKER_MESSAGE_KINDS } from './workers.constants.ts'
-import {
-  type ResponseRequestEvent,
-  validateResponseCancelEvent,
-  validateResponseRequestEvent,
-} from './workers.types.ts'
 
 // ---------------------------------------------------------------------------
 // Endpoint config (environment data — seeded by the host before spawn)
@@ -275,7 +275,7 @@ const active = new Map<string, ActiveRequest>()
 
 const postResult = (id: string, result: unknown, space?: string): void => {
   emit({
-    type: WORKER_MESSAGE_KINDS.response_request_result,
+    type: BEHAVIOR_MESSAGE_KINDS.response_request_result,
     // The uniform envelope: { isError: true, … } → error branch; the model
     // respond output → ok branch.
     detail: ((): JsonObject & { id: string } => {

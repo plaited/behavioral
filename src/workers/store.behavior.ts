@@ -40,6 +40,8 @@ import * as path from 'node:path'
 import type { JSONSchemaType } from 'ajv'
 import { ajv, type JsonObject } from '../behavioral/behavioral.types.ts'
 import { deepEqual } from '../utils.ts'
+import { BEHAVIOR_MESSAGE_KINDS } from './behaviors.constants.ts'
+import { type StoreRequestEvent, validateStoreRequestEvent } from './behaviors.types.ts'
 import { emit, envData, wireInbound } from './process-lane.ts'
 import {
   ROOT_SPACE,
@@ -49,8 +51,6 @@ import {
   type StorePutInput,
   type StoreQueryInput,
 } from './store.types.ts'
-import { WORKER_MESSAGE_KINDS } from './workers.constants.ts'
-import { type StoreRequestEvent, validateStoreRequestEvent } from './workers.types.ts'
 
 // ---------------------------------------------------------------------------
 // Backing — one owned connection, migrations on boot
@@ -144,7 +144,7 @@ const validateQuery = ajv.compile(QueryInputSchema)
 
 const postResult = ({ id, result, space }: { id: string; result: unknown; space?: string }): void => {
   emit({
-    type: WORKER_MESSAGE_KINDS.store_request_result,
+    type: BEHAVIOR_MESSAGE_KINDS.store_request_result,
     // The uniform envelope: op-runner { ok: true, … } → ok branch (payload =
     // the rest); { isError: true, … } or a throw → error branch.
     detail: ((): JsonObject & { id: string } => {

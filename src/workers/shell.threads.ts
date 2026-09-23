@@ -20,7 +20,7 @@
  */
 
 import type { Thread } from '../behavioral/behavioral.types.ts'
-import { WORKER_MESSAGE_KINDS } from './workers.constants.ts'
+import { BEHAVIOR_MESSAGE_KINDS } from './behaviors.constants.ts'
 
 // ── Vocabulary ───────────────────────────────────────────────────────────────
 
@@ -169,7 +169,7 @@ const skillScanBoot: Thread = {
   rules: [
     {
       request: {
-        type: WORKER_MESSAGE_KINDS.shell_request,
+        type: BEHAVIOR_MESSAGE_KINDS.shell_request,
         detail: {
           id: SKILL_SCAN_CALL_ID,
           label: SKILL_SCAN_TOOL,
@@ -187,10 +187,10 @@ const skillCatalog: Thread = {
     {
       transform: [
         {
-          type: WORKER_MESSAGE_KINDS.shell_request_result,
+          type: BEHAVIOR_MESSAGE_KINDS.shell_request_result,
           query:
             '. as $d | select($d.result.jsonData.skills? != null) | {id: $d.id, op: "put", input: {collection: "skills", key: "catalog", value: $d.result.jsonData}}',
-          target: WORKER_MESSAGE_KINDS.store_request,
+          target: BEHAVIOR_MESSAGE_KINDS.store_request,
           // The validate-before-put gate: the envelope schema nests under
           // jsonData — strict at the payload, loose around it (absent
           // jsonData passes and the query rejects instead).
@@ -591,7 +591,7 @@ const pluginScanBoot: Thread = {
   rules: [
     {
       request: {
-        type: WORKER_MESSAGE_KINDS.shell_request,
+        type: BEHAVIOR_MESSAGE_KINDS.shell_request,
         detail: {
           id: PLUGIN_SCAN_CALL_ID,
           label: PLUGIN_SCAN_TOOL,
@@ -609,10 +609,10 @@ const pluginManifests: Thread = {
     {
       transform: [
         {
-          type: WORKER_MESSAGE_KINDS.shell_request_result,
+          type: BEHAVIOR_MESSAGE_KINDS.shell_request_result,
           query:
             '. as $d | select($d.result.jsonData.plugins? != null) | {id: $d.id, op: "put", input: {collection: "plugins", key: "manifests", value: $d.result.jsonData}}',
-          target: WORKER_MESSAGE_KINDS.store_request,
+          target: BEHAVIOR_MESSAGE_KINDS.store_request,
           // The validate-before-put gate: the envelope schema nests under
           // jsonData — strict at the payload, loose around it (absent
           // jsonData passes and the query rejects instead).
@@ -861,7 +861,7 @@ const linksSeeder: Thread = {
   rules: [
     {
       request: {
-        type: WORKER_MESSAGE_KINDS.store_request,
+        type: BEHAVIOR_MESSAGE_KINDS.store_request,
         detail: {
           id: 'seed-extract-links',
           op: 'put',
@@ -875,7 +875,7 @@ const linksSeeder: Thread = {
     },
     {
       request: {
-        type: WORKER_MESSAGE_KINDS.store_request,
+        type: BEHAVIOR_MESSAGE_KINDS.store_request,
         detail: {
           id: 'seed-validate-links',
           op: 'put',
@@ -910,7 +910,7 @@ const dispatcherExtract: Thread = {
         {
           type: LINKS_EVENT_TYPES.request,
           query: `. as $d | select($d.recipe == "${LINKS_EXTRACT_RECIPE_KEY}") | {id: $d.id, label: "${SKILL_EXTRACT_LINKS_TOOL}", input: {op: "run", script: ${JSON.stringify(SKILL_EXTRACT_LINKS_SCRIPT)}, format: "json", env: {LINKS_INPUT: $d.input.markdown}}}`,
-          target: WORKER_MESSAGE_KINDS.shell_request,
+          target: BEHAVIOR_MESSAGE_KINDS.shell_request,
           detailSchema: LINKS_REQUEST_DETAIL_SCHEMA,
         },
       ],
@@ -927,7 +927,7 @@ const dispatcherValidate: Thread = {
         {
           type: LINKS_EVENT_TYPES.request,
           query: `. as $d | select($d.recipe == "${LINKS_VALIDATE_RECIPE_KEY}") | {id: $d.id, label: "${SKILL_VALIDATE_LINKS_TOOL}", input: {op: "run", script: ${JSON.stringify(SKILL_VALIDATE_LINKS_SCRIPT)}, format: "json", env: {LINKS_INPUT: $d.input.markdown, LINKS_ROOT_RELATIVE: (if ($d.input.rootRelative // false) then "1" else "0" end)}}}`,
-          target: WORKER_MESSAGE_KINDS.shell_request,
+          target: BEHAVIOR_MESSAGE_KINDS.shell_request,
           detailSchema: LINKS_REQUEST_DETAIL_SCHEMA,
         },
       ],

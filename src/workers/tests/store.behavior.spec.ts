@@ -2,9 +2,9 @@ import { describe, expect, test } from 'bun:test'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { JsonObject } from '../../behavioral/behavioral.types.ts'
+import { BEHAVIOR_MESSAGE_KINDS } from '../behaviors.constants.ts'
+import type { StoreOp } from '../behaviors.types.ts'
 import { STORE_DB_PATH_KEY } from '../store.types.ts'
-import { WORKER_MESSAGE_KINDS } from '../workers.constants.ts'
-import type { StoreOp } from '../workers.types.ts'
 import { spawnFamily } from './family-harness.ts'
 
 /**
@@ -31,9 +31,9 @@ type WireResult = {
 /** Spawn the store family PROCESS and expose the same wire harness API. */
 const spawnStoreWorker = (dbPath = ':memory:') => {
   const family = spawnFamily({
-    file: 'store.worker.ts',
-    requestType: WORKER_MESSAGE_KINDS.store_request,
-    resultType: WORKER_MESSAGE_KINDS.store_request_result,
+    file: 'store.behavior.ts',
+    requestType: BEHAVIOR_MESSAGE_KINDS.store_request,
+    resultType: BEHAVIOR_MESSAGE_KINDS.store_request_result,
     // Env vars cross Bun.spawn boundaries; worker-thread env-data does not.
     env: { [STORE_DB_PATH_KEY]: dbPath },
   })

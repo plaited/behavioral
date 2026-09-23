@@ -13,8 +13,8 @@ import { describe, expect, test } from 'bun:test'
 import { TRACE_MESSAGE_KINDS } from '../../behavioral/behavioral.constants.ts'
 import { behavioral } from '../../behavioral/behavioral.ts'
 import type { BPEvent, JsonObject, SelectionTrace, Trace } from '../../behavioral/behavioral.types.ts'
+import { BEHAVIOR_MESSAGE_KINDS } from '../behaviors.constants.ts'
 import { MCP_CALLS_COLLECTION, MCP_EVENT_TYPES, mcpThreads } from '../mcp.threads.ts'
-import { WORKER_MESSAGE_KINDS } from '../workers.constants.ts'
 
 type Selected = { type: string; detail: Record<string, unknown> | undefined }
 
@@ -39,7 +39,7 @@ const runProgram = (events: BPEvent[]): Selected[] => {
 }
 
 const authRequiredResult = (id: string): BPEvent => ({
-  type: WORKER_MESSAGE_KINDS.mcp_request_result,
+  type: BEHAVIOR_MESSAGE_KINDS.mcp_request_result,
   detail: {
     id,
     ok: false,
@@ -53,7 +53,7 @@ const authRequiredResult = (id: string): BPEvent => ({
 })
 
 const completedResult = (id: string): BPEvent => ({
-  type: WORKER_MESSAGE_KINDS.mcp_request_result,
+  type: BEHAVIOR_MESSAGE_KINDS.mcp_request_result,
   detail: {
     id,
     result: { id, status: 'completed', durationMs: 40, output: { tools: [] } },
@@ -63,7 +63,7 @@ const completedResult = (id: string): BPEvent => ({
 describe('mcp threads — the replay spine', () => {
   test('an authorization_required result is captured in the store with the echoed request', () => {
     const selected = runProgram([authRequiredResult('c1')])
-    const put = selected.find((s) => s.type === WORKER_MESSAGE_KINDS.store_request && s.detail?.op === 'put')
+    const put = selected.find((s) => s.type === BEHAVIOR_MESSAGE_KINDS.store_request && s.detail?.op === 'put')
     expect(put).toBeDefined()
     const input = put?.detail?.input as JsonObject
     expect(input.collection).toBe(MCP_CALLS_COLLECTION)
@@ -73,7 +73,7 @@ describe('mcp threads — the replay spine', () => {
 
   test('a completed result is never captured — no per-call store churn', () => {
     const selected = runProgram([completedResult('c2')])
-    expect(selected.some((s) => s.type === WORKER_MESSAGE_KINDS.store_request && s.detail?.op !== 'get')).toBe(false)
+    expect(selected.some((s) => s.type === BEHAVIOR_MESSAGE_KINDS.store_request && s.detail?.op !== 'get')).toBe(false)
   })
 
   test('an authorization_required result surfaces mcp_authorization_required to the host', () => {
@@ -89,20 +89,20 @@ describe('mcp threads — the replay spine', () => {
       { type: MCP_EVENT_TYPES.authorizationGranted, detail: { id: 'c4' } },
       // the store worker's get result, as the router would re-enter it
       {
-        type: WORKER_MESSAGE_KINDS.store_request_result,
+        type: BEHAVIOR_MESSAGE_KINDS.store_request_result,
         detail: {
           id: 'c4',
           result: { value: { op: 'list-tools', input: { url: 'https://mcp.example.com/mcp' } } },
         },
       },
     ])
-    const get = selected.find((s) => s.type === WORKER_MESSAGE_KINDS.store_request && s.detail?.op === 'get')
+    const get = selected.find((s) => s.type === BEHAVIOR_MESSAGE_KINDS.store_request && s.detail?.op === 'get')
     expect((get?.detail?.input as JsonObject)?.key).toBe('c4')
-    const retry = selected.find((s) => s.type === WORKER_MESSAGE_KINDS.mcp_request && s.detail?.id === 'c4-retry')
+    const retry = selected.find((s) => s.type === BEHAVIOR_MESSAGE_KINDS.mcp_request && s.detail?.id === 'c4-retry')
     expect(retry?.detail?.op).toBe('list-tools')
     expect((retry?.detail?.input as JsonObject)?.url).toBe('https://mcp.example.com/mcp')
     const del = selected.find(
-      (s) => s.type === WORKER_MESSAGE_KINDS.store_request && s.detail?.op === 'delete' && s.detail?.id === 'c4',
+      (s) => s.type === BEHAVIOR_MESSAGE_KINDS.store_request && s.detail?.op === 'delete' && s.detail?.id === 'c4',
     )
     expect(del).toBeDefined()
   })
@@ -110,13 +110,13 @@ describe('mcp threads — the replay spine', () => {
   test('a store value that is not a captured request does not replay', () => {
     const selected = runProgram([
       {
-        type: WORKER_MESSAGE_KINDS.store_request_result,
+        type: BEHAVIOR_MESSAGE_KINDS.store_request_result,
         detail: {
           id: 'c5',
           result: { value: { skills: [{ name: 'alpha' }], warnings: [] } },
         },
       },
     ])
-    expect(selected.some((s) => s.type === WORKER_MESSAGE_KINDS.mcp_request)).toBe(false)
+    expect(selected.some((s) => s.type === BEHAVIOR_MESSAGE_KINDS.mcp_request)).toBe(false)
   })
 })

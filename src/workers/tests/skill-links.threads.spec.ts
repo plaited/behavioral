@@ -15,6 +15,7 @@ import { join } from 'node:path'
 import { TRACE_MESSAGE_KINDS } from '../../behavioral/behavioral.constants.ts'
 import { behavioral } from '../../behavioral/behavioral.ts'
 import type { BPEvent, JsonObject, SelectionTrace, Trace } from '../../behavioral/behavioral.types.ts'
+import { BEHAVIOR_MESSAGE_KINDS } from '../behaviors.constants.ts'
 import {
   LINKS_EXTRACT_RECIPE_KEY,
   LINKS_RECIPES_COLLECTION,
@@ -22,7 +23,6 @@ import {
   SKILL_VALIDATE_LINKS_SCRIPT,
   skillLinksThreads,
 } from '../shell.threads.ts'
-import { WORKER_MESSAGE_KINDS } from '../workers.constants.ts'
 
 type Selected = { type: string; detail: Record<string, unknown> | undefined }
 
@@ -47,7 +47,7 @@ const runProgram = (events: BPEvent[]): Selected[] => {
 describe('skill-links threads — recipe seeding', () => {
   test('boot seeds both recipes into the store (recipes-as-tenant)', () => {
     const selected = runProgram([])
-    const puts = selected.filter((s) => s.type === WORKER_MESSAGE_KINDS.store_request && s.detail?.op === 'put')
+    const puts = selected.filter((s) => s.type === BEHAVIOR_MESSAGE_KINDS.store_request && s.detail?.op === 'put')
     const keys = puts.map((p) => (p.detail?.input as JsonObject)?.key).sort()
     expect(keys).toEqual(['extract-links', 'validate-links'])
     const extract = puts.find((p) => (p.detail?.input as JsonObject)?.key === LINKS_EXTRACT_RECIPE_KEY)
@@ -59,7 +59,7 @@ describe('skill-links threads — recipe seeding', () => {
 
   test('seeding fires once per key — a second pump adds no duplicate puts', () => {
     const selected = runProgram([])
-    const puts = selected.filter((s) => s.type === WORKER_MESSAGE_KINDS.store_request && s.detail?.op === 'put')
+    const puts = selected.filter((s) => s.type === BEHAVIOR_MESSAGE_KINDS.store_request && s.detail?.op === 'put')
     expect(puts).toHaveLength(2)
   })
 })
@@ -76,7 +76,7 @@ describe('skill-links threads — dispatchers', () => {
         },
       },
     ])
-    const call = selected.find((s) => s.type === WORKER_MESSAGE_KINDS.shell_request)
+    const call = selected.find((s) => s.type === BEHAVIOR_MESSAGE_KINDS.shell_request)
     expect(call).toBeDefined()
     expect(call?.detail?.id).toBe('l1')
     expect(call?.detail?.label).toBe('skill-extract-links')
@@ -98,7 +98,7 @@ describe('skill-links threads — dispatchers', () => {
         },
       },
     ])
-    const call = selected.find((s) => s.type === WORKER_MESSAGE_KINDS.shell_request)
+    const call = selected.find((s) => s.type === BEHAVIOR_MESSAGE_KINDS.shell_request)
     expect(call?.detail?.label).toBe('skill-validate-links')
     const input = call?.detail?.input as JsonObject
     expect(input.script).toBe(SKILL_VALIDATE_LINKS_SCRIPT)
@@ -113,7 +113,7 @@ describe('skill-links threads — dispatchers', () => {
         detail: { id: 'l3', recipe: 'nope', input: { markdown: 'x' } },
       },
     ])
-    expect(selected.some((s) => s.type === WORKER_MESSAGE_KINDS.shell_request)).toBe(false)
+    expect(selected.some((s) => s.type === BEHAVIOR_MESSAGE_KINDS.shell_request)).toBe(false)
   })
 })
 

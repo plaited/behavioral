@@ -50,9 +50,9 @@ import {
   useThread,
 } from '../behavioral/behavioral.utils.ts'
 import { ueid } from '../utils.ts'
+import { BEHAVIOR_MESSAGE_KINDS } from './behaviors.constants.ts'
+import { type FrontierRequestEvent, validateFrontierRequestEvent } from './behaviors.types.ts'
 import { emit, wireInbound } from './process-lane.ts'
-import { WORKER_MESSAGE_KINDS } from './workers.constants.ts'
-import { type FrontierRequestEvent, validateFrontierRequestEvent } from './workers.types.ts'
 
 // ---------------------------------------------------------------------------
 // Private helpers
@@ -1188,7 +1188,7 @@ export const FrontierVerifyInputSchema = {
 
 const postResult = ({ id, result, space }: { id: string; result: unknown; space?: string }): void => {
   emit({
-    type: WORKER_MESSAGE_KINDS.frontier_request_result,
+    type: BEHAVIOR_MESSAGE_KINDS.frontier_request_result,
     // The uniform envelope: { isError: true, … } → error branch; anything
     // else is the analysis payload → ok branch.
     detail: ((): JsonObject & { id: string } => {

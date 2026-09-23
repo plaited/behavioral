@@ -2,13 +2,13 @@ import { describe, expect, test } from 'bun:test'
 import { TRACE_MESSAGE_KINDS } from '../../behavioral/behavioral.constants.ts'
 import { behavioral } from '../../behavioral/behavioral.ts'
 import type { BPEvent, SelectionTrace, Thread, Trace } from '../../behavioral/behavioral.types.ts'
-import { useProcess } from '../use-process.ts'
-import { WORKER_MESSAGE_KINDS } from '../workers.constants.ts'
+import { BEHAVIOR_MESSAGE_KINDS } from '../behaviors.constants.ts'
 import {
   validateShellCancelEvent,
   validateShellRequestEvent,
   validateShellRequestResultEvent,
-} from '../workers.types.ts'
+} from '../behaviors.types.ts'
+import { useProcess } from '../use-process.ts'
 
 /**
  * useProcess — the spawn-based family primitive — against a real process on
@@ -60,7 +60,7 @@ const spawnProbe = () => {
     if (trace.kind !== TRACE_MESSAGE_KINDS.selection) return
     const selected = (trace as SelectionTrace).selected
     const event = { type: selected.type, detail: selected.detail, space: selected.space } as BPEvent
-    if (event.type === WORKER_MESSAGE_KINDS.shell_request && validateShellRequestEvent(event)) {
+    if (event.type === BEHAVIOR_MESSAGE_KINDS.shell_request && validateShellRequestEvent(event)) {
       family.send(event)
     }
   })
@@ -83,7 +83,7 @@ const awaitSelection = async (
 }
 
 const request = (id: string, op: string): BPEvent => ({
-  type: WORKER_MESSAGE_KINDS.shell_request,
+  type: BEHAVIOR_MESSAGE_KINDS.shell_request,
   detail: { id, label: 'probe', input: { op } },
 })
 
@@ -100,7 +100,7 @@ describe('useProcess — the spawn-based family primitive', () => {
       const result = await awaitSelection(
         traces,
         (t) =>
-          t.selected.type === WORKER_MESSAGE_KINDS.shell_request_result &&
+          t.selected.type === BEHAVIOR_MESSAGE_KINDS.shell_request_result &&
           (t.selected.detail as { id?: string } | undefined)?.id === 'r1',
         'no result',
       )
@@ -119,8 +119,8 @@ describe('useProcess — the spawn-based family primitive', () => {
           {
             waitFor: [
               {
-                type: WORKER_MESSAGE_KINDS.worker_error,
-                detailSchema: { type: 'object', properties: { worker: { const: 'probe' } }, required: ['worker'] },
+                type: BEHAVIOR_MESSAGE_KINDS.behavior_error,
+                detailSchema: { type: 'object', properties: { behavior: { const: 'probe' } }, required: ['behavior'] },
               },
             ],
           },
@@ -136,11 +136,13 @@ describe('useProcess — the spawn-based family primitive', () => {
       await awaitSelection(
         traces,
         (t) =>
-          t.selected.type === WORKER_MESSAGE_KINDS.worker_error &&
-          (t.selected.detail as { worker?: string } | undefined)?.worker === 'probe',
+          t.selected.type === BEHAVIOR_MESSAGE_KINDS.behavior_error &&
+          (t.selected.detail as { behavior?: string } | undefined)?.behavior === 'probe',
         'no worker_error',
       )
-      const crashes = selectionsOf(traces).filter((t) => t.selected.type === WORKER_MESSAGE_KINDS.worker_error).length
+      const crashes = selectionsOf(traces).filter(
+        (t) => t.selected.type === BEHAVIOR_MESSAGE_KINDS.behavior_error,
+      ).length
       expect(crashes).toBe(1)
 
       // 2. Respawn on demand: the next request completes on a fresh process.
@@ -153,13 +155,15 @@ describe('useProcess — the spawn-based family primitive', () => {
       const result = await awaitSelection(
         traces,
         (t) =>
-          t.selected.type === WORKER_MESSAGE_KINDS.shell_request_result &&
+          t.selected.type === BEHAVIOR_MESSAGE_KINDS.shell_request_result &&
           (t.selected.detail as { id?: string } | undefined)?.id === 'r2',
         'no respawn result',
       )
       expect((result.selected.detail as { ok?: boolean } | undefined)?.ok).toBe(true)
       // Still exactly one crash — the respawn's listener is armed for the NEXT death only.
-      expect(selectionsOf(traces).filter((t) => t.selected.type === WORKER_MESSAGE_KINDS.worker_error).length).toBe(1)
+      expect(selectionsOf(traces).filter((t) => t.selected.type === BEHAVIOR_MESSAGE_KINDS.behavior_error).length).toBe(
+        1,
+      )
     } finally {
       family.terminate()
     }
