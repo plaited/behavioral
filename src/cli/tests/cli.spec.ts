@@ -83,6 +83,7 @@ describe('Router-level flags (subprocess)', () => {
     expect(await proc.exited).toBe(0)
     const output = JSON.parse(await new Response(proc.stdout).text())
     expect(output.commands).toContain('serve')
+    expect(output.commands).toContain('init')
   })
 })
 

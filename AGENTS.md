@@ -119,7 +119,11 @@ the browser bundle (types in `controller.types.ts`, schemas in the separate file
 controller owns no AJV at runtime; its floors are hardcoded invariants (on*, malformed
 b-trigger, scale mismatch).
 **`src/cli/`** — the `behavioral` CLI framework (`makeCliRouter`/`parseCli`) and its commands,
-registered in `bin/behavioral.ts`. The `behavioral tools` fleet dispatcher is retired with the
+registered in `bin/behavioral.ts`. `init` (`src/cli/init.ts`) generates
+`<home>/config.ts` (+ optional provider entries under `<home>/providers/`):
+interactive tour by default at a TTY (injectable `ask` collector), agent JSON
+otherwise; api keys ride as env-var-name references, never literals. The
+`behavioral tools` fleet dispatcher is retired with the
 fleet (0 tools); turn/config commands land here as the composition rulings build out. The
 JSON-RPC IPC host lives here too: `b-program.ts` (the runtime composition, `bProgram`),
 `json-rpc.ts` (the line codec), `serve.ts` (the `serve`

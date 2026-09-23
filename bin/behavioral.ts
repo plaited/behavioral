@@ -15,6 +15,11 @@ export const runCli = makeCliRouter({
       const { serve } = await import('../src/cli/serve.ts')
       await serve()
     },
+    init: async (args) => {
+      // Lazy: --help/--version must not load the config/composition graph.
+      const { init } = await import('../src/cli/init.ts')
+      await init(args)
+    },
   },
 })
 
