@@ -154,6 +154,36 @@ ingress + a plugin-shipped behavior surface.
      the conventions skill, docs sweep. Remaining: the deletion sweep (fleet 6 → 0)
      and the governor thread (plugin admission). -->
 
+### 2026-09-21 — ruled: useBehavioral owns the runtime — all workers router-spawned; shellWorker is the only override
+
+- **THE SIGNATURE COLLAPSES (pilot: "just shellWorker as optional"; "I
+  don't want to pass in workers at all anymore"):**
+  `useBehavioral({ traceListener, useTrigger, shellWorker? })` — NO threads
+  param, NO workers map, NO family selectors. The composition owns
+  everything.
+- **ALL WORKERS DEFAULT-ON, ROUTER-SPAWNED:** engine, frontier (ruled
+  router-owned), shell, responses, store, mcp — useBehavioral spawns them
+  all internally via the useWorker primitive. Config flows ENTIRELY through
+  env-data (MODEL_ENDPOINTS, STORE_DB_PATH_KEY — :memory: by default,
+  durable by env var; MCP_BROKER_*). No family is deployable-shaped
+  anymore; the config-composition ruling's "addable workers" list
+  COLLAPSES to the one true override below.
+- **shellWorker IS THE ONLY OVERRIDE — the one untrusted-code executor.**
+  Every other family is a safe data plane (env-data configured); shell runs
+  model-authored scripts, so it is the one family a host may want to spawn
+  under different constraints (sandbox env, restricted cwd, process
+  policy). A host that provides it owns its lifecycle; the default spawn is
+  identical.
+- **THREADS ARE COMPOSITION-OWNED:** root thread packs mount with their
+  families (the mcp spine, skill/plugin scans + links dispatchers,
+  default.ts packs) — no host passes threads. Hosts wire ingress (useTrigger)
+  and observe (traceListener) only. The engine stays multiplexed; per-space
+  stacks layer per-space satellites above via useWorker.
+- **use-worker.ts promoted to tracked:** the pilot's primitive is now
+  composition load-bearing — polish notes from the review fold into the
+  recast (the `|| false` residue dies; per-family gates replace the union
+  chain; the one-wiring-per-worker contract gets its doc pin).
+
 ### 2026-09-21 — ruled: the composition hook renames — useWorkers → useBehavioral, use-workers.ts → use-behavioral.ts
 
 - **Pilot's ruling (typo-collision + functional correctness):** the root
