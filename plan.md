@@ -15,9 +15,9 @@ The runtime, config, observability, and IPC host are landed.
   attach; `trigger` admits events only; `terminate` kills every family it
   invoked. The process primitive is `useBehavior` (`src/behaviors/use-behavior.ts`).
 - **Public surface** — `src/behaviors.ts` (package export `./behaviors`): the
-  `Behavior` union, the wire types + schemas/validators, the thread packs
-  (`behaviorsThreads`, `shellThreads`, `mcpThreads`), and `useBehavior` — what a
-  `config.ts` imports.
+  `Behavior` union, the wire types + schemas/validators, the override thread packs
+  (`shellThreads`, `mcpThreads`), and `useBehavior` — what a `config.ts` imports.
+  (`behaviorsThreads`, the root guard pack, is internal.)
 - **Config & home** — `behavioralHome()` (`src/behaviors/behavioral-home.ts`) is
   the single `.behavioral` root, overridable by `BEHAVIORAL_HOME`.
   `loadConfig()` (`src/cli/load-config.ts`) loads `<home>/config.ts` — executable

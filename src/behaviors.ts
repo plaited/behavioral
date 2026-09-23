@@ -1,11 +1,12 @@
 /**
- * The behaviors public surface — the types, schemas, thread packs, and the
- * process primitive a `config.ts` composes with.
+ * The behaviors public surface — what a `config.ts` override composes with.
  *
  * @remarks
- * The runtime composition itself (`bProgram`) lives in the host
- * (`src/cli/b-program.ts`); this boundary is what a config imports:
- * `useBehavior`, the wire validators/schemas, and the shipped thread packs.
+ * Exposes the override thread packs (`shellThreads`, `mcpThreads`), their
+ * schemas and types, the `Behavior` union, and `useBehavior`. The default root
+ * pack (`behaviorsThreads`) is internal — the composition always mounts it — and
+ * is intentionally NOT exported. The runtime composition itself (`bProgram`)
+ * lives in `src/cli/b-program.ts`.
  *
  * @packageDocumentation
  */
@@ -13,8 +14,9 @@
 /** The selectable capability families (the `bProgram` allow-list). */
 export type Behavior = 'shell' | 'responses' | 'store' | 'mcp'
 
-export { behaviorsThreads } from './behaviors/behaviors.threads.ts'
 export * from './behaviors/behaviors.types.ts'
 export { mcpThreads } from './behaviors/mcp.threads.ts'
 export { shellThreads } from './behaviors/shell.threads.ts'
+export * from './behaviors/shell.types.ts'
+export * from './behaviors/store.types.ts'
 export { useBehavior } from './behaviors/use-behavior.ts'

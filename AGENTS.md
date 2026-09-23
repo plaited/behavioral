@@ -98,9 +98,9 @@ skill/plugin operations are the shell family's thread pack
 (`src/behaviors/shell.threads.ts`) + recipes + store, taught by
 `skills/skill-conventions/`.
 **`src/behaviors.ts`** — the behaviors public surface (package export `./behaviors`): the
-`Behavior` union, the wire types + JSON schemas/validators (`behaviors.types.ts`), the thread
-packs (`behaviorsThreads`, `shellThreads`, `mcpThreads`), and `useBehavior` — what a
-`config.ts` imports to compose. The runtime composition itself is `src/cli/b-program.ts`.
+`Behavior` union, the wire types + JSON schemas/validators (`behaviors.types.ts`), the override thread
+packs (`shellThreads`, `mcpThreads`), their schemas/types, and `useBehavior` — what a
+`config.ts` imports to compose. (`behaviorsThreads`, the default root pack, is internal.) The runtime composition itself is `src/cli/b-program.ts`.
 **`src/behavioral/`** — the pure language layer: types, constants, utils, the interpreter core
 (`behavioral.ts`), and its internal jq subprocess (`jq.worker.ts` — engine-internal, wire-external;
 nothing outside behavioral/ speaks its wire). Zero process entries that speak the behavior wire —
