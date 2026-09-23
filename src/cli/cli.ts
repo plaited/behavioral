@@ -36,9 +36,6 @@ export type CliFlags = {
  * @property name - Command name rendered in generated usage output.
  * @property outputSchema - Output schema used for `--schema output` and result validation.
  * @property help - Help text appended to the usage block.
- * @property toolSchemas - Optional per-tool schema resolution for fleet commands.
- * When present, bare `--schema` prints the tool index and
- * `--schema <input|output> --tool <name>` resolves that tool's schema.
  *
  * @public
  */
@@ -47,20 +44,6 @@ export type CliOptions = {
   name: string
   outputSchema: object
   help: string
-  toolSchemas?: CliToolSchemas
-}
-
-/**
- * Per-tool schema resolution for a fleet command.
- *
- * @property index - Tool index printed for bare `--schema` (name + description per tool).
- * @property resolve - Resolves a named tool's input/output schema; `undefined` marks an unknown tool.
- *
- * @public
- */
-export type CliToolSchemas = {
-  index: () => object
-  resolve: (target: 'input' | 'output', tool: string) => object | undefined
 }
 
 /**
@@ -82,7 +65,6 @@ type CliHandlerConfig<TInput, TOutput, TName extends string = string> = {
   inputSchema: JSONSchemaType<TInput>
   outputSchema: JSONSchemaType<TOutput>
   help: string
-  toolSchemas?: CliToolSchemas
   run: (input: TInput, flags: CliFlags) => Promise<TOutput> | TOutput
 }
 
@@ -105,31 +87,15 @@ const buildUsage = ({ name, help }: { name: string; help: string }): string =>
     help,
   ].join('\n')
 
-const getSchemaTarget = (args: string[], hasToolSchemas: boolean): 'input' | 'output' | 'index' | null => {
+const getSchemaTarget = (args: string[]): 'input' | 'output' | null => {
   const schemaIndex = args.indexOf('--schema')
   if (schemaIndex === -1) return null
 
   const target = args[schemaIndex + 1]
   if (target === 'input' || target === 'output') return target
 
-  // A fleet command with toolSchemas treats any bare `--schema` as a request
-  // for the tool index.
-  if (hasToolSchemas) return 'index'
-
   console.error("Invalid value for --schema. Expected 'input' or 'output'.")
   process.exit(2)
-}
-
-const getToolFlag = (args: string[]): string | undefined => {
-  const toolIndex = args.indexOf('--tool')
-  if (toolIndex === -1) return undefined
-
-  const tool = args[toolIndex + 1]
-  if (!tool || tool.startsWith('--')) {
-    console.error('Invalid value for --tool. Expected: --tool <name>')
-    process.exit(2)
-  }
-  return tool
 }
 
 const getPositionalInput = async (args: string[]): Promise<string | undefined> => {
@@ -195,36 +161,10 @@ export const parseCliRequest = async <T>(
     process.exit(0)
   }
 
-  const toolFlag = getToolFlag(args)
-  const schemaTarget = getSchemaTarget(args, Boolean(options.toolSchemas))
-  if (schemaTarget === 'index') {
-    printSchema(options.toolSchemas?.index() ?? {})
-    process.exit(0)
-  }
+  const schemaTarget = getSchemaTarget(args)
   if (schemaTarget) {
-    if (toolFlag !== undefined && !options.toolSchemas) {
-      console.error(`--tool is not supported by command '${options.name}'.`)
-      process.exit(2)
-    }
-    if (toolFlag !== undefined) {
-      const toolSchema = options.toolSchemas?.resolve(schemaTarget, toolFlag)
-      if (!toolSchema) {
-        console.error(`Unknown tool: ${toolFlag}`)
-        process.exit(2)
-      }
-      printSchema(toolSchema)
-      process.exit(0)
-    }
-    if (schemaTarget === 'input') {
-      printSchema(schema)
-      process.exit(0)
-    }
-    printSchema(options.outputSchema)
+    printSchema(schemaTarget === 'input' ? schema : options.outputSchema)
     process.exit(0)
-  }
-  if (toolFlag !== undefined) {
-    console.error('--tool requires --schema <input|output>.')
-    process.exit(2)
   }
 
   const rawInput = await getPositionalInput(args)
@@ -280,7 +220,6 @@ export const makeCli = <TInput, TOutput, TName extends string>({
   inputSchema,
   outputSchema,
   help,
-  toolSchemas,
   run,
 }: CliHandlerConfig<TInput, TOutput, TName>): { [K in TName]: (args: string[]) => Promise<void> } =>
   ({
@@ -289,7 +228,6 @@ export const makeCli = <TInput, TOutput, TName extends string>({
         name,
         outputSchema,
         help,
-        toolSchemas,
       })
 
       if (flags.dryRun) {
