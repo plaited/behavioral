@@ -154,6 +154,30 @@ ingress + a plugin-shipped behavior surface.
      the conventions skill, docs sweep. Remaining: the deletion sweep (fleet 6 → 0)
      and the governor thread (plugin admission). -->
 
+### 2026-09-21 — ruled (pilot): Workers die COMPLETELY — no dual-mode lane, one cut
+
+- **The staging collapses (pilot: "i think we're dropping worker stuff
+  completely right?"):** the dual-mode process-lane (Worker OR process)
+  existed only to serve the staged slice; its IS_WORKER detection is BROKEN
+  in Bun anyway (plain globalThis HAS postMessage — every standalone
+  process mis-detected as a Worker and never read stdin; found by the
+  spec, fixed by deletion). ONE coherent cut, no two commits:
+  - behavioral.worker.ts + the add_threads/trigger envelope DIE —
+    behavioral() runs in-process in useBehavioral (addThread/step/trigger
+    direct; the trailing-step re-entry law is the composition's now).
+  - use-worker.ts DIES — use-process.ts is the only family primitive.
+  - frontier imports IN-PROCESS — analysis functions called directly (the
+    flagged main-thread tradeoff stands: accepted now, spawn-later if it
+  bites).
+  - All family files: process-only entries (wireInbound unconditionally —
+    no mode detection ever).
+  - The five worker specs re-home as PROCESS specs (spawn the family over
+    stdio lines — the probe.proc.ts pattern generalizes); the transport
+    spec dies with the engine transport.
+- **Survivors:** the wire home (workers.types.ts — the schemas gate the
+  same events over stdio), the packs (shell.threads/mcp.threads — mounted
+  identically), the probe fixture (the primitive's spec).
+
 ### 2026-09-21 — ruled: the process composition — engine+frontier in-process; capabilities as Bun.spawn per space; no behavioral on clients
 
 - **THE CONSOLIDATION (pilot, three moves):**
