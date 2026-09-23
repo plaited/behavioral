@@ -155,6 +155,21 @@ ingress + a plugin-shipped behavior surface.
      the conventions skill, docs sweep. Remaining: the deletion sweep (fleet 6 → 0)
      and the governor thread (plugin admission). -->
 
+### 2026-09-22 — landed: behavioralHome + loadConfig
+
+- **`behavioralHome()`** (`src/utils/behavioral-home.ts`): `BEHAVIORAL_HOME ??
+  ~/.behavioral`. The two hardcoded sites now resolve through it — the store's
+  default db path and `traceLogSink`'s root — so pointing the env var isolates
+  a whole harness instance. Both proven at the real process/fs boundary
+  (`BEHAVIORAL_HOME=tmp` → `tmp/db.sqlite`, `tmp/traces/...`).
+- **`loadConfig(path)`** (`src/cli/load-config.ts`): dynamic-imports the
+  executable TS config; missing → `{}` (defaults); present → validated default
+  export; non-object / unknown behavior / non-function override → fail fast
+  with the path.
+- Not yet: package boundary exports (family-default data + validators + thread
+  packs) and the assistant skill; CLI flag precedence; wiring `loadConfig` into
+  a host (arrives with serve.ts).
+
 ### 2026-09-22 — landed: useBehavior / getBehavioral rename + `useBehavior` env
 
 - **Rename** (pilot): `src/behaviors/use-process.ts` → `use-behavior.ts`
