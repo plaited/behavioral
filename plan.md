@@ -154,6 +154,34 @@ ingress + a plugin-shipped behavior surface.
      the conventions skill, docs sweep. Remaining: the deletion sweep (fleet 6 → 0)
      and the governor thread (plugin admission). -->
 
+### 2026-09-21 — confirmed: the uniform result envelope (ok two-branch) + admission intermediation
+
+- **THE RESULT ENVELOPE (pilot's in-flight mod, reviewed):** every family's
+  `detail.result` follows ONE fixed two-branch schema — `{ ok: true,
+  …payload } | { ok: false, code: <family status enum>, message?, …diagnostics }`.
+  The store's shipped `{ ok: true }` is the precedent generalizing; the
+  discriminant is `ok` (data — not isOk, which reads as a method). The
+  family status enums stay the SOURCE OF TRUTH the branches project from
+  (shell: ok = status completed; mcp: authorization_required stays
+  first-class — error-branch code + request echo preserved, per the broker
+  ruling). One schema home: envelope fragments in workers.types.ts, families
+  extend (no-cross-module-drift). Payoffs: uniform jq gates
+  (select($d.result.ok) across every family), the admission monitor's
+  "ok responses only" is one schema field, the JSON-RPC carrier maps
+  ok→result / not-ok→error 1:1.
+- **ADMission INTERMEDIATION CONFIRMED — all three layers are threads, the
+  composition stays a dumb translator:** (1) admission detection + guard =
+  a root pack thread whose detailSchema requires result.ok AND the guarded
+  Thread[] payload (false results/errors cannot carry admissions); (2)
+  admitted threads fire PUBLIC vocabulary only (wide guard); (3) pack
+  threads translate public→family requests and family→public results.
+  The composition's one non-forward job stays pure: admission_approved →
+  the add_threads envelope.
+- **Review note on the in-flight diff:** the first cut groups all non-id
+  fields under `error:` including success payload (lines/jsonData) — the
+  settled shape must split the branches; success payload never lives under
+  an error key.
+
 ### 2026-09-21 — ruled: thread admission — the model can mount threads, behind the WIDE guard (Q1/b)
 
 - **THE WIRING GAP NAMED (pilot): threads can only propose events; only the
