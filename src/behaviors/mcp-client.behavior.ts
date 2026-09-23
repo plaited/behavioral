@@ -47,8 +47,6 @@ import {
 } from '@modelcontextprotocol/client'
 import type { ValidateFunction } from 'ajv'
 import { ajv, type JsonObject } from '../behavioral/behavioral.types.ts'
-import { BunKeychain } from '../oauth/keychain.ts'
-import { tokensKey } from '../oauth/keychain-oauth-provider.ts'
 import { BEHAVIOR_MESSAGE_KINDS } from './behaviors.constants.ts'
 import {
   type McpCancelEvent,
@@ -57,6 +55,7 @@ import {
   validateMcpCancelEvent,
   validateMcpRequestEvent,
 } from './behaviors.types.ts'
+import { BunKeychain, tokensKey } from './keychain-oauth-provider.ts'
 import { MCP_BROKER_BOOT_SECRET_KEY, MCP_BROKER_URL_KEY, MCP_OP_INPUT_VALIDATORS } from './mcp-client.types.ts'
 import { emit, envData, wireInbound } from './process-lane.ts'
 

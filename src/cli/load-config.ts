@@ -1,7 +1,7 @@
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { behavioralHome } from '../behaviors/behavioral-home.ts'
 import type { getBehavioral } from '../behaviors/get-behavioral.ts'
-import { behavioralHome } from '../utils.ts'
 
 /**
  * The host config shape — the {@link getBehavioral} options a `config.ts` may

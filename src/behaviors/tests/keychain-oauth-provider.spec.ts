@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { IssuerMismatchError } from '@modelcontextprotocol/client'
-import { InMemoryKeychain } from '../keychain.ts'
-import { BunKeychainOAuthProvider } from '../keychain-oauth-provider.ts'
+import { BunKeychainOAuthProvider, InMemoryKeychain } from '../keychain-oauth-provider.ts'
 
 const SERVER_URL = 'https://mcp.example.com/mcp'
 const baseOptions = (keychain: ReturnType<typeof InMemoryKeychain>) => ({
