@@ -16,6 +16,7 @@ the engine's super-step scheduler interprets. Hosts attach ingress through
 ```mermaid
 flowchart TD
   subgraph HOST["HOST (the consumer)"]
+    direction TB
     CONFIG["&lt;BEHAVIORAL_HOME&gt;/config.ts — executable TS (defineConfig)"]
     INGRESS["ingress: ui_event · ui_form_submit · trigger"]
     OUT["observation: trace stream via useTrace"]
@@ -32,7 +33,12 @@ flowchart TD
     PACKS --> ENGINE
   end
 
+  subgraph EMBED["IN-PROCESS EMBED"]
+    FRONTIER["frontier — analysis dispatch driven directly by the composition"]
+  end
+
   subgraph FACULTIES["CAPABILITY FACULTIES — src/faculties/&lt;faculty&gt; (Bun.spawn processes, one wire over stdio lines)"]
+    direction TB
     SHELL["shell — bun-direct script + Bun Shell ops"]
     STORE["store — durable space-scoped persistence"]
     MCP["mcp — remote connections/sessions/auth"]
@@ -40,19 +46,20 @@ flowchart TD
     S2["systemTwo — Open Responses model calls (SSE assembled to terminal results)"]
   end
 
-  subgraph EMBED["IN-PROCESS EMBED"]
-    FRONTIER["frontier — analysis dispatch driven directly by the composition"]
-  end
-
   IPC["serve — src/cli/serve.ts: line-framed JSON-RPC over stdio; ingress → triggers, ui_* selections → client notifications, redacted traces out"]
 
   CONFIG --> COMPOSE
   INGRESS --> COMPOSE
   COMPOSE --> OUT
+  COMPOSE --> EMBED
   ROUTER -->|"one JSON event per stdin line"| FACULTIES
   FACULTIES -->|"result lines re-enter the engine (space preserved)"| ROUTER
-  COMPOSE --> EMBED
   COMPOSE <-->|"ui_* wire (dumb relay, schema-gated at threads)"| IPC
+
+  %% Layout-only rank hints (invisible edges) — stack the ranks top to bottom
+  %% so the diagram flows vertically instead of spreading horizontally.
+  EMBED ~~~ FACULTIES
+  FACULTIES ~~~ IPC
 ```
 
 **One wire.** Every faculty speaks the same behavioral event vocabulary
