@@ -15,13 +15,13 @@ the CLI tool fleet is retired:
 - **Remote MCP** is the mcp behavior: requests ride the behavioral
   event wire (`mcp_request` / `mcp_request_result` / `mcp_cancel`), seven
   ops, typed `authorization_required` results with request echo, auth bound
-  at the worker's module scope (broker env-data + keychain floor — per-call
+  at the behavior's module scope (broker env-data + keychain floor — per-call
   credentials are retired). See
   [references/mcp-client.md](references/mcp-client.md).
 - **Skills and plugins** (discovery, reading, frontmatter validation, link
-  extraction/validation) run through threads + the shell worker (`bun run -`)
+  extraction/validation) run through threads + the shell behavior (`bun run -`)
   + the store — taught by the **skill-conventions** skill.
-- **Git and raw shell** belong to the shell worker (`shell_request`, bun-direct —
+- **Git and raw shell** belong to the shell behavior (`shell_request`, bun-direct —
   `run` op TS scripts, `shell` op Bun Shell commands).
 - **HTML validation** belongs to the controller floors and the classifier
   story ([prompts/html-classifier-gate.md](../../prompts/html-classifier-gate.md)).
