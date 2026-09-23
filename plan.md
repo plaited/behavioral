@@ -169,11 +169,14 @@ ingress + a plugin-shipped behavior surface.
   anymore; the config-composition ruling's "addable workers" list
   COLLAPSES to the one true override below.
 - **shellWorker IS THE ONLY OVERRIDE — the one untrusted-code executor.**
-  Every other family is a safe data plane (env-data configured); shell runs
-  model-authored scripts, so it is the one family a host may want to spawn
-  under different constraints (sandbox env, restricted cwd, process
-  policy). A host that provides it owns its lifecycle; the default spawn is
-  identical.
+  CORRECTED (pilot): the param is NOT a Worker — it is the RETURN of
+  `useWorker` (the curried family-wiring product: worker + name + threads +
+  validators). A host building a sandboxed shell constructs
+  `useWorker({ worker: mySandboxedSpawn, name: 'shell', threads: …,
+  validateRequestEvent, validateEventCancel })` and passes the product;
+  useBehavioral invokes it with the engine's addThreads instead of its
+  default shell wiring. Every other family is a safe data plane (env-data
+  configured); the default products are identical, composition-built.
 - **THREADS ARE COMPOSITION-OWNED:** root thread packs mount with their
   families (the mcp spine, skill/plugin scans + links dispatchers,
   default.ts packs) — no host passes threads. Hosts wire ingress (useTrigger)
