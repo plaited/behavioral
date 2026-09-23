@@ -16,35 +16,34 @@ the engine's super-step scheduler interprets. Hosts attach ingress through
 ```mermaid
 flowchart TD
   subgraph HOST["HOST — the consumer"]
-    direction LR
-    CONFIG["&lt;BEHAVIORAL_HOME&gt;/config.ts — executable TS (defineConfig)"]
-    SERVE["serve — src/cli/serve.ts: line-framed JSON-RPC over stdio · ingress → triggers · ui_* selections → client notifications · redacted traces out"]
+    CONFIG["config.ts — executable TS (defineConfig)"]
+    SERVE["serve — JSON-RPC over stdio"]
   end
 
-  subgraph COMPOSE["COMPOSITION — src/cli/b-program.ts (bProgram)"]
+  subgraph COMPOSE["COMPOSITION — bProgram (src/cli/b-program.ts)"]
     direction TB
-    GUARDS["guard threads — block malformed events at their schema (detailMatch:false); rejects visible in frontier/pending_bids/deadlock"]
-    PACKS["thread packs — the root guard pack always; shell/mcp packs when their faculties are on"]
-    ENGINE["BEHAVIORAL ENGINE — src/behavioral (in-process, super-step scheduler: request · waitFor · block · transform bids)"]
-    ROUTER["the pump — selected events route to their faculty lane; traces out"]
-    FRONTIER["frontier — the in-process embed: analysis dispatch driven directly, results re-enter via bindEmit"]
+    GUARDS["guard threads"]
+    PACKS["thread packs"]
+    ENGINE["BEHAVIORAL ENGINE — in-process, super-step scheduler"]
+    ROUTER["the pump"]
+    FRONTIER["frontier — the in-process embed"]
     GUARDS --> ENGINE
     PACKS --> ENGINE
     ENGINE --> ROUTER
   end
 
-  subgraph FACULTIES["CAPABILITY FACULTIES — src/faculties/&lt;faculty&gt; (Bun.spawn processes, one wire over stdio lines)"]
+  subgraph FACULTIES["CAPABILITY FACULTIES — one Bun.spawn process each"]
     direction LR
-    SHELL["shell — bun-direct script + Bun Shell ops"]
-    STORE["store — durable space-scoped persistence"]
-    MCP["mcp — remote connections/sessions/auth"]
-    S1["systemOne — TypeSafe/OpenRouter Decisions (noul · choice · score)"]
-    S2["systemTwo — Open Responses model calls (SSE → terminal results)"]
+    SHELL["shell"]
+    STORE["store"]
+    MCP["mcp"]
+    S1["systemOne"]
+    S2["systemTwo"]
   end
 
   CONFIG -->|"loadConfig"| COMPOSE
-  SERVE <-->|"ui_* wire (dumb relay, schema-gated at threads)"| COMPOSE
-  COMPOSE <-->|"the stdio wire: one JSON event per line in · results re-enter (space preserved)"| FACULTIES
+  SERVE <-->|"ui_* wire"| COMPOSE
+  COMPOSE <-->|"the stdio wire — one JSON event per line"| FACULTIES
 ```
 
 **One wire.** Every faculty speaks the same behavioral event vocabulary
@@ -62,6 +61,23 @@ system faculties' guards block such a result outright (visible in the
 frontier/deadlock traces); the default faculties (shell/store/mcp) surface it
 as a selected-but-unmatched event. Guarding the default lanes is a recorded
 follow-up.
+
+The life of a request over that lane:
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant P as The pump (composition)
+  participant F as Faculty process
+  participant G as Guard thread (in-engine)
+  P->>F: request — one JSON line on stdin
+  F-->>P: result — re-enters the engine, space preserved
+  Note over P,G: a valid result selects; the caller's waitFor fires
+  F-->>G: a malformed result re-enters instead of being discarded
+  G--xP: blocked — visible in the frontier/deadlock traces, never selected
+  P->>F: cancel — abort the in-flight call, the first stop reason wins
+  Note over F: unsolicited death: exactly one faculty_error re-entry, respawn on demand
+```
 
 **System faculties are endpoint-carrying overrides.** `systemOne` and `systemTwo`
 have no defaults: without an endpoint they are simply absent — no process, no
