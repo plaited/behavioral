@@ -46,7 +46,7 @@ block-beta
     S2["systemTwo — Open Responses model calls (SSE assembled to terminal results)"]
   end
 
-  block:IPC["SERVE — src/cli/serve.ts: line-framed JSON-RPC over stdio; ingress → triggers, ui_* selections → client notifications, redacted traces out"]
+  IPC["SERVE — src/cli/serve.ts: line-framed JSON-RPC over stdio; ingress → triggers, ui_* selections → client notifications, redacted traces out"]
 
   HOST --> COMPOSE
   COMPOSE --> EMBED
