@@ -40,7 +40,7 @@ call-tool, `name` for get-prompt, `uri` for read-resource) and an optional
 ## Auth
 
 Per-call input credentials are **retired** — the wire carries the server
-URL only. Auth binds at the worker's module scope: broker env-data
+URL only. Auth binds at the behavior's module scope: broker env-data
 (`MCP_BROKER_URL` + `MCP_BROKER_BOOT_SECRET`, seeded by the spawning host)
 with the OS-keychain floor beneath it. Neither yields a token → the call
 goes unauthenticated → the server's 401 → typed `authorization_required`.
