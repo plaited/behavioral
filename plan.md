@@ -155,6 +155,22 @@ ingress + a plugin-shipped behavior surface.
      the conventions skill, docs sweep. Remaining: the deletion sweep (fleet 6 → 0)
      and the governor thread (plugin admission). -->
 
+### 2026-09-22 — ruled: validation lives in threads; rejects are trace-visible
+
+- **One validation home — threads, not the host or controller** (pilot): the
+  JSON-RPC codec stays transport-only; the controller stays a dumb relay. Guard
+  threads `block` invalid messages at the schema level — ingress events and
+  `ui_*` egress requests — via `{ detailSchema, detailMatch: false }` (which
+  matches non-conforming details). The engine's `trigger` remains the structural
+  BPEvent floor (`trigger_error`).
+- **Rejection is observable** (pilot's correction): the block happens in the
+  behavioral runtime, so it is captured in the trace stream — the `frontier`
+  trace (candidate present, `enabled` empty → `deadlock`) and `pending_bids`
+  (the block declarations) — and reaches the client via the redacted `trace`
+  notification. No separate rejection event or host policy is needed.
+- **The schemas are the shared home**: the same `detailSchema` JSON powers the
+  guard threads and the CLI `--schema` reflection (no cross-module drift).
+
 ### 2026-09-22 — landed: cli.ts drops the retired fleet schema machinery
 
 - The `--tool`/`toolSchemas` "fleet command" schema resolution in
