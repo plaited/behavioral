@@ -142,7 +142,7 @@ describe('bProgram — the runtime composition', () => {
     }
   })
 
-  test('the faculties allow-list prunes faculties: without shell, the shell pack does not mount', async () => {
+  test('the faculties allow-list prunes faculties: without shell, no route — a triggered shell_request is never answered', async () => {
     const { runtime, traces } = startRuntime({ faculties: ['store'] })
     try {
       // No shell → no scan boot, no shell_request ever. Settle past any
@@ -151,6 +151,21 @@ describe('bProgram — the runtime composition', () => {
       expect(selectionsOf(traces).some((t) => t.selected.type === FACULTY_MESSAGE_KINDS.shell_request)).toBe(false)
       expect(storeRequest(selectionsOf(traces), 'put', 'skills')).toBeUndefined()
       expect(storeRequest(selectionsOf(traces), 'put', 'skill-recipes')).toBeUndefined()
+      // The pruning BOUNDS the arbitrary-execution faculty: a host-injected
+      // shell_request (a client can send one) has no route, so it never
+      // spawns a process and is never answered.
+      runtime.trigger({
+        type: FACULTY_MESSAGE_KINDS.shell_request,
+        detail: { id: 'pruned-shell', label: 'probe', input: { op: 'echo' } },
+      })
+      await Bun.sleep(300)
+      expect(
+        selectionsOf(traces).some(
+          (t) =>
+            t.selected.type === FACULTY_MESSAGE_KINDS.shell_request_result &&
+            (t.selected.detail as { id?: string } | undefined)?.id === 'pruned-shell',
+        ),
+      ).toBe(false)
     } finally {
       runtime.terminate()
     }

@@ -140,8 +140,8 @@ export const bProgram = ({
   // The shell faculty: a host override (pre-curried useFaculty return) is
   // invoked with OUR addThreads — the host never touches the program port;
   // a default construction runs otherwise. The pack requires shell + store —
-  // the selector gates the mount; a pruned shell still routes but mounts no
-  // pack.
+  // the selector gates the mount; a pruned shell has no route and mounts no
+  // pack, like every other allow-listed faculty.
   const shell =
     shellOverride === undefined
       ? useFaculty({
@@ -196,10 +196,12 @@ export const bProgram = ({
     for (const type of types) lanes[type] = faculty
   }
 
-  route([FACULTY_MESSAGE_KINDS.shell_request, FACULTY_MESSAGE_KINDS.shell_cancel], {
-    send: (event: BPEvent): void => shell.send(event),
-    gate: (event: BPEvent): boolean => shell.invalidEventGate(event),
-  })
+  if (has('shell')) {
+    route([FACULTY_MESSAGE_KINDS.shell_request, FACULTY_MESSAGE_KINDS.shell_cancel], {
+      send: (event: BPEvent): void => shell.send(event),
+      gate: (event: BPEvent): boolean => shell.invalidEventGate(event),
+    })
+  }
   if (systemOne !== undefined) {
     // The faculty's request/cancel/result guard derives from the same schemas
     // useFaculty compiled — a malformed system_one event is blocked (visible
