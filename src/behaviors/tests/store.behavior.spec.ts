@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { JsonObject } from '../../behavioral/behavioral.types.ts'
@@ -276,6 +277,26 @@ describe('store worker — persistence', () => {
     } finally {
       second.terminate()
       await Bun.$`rm -f ${dbFile}*`.nothrow().quiet()
+    }
+  })
+
+  test('defaults the db path to $BEHAVIORAL_HOME/db.sqlite when no key is seeded', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'behavioral-home-'))
+    // No STORE_DB_PATH_KEY: BEHAVIORAL_HOME alone must drive the db path.
+    const family = spawnFamily({
+      file: 'store.behavior.ts',
+      requestType: BEHAVIOR_MESSAGE_KINDS.store_request,
+      resultType: BEHAVIOR_MESSAGE_KINDS.store_request_result,
+      env: { BEHAVIORAL_HOME: home },
+    })
+    try {
+      family.call({ id: 'h1', op: 'put', input: { collection: 'runs', key: 'r', value: { turn: 1 } } })
+      const { detail } = await family.resultFor('h1')
+      expect(detail.ok).toBe(true)
+      expect(await Bun.file(join(home, 'db.sqlite')).exists()).toBe(true)
+    } finally {
+      family.terminate()
+      rmSync(home, { recursive: true, force: true })
     }
   })
 })

@@ -22,11 +22,11 @@
  */
 
 import { appendFileSync, mkdirSync } from 'node:fs'
-import { homedir } from 'node:os'
 import * as path from 'node:path'
 import { TRACE_MESSAGE_KINDS } from '../behavioral/behavioral.constants.ts'
 import type { Trace, TraceListener } from '../behavioral/behavioral.types.ts'
 import { ROOT_SPACE } from '../behaviors/store.types.ts'
+import { behavioralHome } from '../utils.ts'
 import { CREDENTIAL_RULES, type CredentialRule } from './credential-patterns.ts'
 
 /** Marker substituted for every redacted value. */
@@ -152,7 +152,7 @@ const sanitizeSpace = (space: string): string => space.replace(/[^A-Za-z0-9._-]/
 export const traceLogSink =
   ({ root }: { root?: string } = {}): TraceSink =>
   (trace) => {
-    const base = root ?? path.join(homedir(), '.behavioral', 'traces')
+    const base = root ?? path.join(behavioralHome(), 'traces')
     const dir = path.join(base, sanitizeSpace(traceSpace(trace)))
     mkdirSync(dir, { recursive: true })
     const date = new Date().toISOString().slice(0, 10)

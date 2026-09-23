@@ -15,6 +15,7 @@
  * @since 1.0.0
  */
 
+export * from './utils/behavioral-home.ts'
 export * from './utils/case.ts'
 export * from './utils/deep-equal.ts'
 export * from './utils/escape.ts'

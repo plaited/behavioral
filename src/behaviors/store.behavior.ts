@@ -35,11 +35,10 @@
 
 import { Database } from 'bun:sqlite'
 import { mkdirSync } from 'node:fs'
-import { homedir } from 'node:os'
 import * as path from 'node:path'
 import type { JSONSchemaType } from 'ajv'
 import { ajv, type JsonObject } from '../behavioral/behavioral.types.ts'
-import { deepEqual } from '../utils.ts'
+import { behavioralHome, deepEqual } from '../utils.ts'
 import { BEHAVIOR_MESSAGE_KINDS } from './behaviors.constants.ts'
 import { type StoreRequestEvent, validateStoreRequestEvent } from './behaviors.types.ts'
 import { emit, envData, wireInbound } from './process-lane.ts'
@@ -56,7 +55,7 @@ import {
 // Backing — one owned connection, migrations on boot
 // ---------------------------------------------------------------------------
 
-const DEFAULT_DB_PATH = path.join(homedir(), '.behavioral', 'db.sqlite')
+const DEFAULT_DB_PATH = path.join(behavioralHome(), 'db.sqlite')
 const SCHEMA_VERSION = '1'
 
 const dbPath = (envData(STORE_DB_PATH_KEY) as string | undefined) ?? DEFAULT_DB_PATH

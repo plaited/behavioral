@@ -128,4 +128,19 @@ describe('traceLogSink', () => {
       rmSync(root, { recursive: true, force: true })
     }
   })
+
+  test('defaults its root to $BEHAVIORAL_HOME/traces', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'behavioral-home-'))
+    const previous = process.env.BEHAVIORAL_HOME
+    process.env.BEHAVIORAL_HOME = home
+    try {
+      traceLogSink()(selection({ op: 'echo' }, 'space-a'))
+      const date = new Date().toISOString().slice(0, 10)
+      expect(await Bun.file(join(home, 'traces', 'space-a', `${date}.jsonl`)).exists()).toBe(true)
+    } finally {
+      if (previous === undefined) delete process.env.BEHAVIORAL_HOME
+      else process.env.BEHAVIORAL_HOME = previous
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
 })
