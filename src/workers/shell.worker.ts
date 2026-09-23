@@ -45,6 +45,7 @@ import * as path from 'node:path'
 import type { ValidateFunction } from 'ajv'
 import type { JsonObject } from '../behavioral/behavioral.types.ts'
 import { ajv } from '../behavioral/behavioral.types.ts'
+import { emit, wireInbound } from './process-lane.ts'
 import {
   type ShellCallInput,
   ShellCallInputSchema,
@@ -518,7 +519,7 @@ const postResult = ({
   error?: ShellError
   space?: string
 }): void => {
-  self.postMessage({
+  emit({
     type: WORKER_MESSAGE_KINDS.shell_request_result,
     detail: (error === undefined
       ? { id, ok: true, result: (payload ?? {}) as unknown as JsonObject }
@@ -594,6 +595,9 @@ const handleInbound = async (message: unknown): Promise<void> => {
 
 // The wire is the behavioral event vocabulary, validated with the shared
 // schemas — the trust boundary for anything crossing into this process.
-self.onmessage = (event: MessageEvent): void => {
-  void handleInbound(event.data)
+if (import.meta.main) {
+  // Standalone (spawned process) — wire the stdio line lane. An in-process
+  // import (the composition's frontier embed) wires nothing: the host's
+  // stdin is never touched.
+  wireInbound((message) => handleInbound(message))
 }

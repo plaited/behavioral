@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import type { Thread } from '../../behavioral/behavioral.types.ts'
+import { handleFrontierMessage } from '../frontier.worker.ts'
+import { bindEmit } from '../process-lane.ts'
 import { WORKER_MESSAGE_KINDS } from '../workers.constants.ts'
 
 /**
@@ -24,18 +26,17 @@ type WireResult = {
   space?: string
 }
 
-/** Spawn the frontier worker and expose an event-wire harness over it. */
+/** The frontier IN-PROCESS harness — the embed the composition uses: the exported dispatch with the lane emit bound to a local collector. */
 const spawnFrontierWorker = () => {
-  const worker = new Worker(new URL('../frontier.worker.ts', import.meta.url))
   const results: WireResult[] = []
-  worker.onmessage = ({ data }: MessageEvent): void => {
-    const message = data as { type?: string; detail?: { id: string; result: unknown }; space?: string }
-    if (message?.type === WORKER_MESSAGE_KINDS.frontier_request_result && message.detail !== undefined) {
-      results.push({ ...message.detail, id: message.detail.id, space: message.space } as WireResult)
+  bindEmit((event) => {
+    if (event.type === WORKER_MESSAGE_KINDS.frontier_request_result) {
+      const detail = event.detail as { id: string; ok: boolean; result?: unknown; error?: Record<string, unknown> }
+      results.push({ ...detail, id: detail.id, space: event.space } as WireResult)
     }
-  }
+  })
   const call = (id: string, op: string, input: unknown, space?: string): void => {
-    worker.postMessage({
+    handleFrontierMessage({
       type: WORKER_MESSAGE_KINDS.frontier_request,
       detail: { id, op, input },
       ...(space === undefined ? {} : { space }),
@@ -50,7 +51,7 @@ const spawnFrontierWorker = () => {
       await Bun.sleep(10)
     }
   }
-  return { call, resultFor, terminate: () => worker.terminate() }
+  return { call, resultFor, terminate: (): void => bindEmit(null) }
 }
 
 // Structural mirrors of the worker's result payloads (the worker module is

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { TRACE_MESSAGE_KINDS } from '../../behavioral/behavioral.constants.ts'
 import type { SelectionTrace, Trace, Trigger } from '../../behavioral/behavioral.types.ts'
 import { useBehavioral } from '../use-behavioral.ts'
-import { useWorker } from '../use-worker.ts'
+import { useProcess } from '../use-process.ts'
 import { WORKER_MESSAGE_KINDS } from '../workers.constants.ts'
 import {
   validateShellCancelEvent,
@@ -18,7 +18,7 @@ import { startMcpServer } from './mcp-server-fixture.ts'
  * allow-list). The host wires ingress (useTrigger) and observation
  * (traceListener) only; configuration flows through env-data (store:
  * :memory: by default, STORE_DB_PATH_KEY for durable). `shell` is the one
- * instance-level override: the pre-curried useWorker return substituting
+ * instance-level override: the pre-curried useProcess return substituting
  * the default shell family.
  *
  * The default thread packs are family-shipped: the shell pack
@@ -50,7 +50,7 @@ const storeRequest = (traces: Trace[], op: string, collection: string): Selectio
 describe('useBehavioral — the runtime composition', () => {
   test('the shell pack ships with the shell family: the skill scan self-starts through the composition', async () => {
     const traces: Trace[] = []
-    const engineWorker = useBehavioral({
+    const runtime = useBehavioral({
       traceListener: (trace) => {
         traces.push(trace)
       },
@@ -76,14 +76,14 @@ describe('useBehavioral — the runtime composition', () => {
       expect(input?.collection).toBe('skills')
       expect(input?.key).toBe('catalog')
     } finally {
-      engineWorker.terminate()
+      runtime.terminate()
     }
   })
 
   test('a full round-trip via the default packs: links_request → run op → result re-entry', async () => {
     const traces: Trace[] = []
     let trigger: Trigger | undefined
-    const engineWorker = useBehavioral({
+    const runtime = useBehavioral({
       traceListener: (trace) => {
         traces.push(trace)
       },
@@ -116,14 +116,14 @@ describe('useBehavioral — the runtime composition', () => {
       expect(detail?.ok).toBe(true)
       expect(detail?.result?.jsonData).toEqual({ links: [{ value: 'a.ts', text: 'a' }] })
     } finally {
-      engineWorker.terminate()
+      runtime.terminate()
     }
   })
 
   test('the mcp spine ships with the mcp family: granted ingress fires the store get', async () => {
     const traces: Trace[] = []
     let trigger: Trigger | undefined
-    const engineWorker = useBehavioral({
+    const runtime = useBehavioral({
       traceListener: (trace) => {
         traces.push(trace)
       },
@@ -142,13 +142,13 @@ describe('useBehavioral — the runtime composition', () => {
         'mcp-calls',
       )
     } finally {
-      engineWorker.terminate()
+      runtime.terminate()
     }
   })
 
   test('the workers allow-list prunes families: without shell, the shell pack does not mount', async () => {
     const traces: Trace[] = []
-    const engineWorker = useBehavioral({
+    const runtime = useBehavioral({
       workers: ['responses'],
       traceListener: (trace) => {
         traces.push(trace)
@@ -163,7 +163,7 @@ describe('useBehavioral — the runtime composition', () => {
       expect(storeRequest(selectionsOf(traces), 'put', 'skills')).toBeUndefined()
       expect(storeRequest(selectionsOf(traces), 'put', 'skill-recipes')).toBeUndefined()
     } finally {
-      engineWorker.terminate()
+      runtime.terminate()
     }
   })
 
@@ -172,7 +172,7 @@ describe('useBehavioral — the runtime composition', () => {
     const server = await startMcpServer()
     const loopback = Bun.serve({ port: 0, fetch: (req) => server.fetch(req.url, req) })
     let trigger: Trigger | undefined
-    const engineWorker = useBehavioral({
+    const runtime = useBehavioral({
       traceListener: (trace) => {
         traces.push(trace)
       },
@@ -196,7 +196,7 @@ describe('useBehavioral — the runtime composition', () => {
       expect(types.has(WORKER_MESSAGE_KINDS.mcp_request)).toBe(false) // no capture → no replay
       expect(true).toBe(true)
     } finally {
-      engineWorker.terminate()
+      runtime.terminate()
       loopback.stop(true)
       await server.close()
     }
@@ -205,15 +205,15 @@ describe('useBehavioral — the runtime composition', () => {
   test('shell overrides the default family — a host-constructed shell takes the route', async () => {
     const traces: Trace[] = []
     let trigger: Trigger | undefined
-    const hostShell = useWorker({
-      worker: new Worker(new URL('./fixtures/satellite.worker.ts', import.meta.url)),
+    const hostShell = useProcess({
+      command: ['bun', 'run', 'tests/fixtures/probe.proc.ts'],
       name: 'shell',
       threads: [],
       validateRequestEvent: validateShellRequestEvent,
       validateEventCancel: validateShellCancelEvent,
       validateResultEvent: validateShellRequestResultEvent,
     })
-    const engineWorker = useBehavioral({
+    const runtime = useBehavioral({
       traceListener: (trace) => {
         traces.push(trace)
       },
@@ -230,7 +230,7 @@ describe('useBehavioral — the runtime composition', () => {
       // shell route. (The pack rides the host's threads — [] here by choice.)
       trigger!({
         type: WORKER_MESSAGE_KINDS.shell_request,
-        detail: { id: 'ov1', label: 'probe', input: { op: 'shell', command: 'echo x' } },
+        detail: { id: 'ov1', label: 'probe', input: { op: 'echo' } },
       })
       await waitForTraces(traces, (s) =>
         s.some(
@@ -240,22 +240,22 @@ describe('useBehavioral — the runtime composition', () => {
         ),
       )
     } finally {
-      engineWorker.terminate()
+      runtime.terminate()
     }
   })
 
   test('a crashed satellite re-enters one worker_error event', async () => {
     const traces: Trace[] = []
     let trigger: Trigger | undefined
-    const hostShell = useWorker({
-      worker: new Worker(new URL('./fixtures/crash.worker.ts', import.meta.url)),
+    const hostShell = useProcess({
+      command: ['bun', 'run', 'tests/fixtures/probe.proc.ts'],
       name: 'shell',
       threads: [],
       validateRequestEvent: validateShellRequestEvent,
       validateEventCancel: validateShellCancelEvent,
       validateResultEvent: validateShellRequestResultEvent,
     })
-    const engineWorker = useBehavioral({
+    const runtime = useBehavioral({
       traceListener: (trace) => {
         traces.push(trace)
       },
@@ -269,13 +269,13 @@ describe('useBehavioral — the runtime composition', () => {
       // The crash fixture throws on its FIRST message — drive one into it.
       trigger!({
         type: WORKER_MESSAGE_KINDS.shell_request,
-        detail: { id: 'c1', label: 'probe', input: { op: 'shell', command: 'boom' } },
+        detail: { id: 'c1', label: 'probe', input: { op: 'die' } },
       })
       await waitForTraces(traces, (s) => s.some((t) => t.selected.type === WORKER_MESSAGE_KINDS.worker_error))
       const crash = selectionsOf(traces).find((t) => t.selected.type === WORKER_MESSAGE_KINDS.worker_error)
       expect((crash?.selected.detail as { worker?: string } | undefined)?.worker).toBe('shell')
     } finally {
-      engineWorker.terminate()
+      runtime.terminate()
     }
   })
 })

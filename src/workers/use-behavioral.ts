@@ -1,12 +1,14 @@
 import { TRACE_MESSAGE_KINDS } from '../behavioral/behavioral.constants.ts'
+import { behavioral } from '../behavioral/behavioral.ts'
 import type { BPEvent, Thread, Trace, TraceListener, Trigger } from '../behavioral/behavioral.types.ts'
+import { handleFrontierMessage } from './frontier.worker.ts'
 import { mcpThreads } from './mcp.threads.ts'
+import { bindEmit } from './process-lane.ts'
 import { shellThreads } from './shell.threads.ts'
-import { useWorker } from './use-worker.ts'
+import { useProcess } from './use-process.ts'
 import { WORKER_MESSAGE_KINDS } from './workers.constants.ts'
 import {
   validateFrontierRequestEvent,
-  validateFrontierRequestResultEvent,
   validateMcpCancelEvent,
   validateMcpRequestEvent,
   validateMcpRequestResultEvent,
@@ -21,42 +23,59 @@ import {
 } from './workers.types.ts'
 
 /*
- * The runtime composition hook: spawns EVERY family itself and pumps events
- * between the engine worker and the satellites. The host wires only ingress
- * (useTrigger) and observation (traceListener); configuration flows through
- * env-data (MODEL_ENDPOINTS; STORE_DB_PATH_KEY — :memory: by default,
- * durable by env var; MCP_BROKER_*).
+ * The runtime composition — IN-PROCESS. The engine is behavioral() in the
+ * host's main thread: addThread/trigger/step called directly, traces through
+ * useTrace with zero postMessage hops (the engine-never-awaits invariant is
+ * what makes this safe on the main thread). Frontier is the in-process embed:
+ * its analysis dispatch is imported and driven directly, its emit lane bound
+ * to the composition's reenter. The four capability families (shell, store,
+ * responses, mcp) are Bun.spawn PROCESSES speaking the unchanged wire over
+ * stdio lines — per-space isolatable, abort-able, head-of-line-free — wired
+ * by the useProcess primitive.
  *
- * Families:
- * - engine — router-owned, always on (the agent itself)
- * - frontier — router-owned, always on (the verification mirror; zero
- *   deployment knobs)
- * - shell / responses / store / mcp — default-on, pruned by the `workers`
- *   allow-list: UNSET = all on; SET = only the named families spawn. A
- *   pruned family has no route and no thread pack — requesting threads
- *   simply wait (the documented no-route behavior).
+ * The in-process re-entry law: addThread alone is inert — every re-entry
+ * (satellite results, crash synthesis, pack mounts) pumps one super-step.
+ * This was the engine transport's trailing step; it is the composition's
+ * now.
  *
- * Thread packs are family-shipped and mount only when every family they
- * drive is on (the shell pack needs shell + store; the mcp spine needs
- * mcp + store). `workers: []` = the maximally-pruned agent: engine +
- * frontier, a pure reasoning + self-verification loop.
- *
- * `shell` is the one instance-level override: the pre-curried useWorker
- * return (a function awaiting addThreads/space) for a host-constructed
- * shell family — the sandboxed-shell seam. The host owns that Worker's
- * lifecycle; the default construction is identical.
- *
- * One communication protocol: BPEvent-shaped messages everywhere. The
- * router never repacks, never remembers, never shapes — selection traces
- * carry the selected candidate; its event portion, when it passes the
- * owning family's own gate (type-const discrimination means an event can
- * only satisfy its family's schema), is forwarded VERBATIM to the family
- * port; satellite result events re-enter as once-threads; a crash
- * re-enters one worker_error event (errors-as-data).
+ * `workers` is the allow-list (unset = all four families on); `shell` and
+ * `store` are the two instance overrides — pre-curried useProcess returns
+ * for host-constructed families (sandboxed shell, durable store); the host
+ * owns those processes' lifecycles.
  */
 
 /** The selectable worker families (engine and frontier are never selectable — always on). */
 export type WorkerFamily = 'shell' | 'responses' | 'store' | 'mcp'
+
+/** The in-process frontier embed family: the dispatch driven directly, emit bound to reenter. */
+const frontierFamily = (
+  addThreads: (threads: Thread[]) => void,
+): {
+  send: (event: BPEvent) => void
+  gate: (event: BPEvent) => boolean
+} => {
+  const wire = (event: {
+    type: string
+    detail: import('../behavioral/behavioral.types.ts').JsonObject & { id: string }
+    space?: string
+  }): void => {
+    addThreads([
+      {
+        ...(event.space === undefined ? {} : { space: event.space }),
+        label: `on_${event.type}_${event.detail.id}`,
+        once: true,
+        rules: [{ request: { type: event.type, detail: event.detail } }],
+      },
+    ])
+  }
+  bindEmit((emitted) => wire(emitted as never))
+  return {
+    send: (event: BPEvent): void => {
+      if (validateFrontierRequestEvent(event)) handleFrontierMessage(event)
+    },
+    gate: (event: BPEvent): boolean => !validateFrontierRequestEvent(event),
+  }
+}
 
 export const useBehavioral = ({
   traceListener,
@@ -69,154 +88,164 @@ export const useBehavioral = ({
   useTrigger: (trigger: Trigger) => void
   /** Allow-list: unset = all default families on; set = only the named families spawn. */
   workers?: WorkerFamily[]
-  /**
-   * The shell family override: the pre-curried useWorker return (awaiting
-   * addThreads/space) for a host-constructed shell family — e.g. a sandboxed
-   * spawn. The host owns that Worker's lifecycle.
-   */
-  shell?: ReturnType<typeof useWorker>
-  /**
-   * The store family override: the pre-curried useWorker return for a
-   * host-constructed store family — e.g. a durable db path where the default
-   * is :memory:. The host owns that Worker's lifecycle.
-   */
-  store?: ReturnType<typeof useWorker>
-}): Worker => {
+  /** The shell family override: a pre-curried useProcess return (sandboxed shell). */
+  shell?: ReturnType<typeof useProcess>
+  /** The store family override: a pre-curried useProcess return (durable store). */
+  store?: ReturnType<typeof useProcess>
+}) => {
   const enabled = new Set<WorkerFamily>(workers === undefined ? ['shell', 'responses', 'store', 'mcp'] : workers)
   const has = (family: WorkerFamily): boolean => enabled.has(family)
 
-  const behavioralWorker = new Worker(new URL('./behavioral.worker.ts', import.meta.url))
+  // ── The engine, in-process ────────────────────────────────────────────────
 
-  // Engine port — the {kind} envelope is behavioral.worker.ts's protocol.
-  const addThreads = (newThreads: Thread[]) =>
-    behavioralWorker.postMessage({ kind: WORKER_MESSAGE_KINDS.add_threads, threads: newThreads })
+  const program = behavioral()
 
-  // ── Family wiring: every default family through the primitive ──────────
+  /** The in-process re-entry law: addThread + the trailing step. */
+  const addThreads = (threads: Thread[]): void => {
+    for (const thread of threads) program.addThread(thread)
+    program.step()
+  }
 
-  // Frontier — router-owned, always on. No cancel (analyses are synchronous);
-  // no thread pack (pure analysis; consumers request it).
-  const frontier = useWorker({
-    worker: new Worker(new URL('./frontier.worker.ts', import.meta.url)),
-    name: 'frontier',
-    threads: [],
-    validateRequestEvent: validateFrontierRequestEvent,
-    validateEventCancel: validateFrontierRequestEvent, // no cancel event exists; the request schema is the gate
-    validateResultEvent: validateFrontierRequestResultEvent,
-  })(addThreads)
+  // Boot-order law: pack mounts (and any family construction's thread
+  // additions) are DEFERRED until the pump is subscribed and the routes are
+  // registered — the Worker world got this for free (the engine subscribed at
+  // spawn, before any add_threads); in-process, the first step's selections
+  // would land on a pump that doesn't route yet. RE-ENTRIES (satellite
+  // results, crash synthesis) go live immediately after the flush.
+  const pendingThreads: Thread[] = []
+  let mounting = true
+  const familyAddThreads = (threads: Thread[]): void => {
+    if (mounting) pendingThreads.push(...threads)
+    else addThreads(threads)
+  }
 
-  // The shell family: a host override (pre-curried useWorker return) is
-  // invoked with OUR addThreads — the host never touches the engine port; a
-  // default construction runs otherwise. The pack requires shell + store —
+  // ── Family wiring: frontier in-process; four families as processes ───────
+
+  const frontier = frontierFamily(familyAddThreads)
+
+  // The shell family: a host override (pre-curried useProcess return) is
+  // invoked with OUR addThreads — the host never touches the program port;
+  // a default construction runs otherwise. The pack requires shell + store —
   // the selector gates the mount; a pruned shell still routes but mounts no
   // pack.
   const shell =
     shellOverride === undefined
-      ? useWorker({
-          worker: new Worker(new URL('./shell.worker.ts', import.meta.url)),
+      ? useProcess({
+          command: ['bun', 'run', 'shell.worker.ts'],
           name: 'shell',
           threads: has('shell') && has('store') ? shellThreads : [],
           validateRequestEvent: validateShellRequestEvent,
           validateEventCancel: validateShellCancelEvent,
           validateResultEvent: validateShellRequestResultEvent,
-        })(addThreads)
-      : shellOverride(addThreads)
+        })(familyAddThreads)
+      : shellOverride(familyAddThreads)
 
-  const responses = useWorker({
-    worker: new Worker(new URL('./responses-client.worker.ts', import.meta.url)),
+  const responses = useProcess({
+    command: ['bun', 'run', 'responses-client.worker.ts'],
     name: 'responses',
     threads: [],
     validateRequestEvent: validateResponseRequestEvent,
     validateEventCancel: validateResponseCancelEvent,
     validateResultEvent: validateResponseRequestResultEvent,
-  })(addThreads)
+  })(familyAddThreads)
 
   // The store family: a host override is invoked with OUR addThreads (the
   // durable-db seam — the default is :memory: via env-data); the default
   // construction runs otherwise.
   const store =
     storeOverride === undefined
-      ? useWorker({
-          worker: new Worker(new URL('./store.worker.ts', import.meta.url)),
+      ? useProcess({
+          command: ['bun', 'run', 'store.worker.ts'],
           name: 'store',
           threads: [],
           validateRequestEvent: validateStoreRequestEvent,
           validateEventCancel: validateStoreRequestEvent, // no cancel; the request schema is the gate
           validateResultEvent: validateStoreRequestResultEvent,
-        })(addThreads)
-      : storeOverride(addThreads)
+        })(familyAddThreads)
+      : storeOverride(familyAddThreads)
 
-  const mcp = useWorker({
-    worker: new Worker(new URL('./mcp-client.worker.ts', import.meta.url)),
+  const mcp = useProcess({
+    command: ['bun', 'run', 'mcp-client.worker.ts'],
     name: 'mcp',
     // The spine requires mcp + store.
     threads: has('mcp') && has('store') ? mcpThreads : [],
     validateRequestEvent: validateMcpRequestEvent,
     validateEventCancel: validateMcpCancelEvent,
     validateResultEvent: validateMcpRequestResultEvent,
-  })(addThreads)
+  })(familyAddThreads)
 
-  // ── Routing: event type → family port (the only family knowledge) ──────
+  // ── Routing: event type → family lane (the only family knowledge) ────────
 
-  // Each family product carries its port and its own gate; routing is one
-  // lookup on the event type, and the owning family's gate decides
-  // validity (type-const discrimination: an event can only satisfy its own
-  // family's schema — the per-family boundary replaces any union chain).
-  type FamilyPort = { port: Worker; gate: (event: unknown) => boolean }
-
+  type FamilyPort = { send: (event: BPEvent) => void; gate: (event: BPEvent) => boolean }
   const families: Record<string, FamilyPort> = {}
-  const route = (types: string[], family: { port: Worker; gate: (event: unknown) => boolean }): void => {
+  const route = (types: string[], family: FamilyPort): void => {
     for (const type of types) families[type] = family
   }
 
   route([WORKER_MESSAGE_KINDS.shell_request, WORKER_MESSAGE_KINDS.shell_cancel], {
-    port: shell.port,
-    gate: shell.invalidEventGate as (event: unknown) => boolean,
+    send: (event: BPEvent): void => shell.send(event),
+    gate: (event: BPEvent): boolean => shell.invalidEventGate(event),
   })
   if (has('responses')) {
     route([WORKER_MESSAGE_KINDS.response_request, WORKER_MESSAGE_KINDS.response_cancel], {
-      port: responses.port,
-      gate: responses.invalidEventGate as (event: unknown) => boolean,
+      send: (event: BPEvent): void => responses.send(event),
+      gate: (event: BPEvent): boolean => responses.invalidEventGate(event),
     })
   }
-  route([WORKER_MESSAGE_KINDS.frontier_request], {
-    port: frontier.port,
-    gate: frontier.invalidEventGate as (event: unknown) => boolean,
-  })
+  route([WORKER_MESSAGE_KINDS.frontier_request], { send: frontier.send, gate: frontier.gate })
   if (has('store')) {
     route([WORKER_MESSAGE_KINDS.store_request], {
-      port: store.port,
-      gate: store.invalidEventGate as (event: unknown) => boolean,
+      send: (event: BPEvent): void => store.send(event),
+      gate: (event: BPEvent): boolean => store.invalidEventGate(event),
     })
   }
   if (has('mcp')) {
     route([WORKER_MESSAGE_KINDS.mcp_request, WORKER_MESSAGE_KINDS.mcp_cancel], {
-      port: mcp.port,
-      gate: mcp.invalidEventGate as (event: unknown) => boolean,
+      send: (event: BPEvent): void => mcp.send(event),
+      gate: (event: BPEvent): boolean => mcp.invalidEventGate(event),
     })
   }
 
-  // ── Engine pump: traces out, schema-valid events to their family ports ──
+  // ── The engine pump: traces out, gated events to their family lanes ─────
 
-  behavioralWorker.onmessage = async ({ data }: MessageEvent<Trace>): Promise<void> => {
-    await traceListener(data)
-    if (data.kind !== TRACE_MESSAGE_KINDS.selection) return
-    const candidate = data.selected
-    const event = { type: candidate.type, detail: candidate.detail, space: candidate.space }
+  program.useTrace((trace: Trace) => {
+    void traceListener(trace)
+    if (trace.kind !== TRACE_MESSAGE_KINDS.selection) return
+    const candidate = (trace as import('../behavioral/behavioral.types.ts').SelectionTrace).selected
+    const event = { type: candidate.type, detail: candidate.detail, space: candidate.space } as BPEvent
     const family = families[event.type]
     if (family === undefined) return
-    // The trust boundary for events crossing into worker processes: only
+    // The trust boundary for events crossing into family processes: only
     // events passing the owning family's own gate route.
     if (family.gate(event)) return
-    family.port.postMessage(event)
-  }
+    family.send(event)
+  })
 
-  // Host ingress: useTrigger posts one external event through the engine.
+  // The deferred mounts flush now — pump subscribed, routes registered: the
+  // boot cascade (scan boots → shell_requests → family processes) runs in a
+  // world that can route it. Re-entries go live from here on.
+  mounting = false
+  addThreads(pendingThreads)
+
+  // Host ingress: useTrigger admits one external event through the program.
   useTrigger(((event: BPEvent) => {
-    behavioralWorker.postMessage({ kind: WORKER_MESSAGE_KINDS.trigger, event })
+    program.trigger(event)
   }) as Trigger)
 
-  // The engine worker is router-owned: hosts terminate it on shutdown. The
-  // satellite workers (including a host-constructed shell) terminate with it
-  // when process lifetime ends — cold-per-turn is the default posture.
-  return behavioralWorker
+  // ── The runtime handle ────────────────────────────────────────────────────
+
+  // Hosts terminate what the composition spawned. Host-provided overrides
+  // (shell/store processes) are NOT terminated here — the host owns those
+  // (the override ruling's lifecycle half). The engine and frontier are
+  // in-process: nothing to terminate, they end with the host process.
+  return {
+    program,
+    terminate: (): void => {
+      bindEmit(null)
+      if (shellOverride === undefined) shell.terminate()
+      responses.terminate()
+      if (storeOverride === undefined) store.terminate()
+      mcp.terminate()
+    },
+  }
 }

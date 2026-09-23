@@ -28,8 +28,8 @@
  * @packageDocumentation
  */
 
-import { getEnvironmentData } from 'node:worker_threads'
 import type { JsonObject } from '../behavioral/behavioral.types.ts'
+import { emit, envData, wireInbound } from './process-lane.ts'
 import {
   ErrorSchema,
   type KnownStreamEvent,
@@ -62,7 +62,7 @@ import {
 // Endpoint config (environment data — seeded by the host before spawn)
 // ---------------------------------------------------------------------------
 
-const endpoints = (getEnvironmentData(MODEL_ENDPOINTS_KEY) ?? {}) as ModelEndpoints
+const endpoints = (envData(MODEL_ENDPOINTS_KEY) ?? {}) as ModelEndpoints
 
 // ---------------------------------------------------------------------------
 // Wire helpers
@@ -274,7 +274,7 @@ type ActiveRequest = {
 const active = new Map<string, ActiveRequest>()
 
 const postResult = (id: string, result: unknown, space?: string): void => {
-  self.postMessage({
+  emit({
     type: WORKER_MESSAGE_KINDS.response_request_result,
     // The uniform envelope: { isError: true, … } → error branch; the model
     // respond output → ok branch.
@@ -374,6 +374,9 @@ const handleInbound = async (message: unknown): Promise<void> => {
 
 // The wire is the behavioral event vocabulary, validated with the shared
 // schemas — the trust boundary for anything crossing into this process.
-self.onmessage = (event: MessageEvent): void => {
-  void handleInbound(event.data)
+if (import.meta.main) {
+  // Standalone (spawned process) — wire the stdio line lane. An in-process
+  // import (the composition's frontier embed) wires nothing: the host's
+  // stdin is never touched.
+  wireInbound((message) => handleInbound(message))
 }

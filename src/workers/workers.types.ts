@@ -84,12 +84,6 @@ export type WorkerResultError = {
 /** The `detail` of every `*_result` event — one shape across all five families. */
 export type WorkerResultDetail = WorkerResultOk | WorkerResultError
 
-/**
- * The generic wire message the wiring primitive's validators gate — request,
- * cancel, and result events share it (detail carries the correlation id).
- */
-export type WorkerMessage = { type: string; detail: JsonObject & { id: string }; space?: string }
-
 export type WorkerErrorEvent = {
   type: typeof WORKER_MESSAGE_KINDS.worker_error
   detail: { worker: string; message: string }

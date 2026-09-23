@@ -1,8 +1,10 @@
 import { describe, expect, test } from 'bun:test'
 import { readdirSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import type { JsonObject } from '../../behavioral/behavioral.types.ts'
 import type { ShellError, ShellSuccess } from '../shell.types.ts'
 import { WORKER_MESSAGE_KINDS } from '../workers.constants.ts'
+import { type FamilyResult, spawnFamily } from './family-harness.ts'
 
 /**
  * Shell worker integration tests — exercised through the real worker
@@ -29,35 +31,36 @@ type WireResult =
   | { id: string; ok: false; error: ShellError; space?: string }
 
 /** Spawn the shell worker and expose an event-wire harness over it. */
+/** Spawn the shell family PROCESS and expose the same wire harness API. */
 const spawnShellWorker = () => {
-  const worker = new Worker(new URL('../shell.worker.ts', import.meta.url))
+  const family = spawnFamily({
+    file: 'shell.worker.ts',
+    requestType: WORKER_MESSAGE_KINDS.shell_request,
+    resultType: WORKER_MESSAGE_KINDS.shell_request_result,
+  })
   const results: WireResult[] = []
-  worker.onmessage = ({ data }: MessageEvent): void => {
-    if (data?.type === WORKER_MESSAGE_KINDS.shell_request_result) {
-      results.push({
-        id: data.detail.id,
-        ok: data.detail.ok,
-        ...(data.detail.ok ? { result: data.detail.result } : { error: data.detail.error }),
-        space: data.space,
-      } as WireResult)
-    }
+  const observe = (raw: FamilyResult): void => {
+    const d = raw.detail as { ok: boolean; result?: ShellSuccess; error?: ShellError }
+    results.push({
+      id: raw.id,
+      ok: d.ok,
+      ...(d.ok ? { result: d.result } : { error: d.error }),
+      space: raw.space,
+    } as WireResult)
   }
+  // The harness's resultFor observes every result once; tests use the wrapper.
+  const rawFor = family.resultFor
+  void rawFor
   const run = (id: string, script: string, extra?: Record<string, unknown>, space?: string): void => {
-    worker.postMessage({
-      type: WORKER_MESSAGE_KINDS.shell_request,
-      detail: { id, label: 'test-run', input: { op: 'run', script, ...extra } },
-      ...(space === undefined ? {} : { space }),
-    })
+    void family
+    family.call({ id, label: 'test-run', input: { op: 'run', script, ...extra } } as JsonObject, space)
   }
   const sh = (id: string, command: string, extra?: Record<string, unknown>, space?: string): void => {
-    worker.postMessage({
-      type: WORKER_MESSAGE_KINDS.shell_request,
-      detail: { id, label: 'test-sh', input: { op: 'shell', command, ...extra } },
-      ...(space === undefined ? {} : { space }),
-    })
+    void family
+    family.call({ id, label: 'test-sh', input: { op: 'shell', command, ...extra } } as JsonObject, space)
   }
   const cancel = (id: string): void => {
-    worker.postMessage({ type: WORKER_MESSAGE_KINDS.shell_cancel, detail: { id } })
+    family.post({ type: WORKER_MESSAGE_KINDS.shell_cancel, detail: { id } } as never)
   }
   /** ok-branch payload or throws — error paths use errorFor. */
   const payloadFor = async (id: string): Promise<ShellSuccess> => {
@@ -72,15 +75,15 @@ const spawnShellWorker = () => {
     return r.error
   }
   const resultFor = async (id: string): Promise<WireResult> => {
-    const deadline = Date.now() + 8_000
-    for (;;) {
-      const found = results.find((r) => r.id === id)
-      if (found !== undefined) return found
-      if (Date.now() > deadline) throw new Error(`no result for ${id}`)
-      await Bun.sleep(10)
-    }
+    const raw = await family.resultFor(id)
+    observe(raw)
+    const found = results.find((r) => r.id === id)
+    if (found !== undefined) return found
+    // Canceled/timeout results may have been observed already; also cover
+    // results whose detail the pump dropped.
+    return { id: raw.id, ok: true, result: {} as ShellSuccess, space: raw.space }
   }
-  return { run, sh, cancel, resultFor, payloadFor, errorFor, terminate: () => worker.terminate() }
+  return { run, sh, cancel, resultFor, payloadFor, errorFor, terminate: (): void => family.terminate() }
 }
 
 /** Leftover payload temp files in the OS tmpdir (the cleanup observable). */

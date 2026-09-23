@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test'
+import type { JsonObject } from '../../behavioral/behavioral.types.ts'
 import { WORKER_MESSAGE_KINDS } from '../workers.constants.ts'
+import { spawnFamily } from './family-harness.ts'
 import { startMcpServer } from './mcp-server-fixture.ts'
 
 /**
@@ -30,40 +32,24 @@ type WireResult = {
   space?: string
 }
 
-/** Spawn the mcp worker and expose an event-wire harness over it. */
+/** Spawn the mcp family PROCESS and expose the same wire harness API. */
 const spawnMcpWorker = () => {
-  const worker = new Worker(new URL('../mcp-client.worker.ts', import.meta.url))
-  const results: WireResult[] = []
-  worker.onmessage = ({ data }: MessageEvent): void => {
-    const message = data as {
-      type?: string
-      detail?: { id: string; ok: boolean; result?: Record<string, unknown>; error?: Record<string, unknown> }
-      space?: string
-    }
-    if (message?.type === WORKER_MESSAGE_KINDS.mcp_request_result && message.detail !== undefined) {
-      results.push({ ...message.detail, id: message.detail.id, space: message.space } as WireResult)
-    }
-  }
+  const worker = spawnFamily({
+    file: 'mcp-client.worker.ts',
+    requestType: WORKER_MESSAGE_KINDS.mcp_request,
+    resultType: WORKER_MESSAGE_KINDS.mcp_request_result,
+  })
   const call = (id: string, op: string, input: unknown, space?: string): void => {
-    worker.postMessage({
-      type: WORKER_MESSAGE_KINDS.mcp_request,
-      detail: { id, op, input },
-      ...(space === undefined ? {} : { space }),
-    })
+    worker.call({ id, op, input } as JsonObject, space)
   }
   const cancel = (id: string): void => {
-    worker.postMessage({ type: WORKER_MESSAGE_KINDS.mcp_cancel, detail: { id } })
+    worker.post({ type: WORKER_MESSAGE_KINDS.mcp_cancel, detail: { id } } as never)
   }
   const resultFor = async (id: string): Promise<WireResult> => {
-    const deadline = Date.now() + 15_000
-    for (;;) {
-      const found = results.find((r) => r.id === id)
-      if (found !== undefined) return found
-      if (Date.now() > deadline) throw new Error(`no result for ${id}`)
-      await Bun.sleep(10)
-    }
+    const raw = await worker.resultFor(id)
+    return { ...raw.detail, id: raw.id, space: raw.space } as WireResult
   }
-  return { call, cancel, resultFor, terminate: () => worker.terminate() }
+  return { call, cancel, resultFor, terminate: (): void => worker.terminate() }
 }
 
 /** Wrap the fixture handler in a real loopback HTTP server. */

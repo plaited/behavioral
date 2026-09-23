@@ -39,7 +39,6 @@
  * @packageDocumentation
  */
 
-import { getEnvironmentData } from 'node:worker_threads'
 import {
   type AuthProvider,
   Client,
@@ -51,6 +50,7 @@ import { ajv, type JsonObject } from '../behavioral/behavioral.types.ts'
 import { BunKeychain } from '../oauth/keychain.ts'
 import { tokensKey } from '../oauth/keychain-oauth-provider.ts'
 import { MCP_BROKER_BOOT_SECRET_KEY, MCP_BROKER_URL_KEY, MCP_OP_INPUT_VALIDATORS } from './mcp-client.types.ts'
+import { emit, envData, wireInbound } from './process-lane.ts'
 import { WORKER_MESSAGE_KINDS } from './workers.constants.ts'
 import {
   type McpCancelEvent,
@@ -72,8 +72,8 @@ const CLIENT_INFO = { name: 'behavioral', version: '0.0.0' }
 // Auth binding — module scope, from boundary-legal data only
 // ---------------------------------------------------------------------------
 
-const brokerUrl = getEnvironmentData(MCP_BROKER_URL_KEY)
-const brokerBootSecret = getEnvironmentData(MCP_BROKER_BOOT_SECRET_KEY)
+const brokerUrl = envData(MCP_BROKER_URL_KEY) as string | undefined
+const brokerBootSecret = envData(MCP_BROKER_BOOT_SECRET_KEY) as string | undefined
 const keychain = BunKeychain()
 
 /** Fetch an access token from the taskbar broker (env-data binding). Fail-closed. */
@@ -265,7 +265,7 @@ const postResult = ({
   error?: { code: string; message?: string } & JsonObject
   space?: string
 }): void => {
-  self.postMessage({
+  emit({
     type: WORKER_MESSAGE_KINDS.mcp_request_result,
     detail: (error === undefined
       ? { id, ok: true, result: payload ?? {} }
@@ -371,6 +371,9 @@ const handleInbound = async (message: unknown): Promise<void> => {
 
 // The wire is the behavioral event vocabulary, validated with the shared
 // schemas — the trust boundary for anything crossing into this process.
-self.onmessage = (event: MessageEvent): void => {
-  void handleInbound(event.data)
+if (import.meta.main) {
+  // Standalone (spawned process) — wire the stdio line lane. An in-process
+  // import (the composition's frontier embed) wires nothing: the host's
+  // stdin is never touched.
+  wireInbound((message) => handleInbound(message))
 }

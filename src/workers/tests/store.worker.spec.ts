@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { setEnvironmentData } from 'node:worker_threads'
 import type { JsonObject } from '../../behavioral/behavioral.types.ts'
 import { STORE_DB_PATH_KEY } from '../store.types.ts'
 import { WORKER_MESSAGE_KINDS } from '../workers.constants.ts'
 import type { StoreOp } from '../workers.types.ts'
+import { spawnFamily } from './family-harness.ts'
 
 /**
  * Store worker integration tests — exercised through the real worker boundary
@@ -28,34 +28,23 @@ type WireResult = {
   space?: string
 }
 
-/** Spawn the store worker and expose an event-wire harness over it. */
+/** Spawn the store family PROCESS and expose the same wire harness API. */
 const spawnStoreWorker = (dbPath = ':memory:') => {
-  setEnvironmentData(STORE_DB_PATH_KEY, dbPath)
-  const worker = new Worker(new URL('../store.worker.ts', import.meta.url))
-  const results: WireResult[] = []
-  worker.onmessage = ({ data }: MessageEvent): void => {
-    const message = data as { type?: string; detail?: { id: string; result: unknown }; space?: string }
-    if (message?.type === WORKER_MESSAGE_KINDS.store_request_result && message.detail !== undefined) {
-      results.push({ ...message.detail, id: message.detail.id, space: message.space } as WireResult)
-    }
-  }
+  const family = spawnFamily({
+    file: 'store.worker.ts',
+    requestType: WORKER_MESSAGE_KINDS.store_request,
+    resultType: WORKER_MESSAGE_KINDS.store_request_result,
+    // Env vars cross Bun.spawn boundaries; worker-thread env-data does not.
+    env: { [STORE_DB_PATH_KEY]: dbPath },
+  })
   const call = (id: string, op: StoreOp, input: unknown, space?: string): void => {
-    worker.postMessage({
-      type: WORKER_MESSAGE_KINDS.store_request,
-      detail: { id, op, input },
-      ...(space === undefined ? {} : { space }),
-    })
+    family.call({ id, op, input } as JsonObject, space)
   }
   const resultFor = async (id: string): Promise<WireResult> => {
-    const deadline = Date.now() + 5_000
-    for (;;) {
-      const found = results.find((r) => r.id === id)
-      if (found !== undefined) return found
-      if (Date.now() > deadline) throw new Error(`no result for ${id}`)
-      await Bun.sleep(10)
-    }
+    const raw = await family.resultFor(id)
+    return { ...raw.detail, id: raw.id, space: raw.space } as WireResult
   }
-  return { call, resultFor, terminate: () => worker.terminate() }
+  return { call, resultFor, terminate: (): void => family.terminate() }
 }
 
 describe('store worker — event wire', () => {

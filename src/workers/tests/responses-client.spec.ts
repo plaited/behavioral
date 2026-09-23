@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { setEnvironmentData } from 'node:worker_threads'
+import type { JsonObject } from '../../behavioral/behavioral.types.ts'
 import {
   AudioContentSchema,
   CompactionItemSchema,
@@ -25,6 +25,7 @@ import {
 } from '../responses-client.schemas.ts'
 import { MODEL_ENDPOINTS_KEY, type ModelEndpoints, type ModelRespondOutput } from '../responses-client.types.ts'
 import { WORKER_MESSAGE_KINDS } from '../workers.constants.ts'
+import { spawnFamily } from './family-harness.ts'
 import { ASSISTANT_TEXT, startOpenResponsesServer } from './fixtures/model-server.ts'
 
 // ================================================================
@@ -39,42 +40,30 @@ type WireResult = {
   space?: string
 }
 
-/** Spawn the model worker and expose an event-wire harness over it. */
+/** Spawn the responses family PROCESS and expose the same wire harness API. */
 const spawnModelWorker = (endpoints: ModelEndpoints) => {
-  // Endpoint config is seeded into environment data immediately before spawn
-  // (the provisioning contract): the worker reads it once at startup and no
-  // secret ever crosses the message boundary.
-  setEnvironmentData(MODEL_ENDPOINTS_KEY, endpoints)
-  const worker = new Worker(new URL('../responses-client.worker.ts', import.meta.url))
-  const messages: { type?: string }[] = []
-  const results: WireResult[] = []
-  worker.onmessage = ({ data }: MessageEvent): void => {
-    const message = data as { type?: string; detail?: { id: string; result: ModelRespondOutput }; space?: string }
-    messages.push(message)
-    if (message?.type === WORKER_MESSAGE_KINDS.response_request_result && message.detail !== undefined) {
-      results.push({ ...message.detail, id: message.detail.id, space: message.space } as WireResult)
-    }
-  }
+  // Endpoint config seeds the spawn ENV (the provisioning contract): the
+  // process reads it once at startup and no secret ever crosses the message
+  // boundary. Env vars cross Bun.spawn; worker-thread env-data does not.
+  const worker = spawnFamily({
+    file: 'responses-client.worker.ts',
+    requestType: WORKER_MESSAGE_KINDS.response_request,
+    resultType: WORKER_MESSAGE_KINDS.response_request_result,
+    env: { [MODEL_ENDPOINTS_KEY]: JSON.stringify(endpoints) },
+  })
+  const messages: { type?: string; detail?: unknown; space?: string }[] = []
   const respond = (id: string, input: unknown, space?: string): void => {
-    worker.postMessage({
-      type: WORKER_MESSAGE_KINDS.response_request,
-      detail: { id, input },
-      ...(space === undefined ? {} : { space }),
-    })
+    worker.call({ id, input } as JsonObject, space)
   }
   const cancel = (id: string): void => {
-    worker.postMessage({ type: WORKER_MESSAGE_KINDS.response_cancel, detail: { id } })
+    worker.post({ type: WORKER_MESSAGE_KINDS.response_cancel, detail: { id } } as never)
   }
   const resultFor = async (id: string): Promise<WireResult> => {
-    const deadline = Date.now() + 5_000
-    for (;;) {
-      const found = results.find((r) => r.id === id)
-      if (found !== undefined) return found
-      if (Date.now() > deadline) throw new Error(`no result for ${id}`)
-      await Bun.sleep(10)
-    }
+    const raw = await worker.resultFor(id)
+    messages.push({ type: WORKER_MESSAGE_KINDS.response_request_result, detail: raw.detail, space: raw.space })
+    return { ...raw.detail, id: raw.id, space: raw.space } as WireResult
   }
-  return { respond, cancel, resultFor, messages, terminate: () => worker.terminate() }
+  return { respond, cancel, resultFor, messages, terminate: (): void => worker.terminate() }
 }
 
 const userMessage = { type: 'message', role: 'user', content: 'Say hello' } as const

@@ -37,10 +37,10 @@ import { Database } from 'bun:sqlite'
 import { mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import * as path from 'node:path'
-import { getEnvironmentData } from 'node:worker_threads'
 import type { JSONSchemaType } from 'ajv'
 import { ajv, type JsonObject } from '../behavioral/behavioral.types.ts'
 import { deepEqual } from '../utils.ts'
+import { emit, envData, wireInbound } from './process-lane.ts'
 import {
   ROOT_SPACE,
   STORE_DB_PATH_KEY,
@@ -59,7 +59,7 @@ import { type StoreRequestEvent, validateStoreRequestEvent } from './workers.typ
 const DEFAULT_DB_PATH = path.join(homedir(), '.behavioral', 'db.sqlite')
 const SCHEMA_VERSION = '1'
 
-const dbPath = (getEnvironmentData(STORE_DB_PATH_KEY) as string | undefined) ?? DEFAULT_DB_PATH
+const dbPath = (envData(STORE_DB_PATH_KEY) as string | undefined) ?? DEFAULT_DB_PATH
 if (dbPath !== ':memory:') {
   mkdirSync(path.dirname(dbPath), { recursive: true })
 }
@@ -143,7 +143,7 @@ const validateQuery = ajv.compile(QueryInputSchema)
 // ---------------------------------------------------------------------------
 
 const postResult = ({ id, result, space }: { id: string; result: unknown; space?: string }): void => {
-  self.postMessage({
+  emit({
     type: WORKER_MESSAGE_KINDS.store_request_result,
     // The uniform envelope: op-runner { ok: true, … } → ok branch (payload =
     // the rest); { isError: true, … } or a throw → error branch.
@@ -264,6 +264,11 @@ const handleInbound = (message: unknown): void => {
   }
 }
 
-self.onmessage = ({ data }: MessageEvent): void => {
-  handleInbound(data)
+if (import.meta.main) {
+  // Standalone (spawned process) — wire the stdio line lane. An in-process
+  // import (the composition's frontier embed) wires nothing: the host's
+  // stdin is never touched.
+  wireInbound((message) => {
+    handleInbound(message)
+  })
 }

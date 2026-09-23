@@ -50,6 +50,7 @@ import {
   useThread,
 } from '../behavioral/behavioral.utils.ts'
 import { ueid } from '../utils.ts'
+import { emit, wireInbound } from './process-lane.ts'
 import { WORKER_MESSAGE_KINDS } from './workers.constants.ts'
 import { type FrontierRequestEvent, validateFrontierRequestEvent } from './workers.types.ts'
 
@@ -1186,7 +1187,7 @@ export const FrontierVerifyInputSchema = {
 // ---------------------------------------------------------------------------
 
 const postResult = ({ id, result, space }: { id: string; result: unknown; space?: string }): void => {
-  self.postMessage({
+  emit({
     type: WORKER_MESSAGE_KINDS.frontier_request_result,
     // The uniform envelope: { isError: true, … } → error branch; anything
     // else is the analysis payload → ok branch.
@@ -1326,6 +1327,16 @@ const OP_RUNNERS: Record<string, ToolRunner> = {
 // schemas — the trust boundary for anything crossing into this process. The
 // raw analysis functions throw; every throw is caught and posted as
 // { isError, message } data, so a throw never crosses the process boundary.
+/**
+ * The frontier dispatch — exported for the in-process embed: the composition
+ * imports this (bindEmit'd to its reenter) and calls it directly with each
+ * routed frontier_request. The standalone entry below wires the same function
+ * to the stdio line lane.
+ */
+export const handleFrontierMessage = (message: unknown): void => {
+  handleInbound(message)
+}
+
 const handleInbound = (message: unknown): void => {
   if (!validateFrontierRequestEvent(message)) return
   const event = message as FrontierRequestEvent
@@ -1342,6 +1353,11 @@ const handleInbound = (message: unknown): void => {
   postResult({ id, result: runner.run(input as never), space: event.space })
 }
 
-self.onmessage = ({ data }: MessageEvent): void => {
-  handleInbound(data)
+if (import.meta.main) {
+  // Standalone (spawned process) — wire the stdio line lane. An in-process
+  // import (the composition's frontier embed) wires nothing: the host's
+  // stdin is never touched.
+  wireInbound((message) => {
+    handleInbound(message)
+  })
 }
