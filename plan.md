@@ -154,6 +154,47 @@ ingress + a plugin-shipped behavior surface.
      the conventions skill, docs sweep. Remaining: the deletion sweep (fleet 6 → 0)
      and the governor thread (plugin admission). -->
 
+### 2026-09-21 — ruled: the process composition — engine+frontier in-process; capabilities as Bun.spawn per space; no behavioral on clients
+
+- **THE CONSOLIDATION (pilot, three moves):**
+  1. **ENGINE + FRONTIER ARE IN-PROCESS, NOT WORKERS.** behavioral() runs in
+     the host main thread — addThread/trigger called directly, traces via
+     useTrace, ZERO postMessage hops. The engine-never-awaits invariant is
+     what makes this safe. The add_threads envelope protocol and
+     behavioral.worker.ts's transport DIE (no consumer); the teardown race
+     dissolves STRUCTURALLY — no dead port exists, satellite results are
+     stdio lines from processes the composition holds; useWorker's
+     InvalidStateError bandage dies with the model it patched. FLAGGED
+     TRADEOFF: frontier's synchronous analysis stalls the main thread while
+     running (incl. WS serving on device/cloud hosts) — accepted now; frontier
+     is the easiest spawn-later family if it bites.
+  2. **SHELL / STORE / RESPONSES / MCP ARE Bun.spawn PROCESSES, PER SPACE.**
+     Worker-per-family-shared-across-spaces was head-of-line blocking by
+     construction; per-space processes give true isolation + abort signals +
+     process-tree containment (shell was nearly there natively). The WIRE IS
+     UNCHANGED — BPEvents over stdio lines, the ok envelope, id correlation,
+     space echo; the pilot's JSON-RPC client shape IS the satellite transport
+     (spawn, line pump, pending-by-id, rejectAll on exit; exit code = crash
+     signal). The pipe-carrier ruling extended INSIDE the composition: zero
+     network surface at every layer.
+  3. **NO BEHAVIORAL ON CLIENT APPS (mobile ruling).** The runtime runs
+     somewhere persistent — a local device deployment or a cloud deployment
+     — and clients (mobile app, PWA, desktop views) CONNECT via the ruled WS
+     egress. SUPERSEDES: the webview-runtime composition, Pattern 1 (Tauri
+     IPC broker injection), the mobile mcp-client bindings, the iOS
+     runtime-validation split. Mobile = pure WS client (sandboxed views +
+     controller); the client complexity budget collapses to connect-and-
+     render. Deployment topology settled: CLI, device daemon, and cloud
+     deployment are ONE composition with different egress carriers.
+- **CONSEQUENCES FOR THE RECUT:** useBehavioral becomes the runtime handle
+  in-process — families are spawn-wrappers (useWorker's primitive shape
+  ports to spawn: line pump, pending map, crash synthesis via exit code);
+  per-space satellite = per-space process handles; the root-thread
+  teardown event (worker_shutdown) kills per-space processes via the
+  composition's interception (the admission pattern's second instance);
+  the transport spec tests die with the engine transport; the engine spec
+  suite ports to the in-process engine.
+
 ### 2026-09-21 — ruled (supersedes the wide-guard consequence): modified-B envelope; mimicry is the only floor
 
 - **THE ENVELOPE IS MODIFIED B (pilot):** the `ok` discriminant sits at the
