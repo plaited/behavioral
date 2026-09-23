@@ -121,7 +121,9 @@ traces out), `load-config.ts` (`<BEHAVIORAL_HOME>/config.ts`), and `trace-consum
 ICL pack — skill/plugin scans, catalog/manifest schema gates, links dispatchers
 + stored recipes) and `mcp.threads.ts` (the auth replay spine). Packs ship with
 their family; `getBehavioral` mounts a pack when the family and its required
-families are on. The former `src/threads/` is dissolved; its engine-layer specs
+families are on — except `behaviors.threads.ts`, the composition's **root
+pack** (the guard threads), always mounted regardless of the allow-list. The
+former `src/threads/` is dissolved; its engine-layer specs
 live in `src/behaviors/tests/*.threads.spec.ts`.
 **`tasks/`** — Harbor skill-authoring task specs (challenge content; not shipped, not a plugin).
 **`scripts/`** — repo setup and package-maintenance shell glue.

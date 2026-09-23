@@ -155,6 +155,19 @@ ingress + a plugin-shipped behavior surface.
      the conventions skill, docs sweep. Remaining: the deletion sweep (fleet 6 → 0)
      and the governor thread (plugin admission). -->
 
+### 2026-09-22 — landed: the root guard pack (behaviors.threads.ts)
+
+- `src/behaviors/behaviors.threads.ts` exports `behaviorsThreads` — the
+  composition's default threads. The guard thread `block`s every controller
+  message whose detail does not conform to its `CONTROLLER_DETAIL_SCHEMAS` entry
+  (`detailMatch: false`), covering both directions. A block-only thread stays
+  pending, so the guard is active every super-step.
+- Mounted unconditionally in `getBehavioral` via `familyAddThreads(behaviorsThreads)`,
+  independent of the family allow-list.
+- Proven at the engine boundary (a malformed `ui_render` → frontier `deadlock`,
+  candidate present, none enabled; valid → selects) and at the composition (a
+  triggered malformed `ui_render` yields no selection plus a `deadlock` trace).
+
 ### 2026-09-22 — landed: controller.schemas.ts — the ui_* AJV home (B)
 
 - The controller message detail schemas live in `src/controller/controller.schemas.ts`
