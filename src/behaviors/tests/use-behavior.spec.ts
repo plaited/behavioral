@@ -3,6 +3,7 @@ import { TRACE_MESSAGE_KINDS } from '../../behavioral/behavioral.constants.ts'
 import { behavioral } from '../../behavioral/behavioral.ts'
 import type { BPEvent, SelectionTrace, Thread, Trace } from '../../behavioral/behavioral.types.ts'
 import { BEHAVIOR_MESSAGE_KINDS } from '../behaviors.constants.ts'
+import { eventGuardEntries, guardThreads } from '../behaviors.threads.ts'
 import {
   ShellCancelEventSchema,
   ShellRequestEventSchema,
@@ -137,6 +138,95 @@ describe('useBehavior — the spawn-based family primitive', () => {
       )
       const detail = result.selected.detail as { result?: { env?: string } } | undefined
       expect(detail?.result?.env).toBe('from-env-option')
+    } finally {
+      family.terminate()
+    }
+  })
+
+  test('without a guard, a schema-invalid result line re-enters and is observable — not silently discarded', async () => {
+    const { program, traces, family } = spawnProbe()
+    try {
+      program.addThread({
+        label: 'malformed-caller',
+        once: true,
+        rules: [{ request: request('m1', 'emit_malformed') }],
+      })
+      program.trigger({ type: 'probe_pump', detail: {} })
+      // The VALID result (emitted after the malformed line) selects normally.
+      const result = await awaitSelection(
+        traces,
+        (t) =>
+          t.selected.type === BEHAVIOR_MESSAGE_KINDS.shell_request_result &&
+          (t.selected.detail as { id?: string } | undefined)?.id === 'm1',
+        'no ok result',
+      )
+      expect((result.selected.detail as { ok?: boolean } | undefined)?.ok).toBe(true)
+      // The MALFORMED result re-entered the engine (instead of vanishing): its
+      // detail is observable in the traces — here as a selected event, since
+      // this raw program mounts no guard to block it.
+      expect(
+        selectionsOf(traces).some(
+          (t) =>
+            t.selected.type === BEHAVIOR_MESSAGE_KINDS.shell_request_result &&
+            (t.selected.detail as { malformed?: boolean } | undefined)?.malformed === true,
+        ),
+      ).toBe(true)
+    } finally {
+      family.terminate()
+    }
+  })
+
+  test('with the family guard mounted, the malformed result is blocked — visible in the frontier, never selected', async () => {
+    const program = behavioral()
+    const traces: Trace[] = []
+    const family = useBehavior({
+      command: ['bun', 'run', 'tests/fixtures/probe.proc.ts'],
+      name: 'probe',
+      threads: [],
+      requestSchema: ShellRequestEventSchema,
+      cancelSchema: ShellCancelEventSchema,
+      resultSchema: ShellRequestResultEventSchema,
+    })(addThreadsWithStep(program))
+    // The composition's own mount: the guard derived from the schemas
+    // useBehavior returned — exactly what bProgram does for a system family.
+    addThreadsWithStep(program)(guardThreads('guard:probe-schema', eventGuardEntries(family.schemas)))
+    try {
+      program.useTrace((trace: Trace) => {
+        traces.push(trace)
+        if (trace.kind !== TRACE_MESSAGE_KINDS.selection) return
+        const selected = (trace as SelectionTrace).selected
+        const event = { type: selected.type, detail: selected.detail, space: selected.space } as BPEvent
+        if (event.type === BEHAVIOR_MESSAGE_KINDS.shell_request && validateShellRequestEvent(event)) {
+          family.send(event)
+        }
+      })
+      program.addThread({
+        label: 'malformed-caller',
+        once: true,
+        rules: [{ request: request('m1', 'emit_malformed') }],
+      })
+      program.trigger({ type: 'probe_pump', detail: {} })
+      // The valid result still selects.
+      await awaitSelection(
+        traces,
+        (t) =>
+          t.selected.type === BEHAVIOR_MESSAGE_KINDS.shell_request_result &&
+          (t.selected.detail as { id?: string } | undefined)?.id === 'm1',
+        'no ok result',
+      )
+      // The malformed result never selects — the guard blocked it...
+      await Bun.sleep(100)
+      expect(
+        selectionsOf(traces).some(
+          (t) =>
+            t.selected.type === BEHAVIOR_MESSAGE_KINDS.shell_request_result &&
+            (t.selected.detail as { malformed?: boolean } | undefined)?.malformed === true,
+        ),
+      ).toBe(false)
+      // ...and the reject is visible: the blocked once-thread stays pending
+      // with no bidders, and the frontier deadlocks naming it.
+      expect(traces.some((trace) => JSON.stringify(trace).includes('"malformed":true'))).toBe(true)
+      expect(traces.some((trace) => trace.kind === TRACE_MESSAGE_KINDS.deadlock)).toBe(true)
     } finally {
       family.terminate()
     }

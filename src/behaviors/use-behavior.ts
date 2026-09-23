@@ -39,12 +39,15 @@ export type BehaviorEventSchemas = {
  * (merged over the inherited environment); the returned function
  * — awaiting `(addThreads, space?)` — wires:
  *
- * - **the line pump** — stdout lines parsed, gated by `validateResultEvent`
- *   (the RESULT validator owns the inbound lane), re-entered as once-threads
- *   with `message.space` PRESERVED;
+ * - **the line pump** — stdout lines parsed and re-entered as once-threads
+ *   with `message.space` PRESERVED. The pump discards only what cannot be
+ *   this lane's event (non-JSON lines, non-object payloads, any type other
+ *   than the family's result kind — the lane stays sealed); schema validity
+ *   of the detail is the family guard's job — a parsed-but-invalid result
+ *   re-enters and is blocked VISIBLY (frontier/pending_bids traces) instead
+ *   of vanishing;
  * - **crash synthesis** — an unsolicited process death (any exit we did not
  *   cause) re-enters exactly ONE `behavior_error { behavior: name }` event;
- *   malformed lines are discarded (the pasted JSON-RPC client's rule);
  * - **respawn on demand** — the next outbound event spawns a fresh process
  *   after a death; one live process per family wiring at all times;
  * - **thread-pack mounting** — stamped with the wiring space only when set.
@@ -75,12 +78,17 @@ export const useBehavior =
     /** The outbound request/result/cancel schemas — the family's trust boundary, compiled here. */
     requestSchema: JSONSchemaType<WireMessage>
     cancelSchema: JSONSchemaType<WireMessage>
+    /** The result schema — returned for the composition's guard derivation. */
     resultSchema: JSONSchemaType<WireMessage>
   }) =>
   (addThreads: AddThreads, space?: string) => {
     const validateRequestEvent = ajv.compile(requestSchema)
     const validateEventCancel = ajv.compile(cancelSchema)
-    const validateResultEvent = ajv.compile(resultSchema)
+    // The inbound lane's seal: only this family's RESULT events re-enter from
+    // its process (the request/cancel types stay outbound-only — a process
+    // cannot inject requests into its own or another family's lane).
+    const resultKind = (resultSchema.properties.type as { const?: string } | undefined)?.const
+
     let proc: Bun.Subprocess<'pipe', 'pipe', 'inherit'> | undefined
     let terminated = false
     let crashed = false
@@ -153,7 +161,18 @@ export const useBehavior =
               // Discard malformed, non-JSON output (the line protocol's rule).
               continue
             }
-            if (!validateResultEvent(message)) continue
+            // The pump discards only what cannot be THIS lane's event (non-JSON,
+            // non-object payloads, any type other than the family's result kind).
+            // Schema validity of the DETAIL is the family guard's job — a
+            // parsed-but-invalid result re-enters and is blocked VISIBLY
+            // (frontier/pending_bids traces) instead of vanishing.
+            if (
+              typeof message.type !== 'string' ||
+              typeof message.detail !== 'object' ||
+              message.detail === null ||
+              message.type !== resultKind
+            )
+              continue
             reenter(message)
           }
         }

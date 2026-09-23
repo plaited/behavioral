@@ -4,8 +4,14 @@
  * The `die` op exits 3 mid-stream (crash synthesis); everything else
  * answers the ok envelope and keeps serving — the primitive's respawn
  * brings a fresh instance only after a death.
+ * The `emit_malformed` op additionally writes one schema-INVALID but
+ * JSON-parseable result line first — the result-lane visibility case (the
+ * pump re-enters it, the guard blocks it).
  */
-const encoder = new TextEncoder()
+
+const emit = (event: unknown): void => {
+  process.stdout.write(`${JSON.stringify(event)}\n`)
+}
 
 const reader = Bun.stdin.stream().getReader()
 const decoder = new TextDecoder()
@@ -28,7 +34,11 @@ for (;;) {
     if (message.detail.input.op === 'die') {
       process.exit(3)
     }
-    const response = {
+    if (message.detail.input.op === 'emit_malformed') {
+      // Well-formed JSON, wrong detail: no id, no ok — fails the result schema.
+      emit({ type: 'shell_request_result', detail: { malformed: true } })
+    }
+    emit({
       type: 'shell_request_result',
       detail: {
         id: message.detail.id,
@@ -36,7 +46,6 @@ for (;;) {
         result: { echoed: message.detail.input.op, env: process.env.PROBE_ENV },
       },
       ...(message.space === undefined ? {} : { space: message.space }),
-    }
-    process.stdout.write(encoder.encode(`${JSON.stringify(response)}\n`))
+    })
   }
 }
