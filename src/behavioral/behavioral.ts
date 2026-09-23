@@ -187,6 +187,14 @@ export const behavioral = () => {
         instanceId,
       })
     }
+    if (frontier.status === FRONTIER_STATUS.idle) {
+      sendTrace({
+        kind: TRACE_MESSAGE_KINDS.idle,
+        timestamp: Date.now(),
+        step,
+        instanceId,
+      })
+    }
   }
 
   const addThread: AddThread = (args) => {

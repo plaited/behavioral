@@ -6,6 +6,7 @@ import { keyMirror } from '../utils.ts'
  * @remarks
  * Use the `kind` field to narrow the union:
  * - `'deadlock'` — no unblocked candidate could be selected
+ * - `'idle'` — no candidates at all; the program is quiescent (not deadlocked)
  * - `'frontier'` — frontier snapshot per super-step
  * - `'pending_bids'` — pending thread bids per super-step
  * - `'selection'` — event selection trace
@@ -24,6 +25,7 @@ import { keyMirror } from '../utils.ts'
  */
 export const TRACE_MESSAGE_KINDS = keyMirror(
   'deadlock',
+  'idle',
   'frontier',
   'pending_bids',
   'selection',

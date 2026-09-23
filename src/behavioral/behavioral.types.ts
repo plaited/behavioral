@@ -351,6 +351,17 @@ export type DeadlockTrace = TraceBase & {
 }
 
 /**
+ * Emitted when a super-step finds no candidate events at all — the program is
+ * quiescent (waiting on external input), distinct from a deadlock (candidates
+ * exist but every one is blocked). The settle signal: no further selections
+ * will occur until a trigger arrives.
+ */
+export type IdleTrace = TraceBase & {
+  kind: typeof TRACE_MESSAGE_KINDS.idle
+  step: number
+}
+
+/**
  * Emitted when `useAddThread` receives arguments that fail `ThreadSchema`
  * validation or contain an un-compilable `detailSchema`.
  *
@@ -524,6 +535,7 @@ export type Trace =
   | TriggerError
   | FrontierTrace
   | DeadlockTrace
+  | IdleTrace
   | SelectionTrace
   | AddThreadError
   | ThreadAddedTrace
