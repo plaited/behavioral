@@ -8,7 +8,7 @@
  * `self.onmessage` at top level, so the host must never import it for
  * types; both sides import here instead. The wire itself is the behavioral
  * event vocabulary (`shell_request` / `shell_cancel` in, one
- * `shell_request_result` out) defined in `src/workers/workers.types.ts` —
+ * `shell_request_result` out) defined in `src/behaviors/workers.types.ts` —
  * only the `detail.input` and `detail.result` payload shapes live here.
  *
  * The input is OP-DISCRIMINATED (the bun-direct conversion): `'run'`

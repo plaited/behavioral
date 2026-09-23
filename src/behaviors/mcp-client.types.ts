@@ -9,7 +9,7 @@
  * the host must never import it for types; both sides import here instead.
  * The wire itself is the behavioral event vocabulary (`mcp_request` /
  * `mcp_cancel` in, one `mcp_request_result` out) defined in
- * `src/workers/workers.types.ts` — only the `detail.input` and
+ * `src/behaviors/workers.types.ts` — only the `detail.input` and
  * `detail.result` payload shapes live here.
  *
  * Per the worker-conversion rulings (plan.md, 2026-09-21): per-call input

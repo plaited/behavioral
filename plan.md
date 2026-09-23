@@ -172,10 +172,10 @@ ingress + a plugin-shipped behavior surface.
   composition: in-process engine, useProcess primitive, process lane,
   five behaviors), skill-conventions + frontier + mcp-client references +
   the classifier prompt swept.
-- **Commit 3 (pending, pilot-gated):** the C leftover — the src/workers/
-  DIRECTORY rename (now also housing the wire home, the composition, and
-  the packs — its settled name is the open question: src/behaviors/ vs
-  src/composition/ vs staying).
+- **Commit 3 (LANDED — "finish it"): src/workers/ → src/behaviors/** — the
+  directory follows the vocabulary (everything in it speaks behaviors; the
+  composition is what wires behaviors). Path sweep: type-file headers,
+  AGENTS.md, the skills references. Full-suite fails = pilot stakes only.
 
 ### 2026-09-21 — ruled: the families are BEHAVIORS (the naming ruling)
 

@@ -7,12 +7,12 @@ runs: *can it deadlock?* and *can it spin forever without making progress?*
 
 ## Public surface
 
-Frontier analysis is a behavior, embedded **in-process** by the composition: `src/workers/frontier.worker.ts`,
+Frontier analysis is a behavior, embedded **in-process** by the composition: `src/behaviors/frontier.worker.ts`,
 speaking the behavioral event wire — `frontier_request { id, op: replay |
 explore | verify, input }` in, one `frontier_request_result { id, result }`
 out. Mount it via the `useBehavioral` map (`frontier: new Worker(...)`); threads
 request it like any satellite. Ops are short-lived (no cancel event). The
-worker's event schemas live in `src/workers/workers.types.ts`.
+worker's event schemas live in `src/behaviors/workers.types.ts`.
 
 Threads are JSON objects: `{ label: string, rules: Idioms[], once?: true }`.
 Each idiom is one sync point with `request` (propose an event), `waitFor`

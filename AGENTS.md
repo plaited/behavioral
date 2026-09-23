@@ -74,7 +74,7 @@ and the impact is broad or unclear, expand coverage until the affected surface i
 
 ## Directory Boundaries
 
-**`src/workers/`** — the process layer: the behavior event wire
+**`src/behaviors/`** — the process layer: the behavior event wire
 (`behaviors.types.ts` + `behaviors.constants.ts` — every request/result event kind,
 validators, and the kind registry), the in-process engine composition
 (`use-behavioral.ts`, `useBehavioral` — behavioral() runs in-process; pack mounts
@@ -92,14 +92,14 @@ by the composition; standalone spawns are a compatibility entry),
 (remote MCP connections/sessions/auth). Each behavior owns its event types + input
 boundary; results echo the request `space`; op runners errors-as-data.
 **`src/tools/`** — deleted (fleet 0): the ICL conversion retired the CLI tool
-fleet. mcp-client is the mcp behavior (`src/workers/mcp-client.behavior.ts`);
+fleet. mcp-client is the mcp behavior (`src/behaviors/mcp-client.behavior.ts`);
 skill/plugin operations are the shell family's thread pack
-(`src/workers/shell.threads.ts`) + recipes + store, taught by
+(`src/behaviors/shell.threads.ts`) + recipes + store, taught by
 `skills/skill-conventions/`.
 **`src/behavioral/`** — the pure language layer: types, constants, utils, the interpreter core
 (`behavioral.ts`), and its internal jq subprocess (`jq.worker.ts` — engine-internal, wire-external;
 nothing outside behavioral/ speaks its wire). Zero process entries that speak the behavior wire —
-dependency arrow is one-way: `src/workers/` → `src/behavioral/`.
+dependency arrow is one-way: `src/behaviors/` → `src/behavioral/`.
 **`src/controller/`** — the browser Controller: a validation-free dumb relay over an injectable
 Transport, plus `controller.utils.ts` (DelegatedListener, swapBoundary, the deterministic floors
 `isInvalidTrigger`/`detectXssVectors`) and render-time scale error-back. The controller owns no
@@ -108,12 +108,12 @@ AJV; its floors are hardcoded invariants (on*, malformed b-trigger, scale mismat
 registered in `bin/behavioral.ts`. The `behavioral tools` fleet dispatcher is retired with the
 fleet (0 tools); turn/config commands land here as the composition rulings build out.
 **`src/utils/`** — shared pure utilities.
-**`src/workers/*.threads.ts`** — behavior thread packs: `shell.threads.ts` (the
+**`src/behaviors/*.threads.ts`** — behavior thread packs: `shell.threads.ts` (the
 ICL pack — skill/plugin scans, catalog/manifest schema gates, links dispatchers
 + stored recipes) and `mcp.threads.ts` (the auth replay spine). Packs ship with
 their family; `useBehavioral` mounts a pack when the family and its required
 families are on. The former `src/threads/` is dissolved; its engine-layer specs
-live in `src/workers/tests/*.threads.spec.ts`.
+live in `src/behaviors/tests/*.threads.spec.ts`.
 **`tasks/`** — Harbor skill-authoring task specs (challenge content; not shipped, not a plugin).
 **`scripts/`** — repo setup and package-maintenance shell glue.
 **`skills/`** — published reference skills.
@@ -195,12 +195,12 @@ input boundaries are the pattern homes). Trust the validated value downstream.
 `ajv` instance. Prefer structural schemas (`oneOf` branches, strict `additionalProperties: false` at
 every level) so constraints are explicit and JSON-schema replay contracts stay aligned. Do not
 hand-maintain a parallel Zod shape alongside an AJV one. Schema-data is exported for reuse (the
-catalog/manifest/recipe contracts in `src/workers/shell.threads.ts`).
+catalog/manifest/recipe contracts in `src/behaviors/shell.threads.ts`).
 **No cross-module schema drift.** When a CLI command returns a shape produced by another module,
 the output schema must derive from or reference that module's exported schema —
 not be hand-mirrored. Failure mode: a module's output type changes; a downstream CLI/tool schema
 silently rejects the new field (`additionalProperties: false` bites). Fix: one JSON-schema home for
-the shape (e.g. a behavior's event schema in `src/workers/behaviors.types.ts`), consumed
+the shape (e.g. a behavior's event schema in `src/behaviors/behaviors.types.ts`), consumed
 downstream via `.schema` or export.
 **CLI schema reflection uses AJV.** The `makeCliRouter`/`parseCli` framework in `src/cli/cli.ts`
 reflects command schemas via `--schema input|output` — schemas are `JSONSchemaType<T>` objects,

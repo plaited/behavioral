@@ -1,7 +1,7 @@
 # mcp-client — the remote MCP behavior
 
 Remote MCP server operations are a spawned **behavior**, not CLI fleet tools:
-`src/workers/mcp-client.worker.ts` (spawned by URL) holds the connections,
+`src/behaviors/mcp-client.behavior.ts` (a spawned Bun process) holds the connections,
 and the engine speaks to it over the behavioral event wire. The
 `src/threads/mcp-client.ts` thread spine orchestrates cross-turn auth
 replay.
@@ -59,5 +59,5 @@ never touch the store.
 Threads request `mcp_request` events like any other behavior; the composition
 spawns it by default (`['bun', 'run', 'mcp-client.behavior.ts']` over stdio
 lines — same wire, one JSON event per line). Schema-reflect the op inputs via
-`src/workers/mcp-client.types.ts` (`MCP_*_OP_INPUT_SCHEMA`) when model-facing
+`src/behaviors/mcp-client.types.ts` (`MCP_*_OP_INPUT_SCHEMA`) when model-facing
 context is needed.

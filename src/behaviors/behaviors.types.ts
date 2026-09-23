@@ -16,7 +16,7 @@ import { BEHAVIOR_MESSAGE_KINDS } from './behaviors.constants.ts'
  * - `input`/`result` are loose JsonObject payloads: their strict schemas keep
  *   their one home in the worker families (no cross-module drift)
  * - `ingress` never survives the boundary: routed events are synthesized by
- *   workers, and `additionalProperties: false` rejects its presence (proven in
+ *   behavior files, and `additionalProperties: false` rejects its presence (proven in
  *   the spec) — so the field is deliberately absent from the types
  *
  * @public
@@ -135,7 +135,7 @@ export type McpOp =
 
 export type McpRequestEvent = {
   type: typeof BEHAVIOR_MESSAGE_KINDS.mcp_request
-  /** `op` selects the MCP client operation; the backing schema lives in `src/workers/mcp-client.types.ts`. */
+  /** `op` selects the MCP client operation; the backing schema lives in `src/behaviors/mcp-client.types.ts`. */
   detail: { id: string; op: McpOp; input: JsonObject }
   space?: string
 }
