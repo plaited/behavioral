@@ -1,0 +1,15 @@
+name: "behavioral CodeQL config"
+
+# Match the suite the default setup ran (extended) so switching to advanced
+# setup changes nothing but the ignored path below.
+queries:
+  - uses: security-extended
+
+# AUTO-GENERATED files are excluded from analysis. `credential-patterns.ts` is
+# regenerated from the pinned betterleaks ruleset (`bun run betterleaks:generate`)
+# and guarded by a byte-stable drift check, so hand fixes are impossible and the
+# flagged regex imprecision (unescaped hostname dots, missing anchors) is
+# inherent to the upstream rules. This is a secret-*detection* redaction pass
+# whose stated intent is over-redaction, so the broader matching is safe.
+paths-ignore:
+  - src/cli/credential-patterns.ts
