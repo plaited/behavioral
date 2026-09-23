@@ -176,7 +176,13 @@ ingress + a plugin-shipped behavior surface.
     spec dies with the engine transport.
 - **Survivors:** the wire home (workers.types.ts — the schemas gate the
   same events over stdio), the packs (shell.threads/mcp.threads — mounted
-  identically), the probe fixture (the primitive's spec).
+  identically), the probe fixture (the primitive's spec), AND the
+  engine-internal jq worker — src/behavioral/jq.worker.ts (pilot's
+  exception: "except what is used in src/behavioral/ which is needed").
+  It is NOT a family: interpreter machinery spawned by URL inside
+  evaluateTransform, SAB + Atomics.wait sync syscall (the
+  engine-never-awaits invariant rides on it), wire-external by the
+  dependency-arrow law. Untouched by the cut.
 
 ### 2026-09-21 — ruled: the process composition — engine+frontier in-process; capabilities as Bun.spawn per space; no behavioral on clients
 
