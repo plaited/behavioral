@@ -155,6 +155,19 @@ ingress + a plugin-shipped behavior surface.
      the conventions skill, docs sweep. Remaining: the deletion sweep (fleet 6 → 0)
      and the governor thread (plugin admission). -->
 
+### 2026-09-22 — landed: the idle trace + the trigger/start split
+
+- **`idle` is a first-class trace** (pilot): `FRONTIER_STATUS.idle` (no
+  candidates at all) is distinct from `deadlock` (candidates exist but all are
+  blocked); the engine now emits an `idle` trace on that branch, mirroring
+  `deadlock`. It is the settle signal a host needs — the program is quiescent
+  until a trigger arrives. Added to `TRACE_MESSAGE_KINDS`, the `Trace` union
+  (`IdleTrace`), and `selectNextEvent` in `behavioral.ts`.
+- **`trigger` no longer starts** (pilot): `useBehavioral` returns the engine's
+  `trigger` directly; `start()`/`terminate()` are the host's lifecycle. The
+  host (serve.ts) subscribes, calls `start()`, then feeds `ui_*`/`trigger`
+  events. The deferred pack mounts flush on `start()` only.
+
 ### 2026-09-22 — ruled: controller vocabulary namespaced ui_*; the trace is the transcript
 
 - **The controller message vocabulary is namespaced `ui_*`** (pilot): incoming →
