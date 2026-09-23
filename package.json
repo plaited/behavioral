@@ -4,7 +4,7 @@
   "description": "Behavioral agent harness — a neuro-symbolic, self-improving agent built on the behavioral-programming runtime.",
   "license": "ISC",
   "engines": {
-    "bun": ">= v1.2.9"
+    "bun": ">= v1.4.2"
   },
   "repository": {
     "type": "git",
