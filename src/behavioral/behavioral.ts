@@ -1,183 +1,49 @@
-import { ueid } from '../utils/ueid.ts'
+import { ueid } from '../utils.ts'
+import { FRONTIER_STATUS, TRACE_MESSAGE_KINDS } from './behavioral.constants.ts'
 import {
-  BTHREAD_ID_PREFIX,
-  EVENT_SOURCES,
-  FRONTIER_STATUS,
-  SNAPSHOT_MESSAGE_KINDS,
-  TRIGGER_ID_PREFIX,
-} from './behavioral.constants.ts'
-import type { SelectionBid, SnapshotMessage, ThreadReference } from './behavioral.schemas.ts'
+  type AddThread,
+  type CandidateBid,
+  type PendingBid,
+  type RunningBid,
+  type SendTrace,
+  type Trace,
+  type Trigger,
+  type UseTrace,
+  validateBPEvent,
+  validateThread,
+} from './behavioral.types.ts'
 import {
   advanceRunningToPending,
   computeFrontier,
-  isListeningFor,
+  evaluateTransform,
+  generateRulesFunctions,
   resumePendingThreadsForSelectedEvent,
-} from './behavioral.shared.ts'
-import type {
-  AddBThread,
-  AddBThreads,
-  Behavioral,
-  BPEvent,
-  BSync,
-  BThreads,
-  CandidateBid,
-  EventDetails,
-  PendingBid,
-  ReportSnapshot,
-  RunningBid,
-  Trigger,
-  UseFeedback,
-  UseSnapshot,
-} from './behavioral.types.ts'
+  useThread,
+} from './behavioral.utils.ts'
 
-/**
- * @internal
- * Creates a simple publish-subscribe mechanism for event distribution.
- *
- * This function creates a publisher that maintains a set of listeners and provides methods
- * to publish values to all listeners and to subscribe/unsubscribe listeners.
- *
- * @template T - Type of values published through this mechanism.
- * @returns A publisher function with a `subscribe` method attached.
- */
-const createPublisher = <T>() => {
-  const listeners = new Set<(value: T) => void | Promise<void>>()
-  function publisher(value: T) {
+const createSubject = (): SendTrace => {
+  const listeners = new Set<(value: Trace) => void | Promise<void>>()
+  function publisher(value: Trace) {
     for (const cb of listeners) {
-      void cb(value)
+      try {
+        // Promise.resolve passes native promises through unchanged and absorbs
+        // non-native thenables, so every listener return value gets a rejection
+        // handler without awaiting or yielding the event loop.
+        void Promise.resolve(cb(value)).catch((error) =>
+          console.error('[behavioral] trace listener rejected:', value.kind, error),
+        )
+      } catch (error) {
+        console.error('[behavioral] trace listener threw:', value.kind, error)
+      }
     }
   }
-  publisher.subscribe = (listener: (msg: T) => void | Promise<void>) => {
+  publisher.subscribe = (listener: (msg: Trace) => void | Promise<void>) => {
     listeners.add(listener)
     return () => {
       listeners.delete(listener)
     }
   }
   return publisher
-}
-
-/**
- * @internal
- * Formats the current state (pending bids, candidates, selected event) into a SnapshotMessage array.
- *
- * This function analyzes the relationships between threads (blocking, interruption), determines
- * which event was selected, and creates a comprehensive view of the current execution step.
- * The resulting array is sorted by priority to show higher priority events first.
- */
-const formatSnapshotBids = ({
-  candidates,
-  pending,
-  selectedEvent,
-}: {
-  candidates: CandidateBid[]
-  pending: Map<string, PendingBid>
-  selectedEvent?: CandidateBid
-}) => {
-  const resolveThreadSnapshotMeta = (id: string): ThreadReference => {
-    const label = pending.get(id)!.label
-    return {
-      label,
-      id,
-    }
-  }
-  const resolveThreadReference = (thread?: string) => (thread ? resolveThreadSnapshotMeta(thread) : undefined)
-
-  const blockingThreads = [...pending].flatMap(([thread, { block }]) =>
-    block && Array.isArray(block)
-      ? block.map((listener) => ({ block: listener, thread }))
-      : block
-        ? [{ block, thread }]
-        : [],
-  )
-  const interruptedThreads = [...pending].flatMap(([thread, { interrupt }]) =>
-    interrupt && Array.isArray(interrupt)
-      ? interrupt.map((listener) => ({ interrupt: listener, thread }))
-      : interrupt
-        ? [{ interrupt, thread }]
-        : [],
-  )
-
-  const ruleSets: SelectionBid[] = []
-  for (const bid of candidates) {
-    const blockedBy = blockingThreads.find(({ block }) => isListeningFor(bid)(block))?.thread
-    const interrupts = interruptedThreads.find(({ interrupt }) => isListeningFor(bid)(interrupt))?.thread
-    const message: SelectionBid = {
-      thread: resolveThreadSnapshotMeta(bid.thread),
-      source: bid.source,
-      type: bid.type,
-      selected: selectedEvent ? selectedEvent.thread === bid.thread : false,
-      priority: bid.priority,
-      detail: bid.detail,
-      blockedBy: resolveThreadReference(blockedBy),
-      interrupts: resolveThreadReference(interrupts),
-    }
-    ruleSets.push(message)
-  }
-  return ruleSets.sort((a, b) => a.priority - b.priority)
-}
-
-const snapshotFormatter = ({
-  candidates,
-  selectedEvent,
-  pending,
-}: {
-  candidates: CandidateBid[]
-  selectedEvent: CandidateBid
-  pending: Map<string, PendingBid>
-}) => {
-  return {
-    kind: SNAPSHOT_MESSAGE_KINDS.selection,
-    bids: formatSnapshotBids({ candidates, selectedEvent, pending }),
-  }
-}
-
-const buildThreadReferences = ({ threads }: { threads: Array<ThreadReference | undefined> }) => {
-  const seenPairs = new Set<string>()
-  const references: ThreadReference[] = []
-
-  for (const thread of threads) {
-    if (!thread) {
-      continue
-    }
-    const dedupeKey = JSON.stringify([thread.label, thread.id ?? null])
-    if (seenPairs.has(dedupeKey)) {
-      continue
-    }
-    seenPairs.add(dedupeKey)
-    references.push(thread)
-  }
-  return references
-}
-
-const deadlockSnapshotFormatter = ({
-  candidates,
-  pending,
-}: {
-  candidates: CandidateBid[]
-  pending: Map<string, PendingBid>
-}) => {
-  const bids = formatSnapshotBids({ candidates, pending }).map((bid) => ({
-    ...bid,
-    selected: false as const,
-    reason: 'blocked' as const,
-  }))
-  const blockedCount = bids.filter((bid) => Boolean(bid.blockedBy?.label)).length
-
-  return {
-    kind: SNAPSHOT_MESSAGE_KINDS.deadlock,
-    bids,
-    summary: {
-      candidateCount: bids.length,
-      blockedCount,
-      unblockedCount: bids.length - blockedCount,
-      blockers: buildThreadReferences({
-        threads: bids.map((bid) => bid.blockedBy),
-      }),
-      interrupters: buildThreadReferences({
-        threads: bids.map((bid) => bid.interrupts),
-      }),
-    },
-  }
 }
 
 /**
@@ -208,7 +74,7 @@ const deadlockSnapshotFormatter = ({
  *
  * 4. **Notify & Update:**
  *    - If an event is selected:
- *      - Publish a snapshot if a listener is attached (for debugging/monitoring).
+ *      - Publish a trace if a listener is attached (for debugging/monitoring).
  *      - Identify threads waiting for, requesting, or interrupted by the selected event.
  *        Move these threads back to the 'running' state.
  *      - Publish the selected event via the `actionPublisher` (for `useFeedback` handlers).
@@ -219,45 +85,55 @@ const deadlockSnapshotFormatter = ({
  * The program's execution is driven by events - either requested by threads or triggered
  * externally. It will continue executing super-steps as long as there are events to select
  * and threads to run. If no events can be selected (either because all requests are blocked
- * or there are no requests), the program will pause until an external event is triggered.
+ * or there are no requests), the program will pause until an event is admitted via `trigger`.
+ *
+ * **Channel invariant:** a selected event carries `ingress: true` iff it was admitted
+ * externally through `trigger`; everything internal (dispatch-bridge results, transform
+ * targets, `threads.registered`) arrives as a thread request added through `useAddThread`.
+ * Re-entering code adds a `once` thread requesting the event, then starts the
+ * super-step — engine-internal code (the transform executor) calls the internal
+ * `step()` directly; `addThread` alone is inert. Listeners restrict themselves to a
+ * channel with the optional `ingressMatch` flag (`true` = external only, `false` = internal only,
+ * absent = either). `trigger` is therefore external admission plus one super-step,
+ * nothing else.
  */
-export const behavioral: Behavioral = <Details extends EventDetails = EventDetails>() => {
+export const behavioral = () => {
+  const instanceId = ueid('bp_')
   /**
    * @internal
-   * Map of threads that have yielded and are waiting for event selection.
+   * Set of threads that have yielded and are waiting for event selection.
    *
-   * Key: threadId (string for named threads)
-   * Value: PendingBid containing the thread's generator and yielded Idioms.
+   * Each entry is a PendingBid containing the thread's generator and yielded idioms.
    * These threads have reached a synchronization point and declared their behavioral intentions.
    */
-  const pending = new Map<string, PendingBid>()
+  const pending = new Set<PendingBid>()
 
   /**
    * @internal
-   * Map of threads whose generators are ready to run (or have just been triggered).
+   * Set of threads whose generators are ready to run (or have just been triggered).
    *
-   * Key: threadId (string for named threads)
-   * Value: RunningBid containing the thread's generator.
+   * Each entry is a RunningBid containing the thread's generator.
    * These threads are about to execute until they yield at their next synchronization point.
    */
-  const running = new Map<string, RunningBid>()
+  const running = new Set<RunningBid>()
 
   /**
    * @internal
-   * Publisher for selected events, consumed by `useFeedback`.
-   * This is the mechanism by which selected events are delivered to external handlers.
+   * Publisher for state traces, consumed by `useTrace`.
+   * Always exists — subscribers are added/removed via `useTrace` which delegates to `subscribe`.
    */
-  const actionPublisher = createPublisher<BPEvent>()
+  const sendTrace = createSubject()
+  let stepId = 0
 
-  /**
-   * @internal
-   * Publisher for state snapshots, consumed by `useSnapshot`.
-   * Always exists — subscribers are added/removed via `useSnapshot` which delegates to `subscribe`.
-   */
-  const snapshotPublisher = createPublisher<SnapshotMessage>()
-
-  const step = () => {
+  const step = (ingress?: true) => {
     if (running.size) {
+      sendTrace?.({
+        kind: TRACE_MESSAGE_KINDS.step,
+        timestamp: Date.now(),
+        step: stepId,
+        ingress,
+        instanceId,
+      })
       advanceRunningToPending(running, pending)
       selectNextEvent()
     }
@@ -272,23 +148,93 @@ export const behavioral: Behavioral = <Details extends EventDetails = EventDetai
    * 2. Collects all request declarations as candidate events
    * 3. Filters out candidates that are blocked
    * 4. Selects the highest priority remaining candidate
-   * 5. If an event is selected, publishes a snapshot and proceeds to the next step
+   * 5. If an event is selected, publishes a trace and proceeds to the next step
    * 6. If no event is selected, the super-step ends (program pauses until external trigger)
    */
   function selectNextEvent() {
-    const frontier = computeFrontier({ pending })
+    const step = stepId++
+
+    sendTrace({
+      kind: TRACE_MESSAGE_KINDS.pending_bids,
+      timestamp: Date.now(),
+      step,
+      instanceId,
+      threads: [...pending].map(({ generator: _, ...rest }) => rest),
+    })
+
+    const frontier = computeFrontier(pending)
+    sendTrace({
+      kind: TRACE_MESSAGE_KINDS.frontier,
+      timestamp: Date.now(),
+      step,
+      instanceId,
+      ...frontier,
+    })
 
     if (frontier.status === FRONTIER_STATUS.ready) {
       /** @internal Priority Queue BPEvent Selection Strategy */
-      const selectedEvent = frontier.enabled.sort(
+      const selected = frontier.enabled.sort(
         ({ priority: priorityA }, { priority: priorityB }) => priorityA - priorityB,
       )[0]!
-      snapshotPublisher(snapshotFormatter({ candidates: frontier.candidates, selectedEvent, pending }))
-      nextStep(selectedEvent)
+      nextStep(selected, step)
       return
     }
     if (frontier.status === FRONTIER_STATUS.deadlock) {
-      snapshotPublisher(deadlockSnapshotFormatter({ candidates: frontier.candidates, pending }))
+      sendTrace({
+        kind: TRACE_MESSAGE_KINDS.deadlock,
+        timestamp: Date.now(),
+        step,
+        instanceId,
+      })
+    }
+    if (frontier.status === FRONTIER_STATUS.idle) {
+      sendTrace({
+        kind: TRACE_MESSAGE_KINDS.idle,
+        timestamp: Date.now(),
+        step,
+        instanceId,
+      })
+    }
+  }
+
+  const addThread: AddThread = (args) => {
+    const attemptedSpace = args?.space
+    if (validateThread(args)) {
+      const { label, rules, once, space } = args
+      try {
+        const syncPoints = generateRulesFunctions(rules, space)
+        const thread = useThread(syncPoints, once)
+        running.add({
+          priority: running.size + 1,
+          generator: thread(),
+          label,
+        })
+        // The provision record — after registration, so thread_added means
+        // registered. Makes the trace log self-contained (replay = these +
+        // ingress events).
+        sendTrace({
+          kind: TRACE_MESSAGE_KINDS.thread_added,
+          timestamp: Date.now(),
+          instanceId,
+          thread: args,
+        })
+      } catch (err) {
+        sendTrace({
+          kind: TRACE_MESSAGE_KINDS.add_thread_error,
+          timestamp: Date.now(),
+          instanceId,
+          error: [err instanceof Error ? err.message : String(err)],
+          space,
+        })
+      }
+    } else {
+      sendTrace({
+        kind: TRACE_MESSAGE_KINDS.add_thread_error,
+        timestamp: Date.now(),
+        instanceId,
+        error: validateThread.errors ?? [],
+        ...(typeof attemptedSpace === 'string' && { space: attemptedSpace }),
+      })
     }
   }
 
@@ -305,14 +251,54 @@ export const behavioral: Behavioral = <Details extends EventDetails = EventDetai
    *
    * @param selectedEvent - Event candidate selected for this step.
    */
-  function nextStep(selectedEvent: CandidateBid) {
-    resumePendingThreadsForSelectedEvent({
+  function nextStep(selectedEvent: CandidateBid, stepId: number) {
+    const transformers = resumePendingThreadsForSelectedEvent({
       selectedEvent,
       running,
       pending,
+      sendTrace,
+      instanceId,
+      step: stepId,
     })
-    actionPublisher({ type: selectedEvent.type, detail: selectedEvent.detail })
-
+    if (transformers.length) {
+      sendTrace?.({
+        kind: TRACE_MESSAGE_KINDS.transform,
+        timestamp: Date.now(),
+        step: stepId,
+        instanceId,
+        transformers,
+      })
+      for (const { query, target, thread, space } of transformers) {
+        const result = evaluateTransform(query, selectedEvent.detail)
+        if (result.ok) {
+          addThread({
+            space,
+            label: `Transform(${thread} => ${target})`,
+            once: true,
+            rules: [{ request: { type: target, detail: result.value } }],
+          })
+        } else {
+          // Errors-as-data: the target never fires; the failure is traced.
+          sendTrace?.({
+            kind: TRACE_MESSAGE_KINDS.transform_error,
+            timestamp: Date.now(),
+            step: stepId,
+            instanceId,
+            transformer: { query, target, thread, space },
+            reason: result.reason,
+            ...(result.stderr !== undefined && { stderr: result.stderr }),
+            ...(result.exitCode !== undefined && { exitCode: result.exitCode }),
+          })
+        }
+      }
+    }
+    sendTrace({
+      kind: TRACE_MESSAGE_KINDS.selection,
+      timestamp: Date.now(),
+      step: stepId,
+      instanceId,
+      selected: selectedEvent,
+    })
     /**
      * @internal
      * Executes one part of the super-step: advancing running threads to their next yield.
@@ -332,15 +318,26 @@ export const behavioral: Behavioral = <Details extends EventDetails = EventDetai
    * Implementation of the public `trigger` function.
    */
   const trigger: Trigger = (event) => {
+    // Read before validation: the Ajv type-guard narrows `event` to `never` in
+    // the failure branch, so the attempted space must be captured up front.
+    const attemptedSpace = event.space
+    if (!validateBPEvent(event)) {
+      return sendTrace({
+        kind: TRACE_MESSAGE_KINDS.trigger_error,
+        timestamp: Date.now(),
+        instanceId,
+        error: validateBPEvent.errors ?? [],
+        ...(typeof attemptedSpace === 'string' ? { space: attemptedSpace } : {}),
+      })
+    }
     const thread = function* () {
       yield {
         request: event,
       }
     }
-    const threadId = ueid(TRIGGER_ID_PREFIX)
-    running.set(threadId, {
+    running.add({
+      space: event.space,
       priority: 0,
-      source: EVENT_SOURCES.trigger,
       generator: thread(),
       ingress: true,
       label: event.type,
@@ -357,67 +354,15 @@ export const behavioral: Behavioral = <Details extends EventDetails = EventDetai
      * 4. Moves the thread from 'running' to 'pending' state
      * 5. Proceeds to the event selection phase
      */
-    step()
+    step(true)
   }
 
   /**
    * @internal
-   * Implementation of the public `useFeedback` hook.
-   *
-   * Subscribes the provided handlers to the action publisher, invoking the
-   * appropriate handler whenever a matching event is selected.
-   * Returns a disconnect function that removes the subscription when called.
-   *
-   * @remarks
-   * The subscriber is async so both sync and async handlers are caught by
-   * the try/catch. Errors are published as `feedback_error` snapshot messages
-   * and logged to console. The publisher still fire-and-forgets the returned
-   * promise via `void cb(value)`, so the BP engine loop is never blocked.
-   *
-   * The generic type parameter `Details` enables type-safe handler mapping,
-   * where each handler receives its correctly-typed detail payload.
+   * Implementation of the public `useTrace` hook.
+   * Delegates directly to the trace publisher's subscribe method.
    */
-  const useFeedback: UseFeedback<Details> = (handlers) => {
-    const disconnect = actionPublisher.subscribe(async (data: BPEvent) => {
-      const { type, detail } = data
-      if (Object.hasOwn(handlers, type)) {
-        try {
-          await handlers[type]!(detail)
-        } catch (error) {
-          const message = {
-            kind: SNAPSHOT_MESSAGE_KINDS.feedback_error,
-            type,
-            detail,
-            error: error instanceof Error ? error.message : String(error),
-          }
-          snapshotPublisher(message)
-        }
-      }
-    })
-    return disconnect
-  }
-
-  const addBThread: AddBThread = (label: string, thread: ReturnType<BSync>) => {
-    const threadId = ueid(BTHREAD_ID_PREFIX)
-    running.set(threadId, {
-      priority: running.size + 1,
-      source: EVENT_SOURCES.request,
-      generator: thread(),
-      label,
-    })
-  }
-  const addBThreads: AddBThreads = (threads: BThreads) => {
-    for (const [label, thread] of Object.entries(threads)) {
-      addBThread(label, thread)
-    }
-  }
-  /**
-   * @internal
-   * Implementation of the public `useSnapshot` hook.
-   * Delegates directly to the snapshot publisher's subscribe method.
-   */
-  const useSnapshot: UseSnapshot = (listener) => snapshotPublisher.subscribe(listener)
-  const reportSnapshot: ReportSnapshot = (message) => snapshotPublisher(message)
+  const useTrace: UseTrace = (listener) => sendTrace.subscribe(listener)
 
   /**
    * @internal
@@ -429,16 +374,11 @@ export const behavioral: Behavioral = <Details extends EventDetails = EventDetai
    */
   return Object.freeze({
     /** Add thread to program. */
-    addBThread,
-    /** Add many threads to program. */
-    addBThreads,
+    addThread,
     /** Function to inject external events into the program. */
     trigger,
-    /** Hook to subscribe to selected events with feedback handlers. */
-    useFeedback,
-    /** Hook to subscribe to internal state snapshots for monitoring/debugging. */
-    useSnapshot,
-    /** Host/runtime seam for publishing structured diagnostics to snapshot subscribers. */
-    reportSnapshot,
+    /** Hook to subscribe to internal state traces for monitoring/debugging. */
+    useTrace,
+    step: () => step(),
   })
 }

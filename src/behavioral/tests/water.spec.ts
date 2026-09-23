@@ -1,7 +1,15 @@
 import { expect, test } from 'bun:test'
-import { behavioral, type SnapshotMessage } from 'plaited/behavioral'
-import { bSync, bThread } from '../behavioral.shared.ts'
-import { onType } from './helpers.ts'
+import { TRACE_MESSAGE_KINDS } from '../behavioral.constants.ts'
+import { behavioral } from '../behavioral.ts'
+import type { Trace } from '../behavioral.types.ts'
+import { onSelection } from './helpers.ts'
+
+const addHotRules = [{ request: { type: 'hot' } }, { request: { type: 'hot' } }, { request: { type: 'hot' } }]
+const addColdRules = [{ request: { type: 'cold' } }, { request: { type: 'cold' } }, { request: { type: 'cold' } }]
+const mixHotColdRules = [
+  { waitFor: [{ type: 'hot' }], block: [{ type: 'cold' }] },
+  { waitFor: [{ type: 'cold' }], block: [{ type: 'hot' }] },
+]
 
 /**
  * Test scenario: Demonstrates a basic behavioral program (`bProgram`).
@@ -12,7 +20,7 @@ import { onType } from './helpers.ts'
  * - A `bProgram` instance is created.
  * - A b-thread named 'addHot' is defined using `bThread` and `bSync`.
  *   - It consists of three steps, each requesting the 'hot' event.
- * - A feedback handler using `useFeedback` is registered to track when 'hot' events are selected.
+ * - A feedback handler using `addHandler` is registered to track when 'hot' events are selected.
  * - The program is initiated by triggering a 'start' event (though any event could start it).
  *
  * Expected Outcome:
@@ -21,18 +29,12 @@ import { onType } from './helpers.ts'
  */
 test('Add hot water 3 times', () => {
   const actual: string[] = []
-  const { addBThreads, trigger, useFeedback } = behavioral()
-  addBThreads({
-    addHot: bThread([
-      bSync({ request: { type: 'hot' } }),
-      bSync({ request: { type: 'hot' } }),
-      bSync({ request: { type: 'hot' } }),
-    ]),
-  })
-  useFeedback({
-    hot() {
-      actual.push('hot')
-    },
+  const program = behavioral()
+  const { addThread, trigger } = program
+
+  addThread({ label: 'addHot', rules: addHotRules, once: true })
+  onSelection(program, (selected) => {
+    if (selected.type === 'hot') actual.push('hot')
   })
   trigger({ type: 'start' })
   expect(actual).toEqual(['hot', 'hot', 'hot'])
@@ -54,26 +56,16 @@ test('Add hot water 3 times', () => {
  */
 test('Add hot/cold water 3 times', () => {
   const actual: string[] = []
-  const { addBThreads, trigger, useFeedback } = behavioral()
-  addBThreads({
-    addHot: bThread([
-      bSync({ request: { type: 'hot' } }),
-      bSync({ request: { type: 'hot' } }),
-      bSync({ request: { type: 'hot' } }),
-    ]),
-    addCold: bThread([
-      bSync({ request: { type: 'cold' } }),
-      bSync({ request: { type: 'cold' } }),
-      bSync({ request: { type: 'cold' } }),
-    ]),
+  const program = behavioral()
+  const { addThread, trigger } = program
+
+  addThread({ label: 'addHot', rules: addHotRules, once: true })
+  addThread({ label: 'addCold', rules: addColdRules, once: true })
+  onSelection(program, (selected) => {
+    if (selected.type === 'hot') actual.push('hot')
   })
-  useFeedback({
-    hot() {
-      actual.push('hot')
-    },
-    cold() {
-      actual.push('cold')
-    },
+  onSelection(program, (selected) => {
+    if (selected.type === 'cold') actual.push('cold')
   })
   trigger({ type: 'start' })
   expect(actual).toEqual(['hot', 'hot', 'hot', 'cold', 'cold', 'cold'])
@@ -87,33 +79,17 @@ test('Add hot/cold water 3 times', () => {
  */
 test('interleave', () => {
   const actual: string[] = []
-  const { addBThreads, trigger, useFeedback } = behavioral()
-  addBThreads({
-    addHot: bThread([
-      bSync({ request: { type: 'hot' } }),
-      bSync({ request: { type: 'hot' } }),
-      bSync({ request: { type: 'hot' } }),
-    ]),
-    addCold: bThread([
-      bSync({ request: { type: 'cold' } }),
-      bSync({ request: { type: 'cold' } }),
-      bSync({ request: { type: 'cold' } }),
-    ]),
-    mixHotCold: bThread(
-      [
-        bSync({ waitFor: onType('hot'), block: onType('cold') }),
-        bSync({ waitFor: onType('cold'), block: onType('hot') }),
-      ],
-      true,
-    ),
+  const program = behavioral()
+  const { addThread, trigger } = program
+
+  addThread({ label: 'addHot', rules: addHotRules, once: true })
+  addThread({ label: 'addCold', rules: addColdRules, once: true })
+  addThread({ label: 'mixHotCold', rules: mixHotColdRules })
+  onSelection(program, (selected) => {
+    if (selected.type === 'hot') actual.push('hot')
   })
-  useFeedback({
-    hot() {
-      actual.push('hot')
-    },
-    cold() {
-      actual.push('cold')
-    },
+  onSelection(program, (selected) => {
+    if (selected.type === 'cold') actual.push('cold')
   })
   trigger({ type: 'start' })
   expect(actual).toHaveLength(6)
@@ -122,40 +98,24 @@ test('interleave', () => {
 })
 
 /**
- * Test scenario: Demonstrates the use of `useSnapshot` to capture the state
+ * Test scenario: Demonstrates the use of `useTrace` to capture the state
  * of the behavioral program at each step (super-step).
  * This is useful for debugging and understanding the event selection process.
- * The captured snapshots are compared against a baseline snapshot.
+ * The captured traces are compared against a baseline trace.
  */
 test('logging', () => {
-  const snapshots: SnapshotMessage[] = []
-  const { addBThreads, trigger, useSnapshot } = behavioral()
-  useSnapshot((snapshot: SnapshotMessage) => {
-    snapshots.push(snapshot)
+  const traces: Trace[] = []
+  const { addThread, trigger, useTrace } = behavioral()
+  useTrace((trace) => {
+    traces.push(trace)
   })
-  addBThreads({
-    addHot: bThread([
-      bSync({ request: { type: 'hot' } }),
-      bSync({ request: { type: 'hot' } }),
-      bSync({ request: { type: 'hot' } }),
-    ]),
-    addCold: bThread([
-      bSync({ request: { type: 'cold' } }),
-      bSync({ request: { type: 'cold' } }),
-      bSync({ request: { type: 'cold' } }),
-    ]),
-    mixHotCold: bThread(
-      [
-        bSync({ waitFor: onType('hot'), block: onType('cold') }),
-        bSync({ waitFor: onType('cold'), block: onType('hot') }),
-      ],
-      true,
-    ),
-  })
+  addThread({ label: 'addHot', rules: addHotRules, once: true })
+  addThread({ label: 'addCold', rules: addColdRules, once: true })
+  addThread({ label: 'mixHotCold', rules: mixHotColdRules })
   trigger({ type: 'start' })
-  const selectionSnapshots = snapshots.filter((snapshot) => snapshot.kind === 'selection')
-  expect(selectionSnapshots.length).toBeGreaterThan(0)
-  const allBids = selectionSnapshots.flatMap((snapshot) => snapshot.bids)
-  expect(allBids.some((bid) => bid.type === 'hot')).toBe(true)
-  expect(allBids.some((bid) => bid.type === 'cold')).toBe(true)
+  const frontierTraces = traces.filter((trace) => trace.kind === TRACE_MESSAGE_KINDS.frontier)
+  expect(frontierTraces.length).toBeGreaterThan(0)
+  const allCandidates = frontierTraces.flatMap((trace) => trace.candidates)
+  expect(allCandidates.some((candidate) => candidate.type === 'hot')).toBe(true)
+  expect(allCandidates.some((candidate) => candidate.type === 'cold')).toBe(true)
 })

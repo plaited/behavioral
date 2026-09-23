@@ -3,28 +3,51 @@ name: Publish
 on:
   workflow_dispatch:
     inputs:
+      package:
+        type: choice
+        description: Package to publish
+        options:
+          - plaited
+          - "@plaited/pi"
       version:
-        description: "New version tag (e.g., 1.0.0)"
+        description: "New version (e.g., 1.0.0)"
         required: true
       next:
-        description: "Next prerelease number (optional, will create a version like x.y.z-next.N)"
+        description: "Next prerelease number (optional, creates x.y.z-next.N)"
         required: false
+
+env:
+  # Map display names (dropdown values) to package directories in the monorepo
+  PACKAGE_DIRS: '{"plaited":"packages/framework","@plaited/pi":"packages/pi"}'
+
 jobs:
   publish:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     permissions:
       contents: write
       id-token: write
 
     steps:
+      - name: Resolve package directory
+        id: resolve
+        env:
+          INPUT_PACKAGE: ${{ github.event.inputs.package }}
+          PACKAGE_DIRS: ${{ env.PACKAGE_DIRS }}
+        run: |
+          dir=$(echo "$PACKAGE_DIRS" | jq -r --arg pkg "$INPUT_PACKAGE" '.[$pkg] // empty')
+          if [[ -z "$dir" ]]; then
+            echo "::error::Unknown package: $INPUT_PACKAGE"
+            exit 1
+          fi
+          echo "dir=$dir" >> $GITHUB_OUTPUT
+          echo "name=$INPUT_PACKAGE" >> $GITHUB_OUTPUT
+          echo "tag=$(echo "$INPUT_PACKAGE" | sed 's|@||; s|/|-|')" >> $GITHUB_OUTPUT
+
       - name: Validate inputs
         env:
           INPUT_VERSION: ${{ github.event.inputs.version }}
           INPUT_NEXT: ${{ github.event.inputs.next }}
         run: |
-          # SECURITY: Validate all inputs before use to prevent injection
-          # Using env vars instead of direct interpolation to prevent shell injection
-
           # Validate version format (semver)
           if ! echo "$INPUT_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "::error::Invalid version format: $INPUT_VERSION"
@@ -72,7 +95,7 @@ jobs:
             exit 1
           fi
 
-          # Validate semver format (allows dots in prerelease suffix for formats like 1.0.0-next.1)
+          # Validate semver format (allows dots in prerelease suffix)
           if [[ ! "$version" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)(-([a-zA-Z0-9._-]+))?$ ]]; then
             echo "::error::Version must have the format 'x.y.z' or 'x.y.z-<string>', where x, y, and z are numbers."
             exit 1
@@ -81,22 +104,27 @@ jobs:
           echo "✅ Version format validated: $version"
 
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           token: ${{ secrets.GH_PAT }}
 
-      - name: Setup Node.js (for NPM OIDC)
-        uses: actions/setup-node@v4
+      - name: Setup Node.js (for npm OIDC)
+        uses: actions/setup-node@v7
         with:
           node-version: "lts/*"
           registry-url: https://registry.npmjs.org
           check-latest: true
 
-      - uses: oven-sh/setup-bun@v1
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
 
-      - name: Setup
+      - name: Install dependencies
         run: |
           bun install
+
+      - name: Check CSS schemas are up to date
+        if: steps.resolve.outputs.name == 'plaited'
+        run: |
+          bun run scripts/css-schemas/run.ts diff
 
       - name: Configure Git
         env:
@@ -106,32 +134,39 @@ jobs:
           git config user.name "$GIT_AUTHOR_NAME"
           git config user.email "$GIT_AUTHOR_EMAIL"
 
-      - name: Version
+      - name: Version package
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
           VERSION: ${{ steps.set_version.outputs.version }}
           IS_PRERELEASE: ${{ steps.set_version.outputs.is_prerelease }}
+          PKG_DIR: ${{ steps.resolve.outputs.dir }}
+          PKG_TAG: ${{ steps.resolve.outputs.tag }}
         run: |
+          cd "$PKG_DIR"
           npm version --no-git-tag-version "$VERSION"
 
+          cd "${{ github.workspace }}"
           git add -A
-          git commit -m "ci: publish [skip ci]"
+          git commit -m "ci: publish $PKG_TAG@$VERSION [skip ci]"
           git push
 
-          # Create GitHub release
+          # Create GitHub release with package-scoped tag
           if [[ "$IS_PRERELEASE" == "true" ]]; then
-            gh release create "v$VERSION" --generate-notes --prerelease
+            gh release create "$PKG_TAG@$VERSION" --generate-notes --prerelease
           else
-            gh release create "v$VERSION" --generate-notes
+            gh release create "$PKG_TAG@$VERSION" --generate-notes
           fi
 
-      - name: Publish to NPM (Trusted Publishing)
+      - name: Publish to npm (Trusted Publishing)
         env:
           IS_PRERELEASE: ${{ steps.set_version.outputs.is_prerelease }}
+          PKG_DIR: ${{ steps.resolve.outputs.dir }}
         run: |
-          # NPM trusted publishing uses OIDC token automatically
+          # npm trusted publishing uses OIDC token automatically
           # Provenance attestations are generated automatically (npm >=11.5.1)
-          # No NPM_TOKEN secret needed - authentication via GitHub OIDC
+          # No NPM_TOKEN secret needed — authentication via GitHub OIDC
+
+          cd "$PKG_DIR"
 
           if [[ "$IS_PRERELEASE" == "true" ]]; then
             echo "Publishing as next (prerelease)"

@@ -1,0 +1,53 @@
+name: CSS Schema Drift Check
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'  # Every Monday at 6 AM UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  drift-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.2
+      - name: Install dependenciesscripts/css-schemas
+        run: |
+          bun install
+      - name: Check for CSS schema drift
+        id: drift
+        continue-on-error: true
+        run: |
+          bun run scripts/css-schemas/run.ts diff
+      - name: Create issue if drift detected
+        if: steps.drift.outcome == 'failure'
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: ['css-schema-drift'],
+            });
+            if (issues.length === 0) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: 'CSS schema drift detected — @webref/css has new or changed properties',
+                labels: ['css-schema-drift'],
+                body: [
+                  'The CSS property schemas in `src/controller/css.schemas.ts` are out of date',
+                  'with the latest `@webref/css` data.',
+                  '',
+                  'Run `bun run generate:css-schemas` to regenerate, then commit the result.',
+                  '',
+                  'See [scripts/css-schemas/](scripts/css-schemas/) for details.',
+                ].join('\n'),
+              });
+            }

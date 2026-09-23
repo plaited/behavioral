@@ -83,7 +83,7 @@ jobs:
           - validation notes if you already tested something
           - a link to your branch or diff if it helps explain the proposal
 
-          Maintainers may label the Issue for internal agent/Kanban execution.
+          Maintainers may review the Issue for internal planning or implementation work.
           BODY
           )"
 

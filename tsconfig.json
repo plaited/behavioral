@@ -5,8 +5,8 @@
     "target": "ESNext",
     "module": "Preserve",
     "moduleDetection": "force",
-    "jsx": "react-jsx",
     "allowJs": true,
+    "types": ["bun"],
 
     // IDE may need this to properly show type errors
     "rootDir": ".",
@@ -28,8 +28,6 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "noPropertyAccessFromIndexSignature": false,
-
-    "jsxImportSource": "plaited"
   },
-  "exclude": ["src/ui/css/types", "src/hypergraph/graph-algorithms", "skills/node-auth/assets"]
+  "exclude": ["src/**/*.d.ts"]
 }

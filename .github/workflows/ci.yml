@@ -14,16 +14,21 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version: 1.4.2
       - name: Install dependencies
         run: |
           bun install
-          bunx playwright install chromium --with-deps
-          bunx playwright-cli open
-          bunx playwright-cli install-browser
+      - name: Cache betterleaks
+        uses: actions/cache@v6
+        with:
+          path: scripts/betterleaks/.bin
+          key: betterleaks-${{ runner.os }}-${{ runner.arch }}-v1.8.1
+      - name: Install betterleaks
+        run: |
+          bun run betterleaks:install
       - name: Run check
         run: |
           bun run check

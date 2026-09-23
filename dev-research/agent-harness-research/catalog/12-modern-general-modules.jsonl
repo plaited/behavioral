@@ -1,4 +1,0 @@
-{"id":"attitude-consistency","prompt":"Build a private reflection tool where I list my core beliefs or attitudes, compare them against past decisions or notes, and review where my actions feel consistent or inconsistent."}
-{"id":"modnet_belief-entry-card","prompt":"Create a belief or principle entry card with statement text, category, confidence level, and date last reviewed."}
-{"id":"modnet_consistency-review-panel","prompt":"Build a consistency review panel that shows one decision, the related beliefs it touches, and a place to record whether they align."}
-{"id":"modnet_reflection-timeline","prompt":"Create a reflection timeline where I browse past entries by date and reopen moments where my stated values shifted."}

@@ -1,135 +1,149 @@
 import { describe, expect, test } from 'bun:test'
-import { behavioral, type DeadlockSnapshot, type SelectionSnapshot, type SnapshotMessage } from 'plaited/behavioral'
-import * as z from 'zod'
-import { SNAPSHOT_MESSAGE_KINDS } from '../behavioral.constants.ts'
-import { bSync, bThread } from '../behavioral.shared.ts'
+import { TRACE_MESSAGE_KINDS } from '../behavioral.constants.ts'
+import { behavioral } from '../behavioral.ts'
+import type { DeadlockTrace, FrontierTrace, SelectionTrace, Trace } from '../behavioral.types.ts'
 
 const onType = (type: string) => ({
   type,
-  sourceSchema: z.enum(['trigger', 'request']),
-  detailSchema: z.unknown(),
 })
 
-describe(SNAPSHOT_MESSAGE_KINDS.deadlock, () => {
-  test('publishes deadlock snapshot when candidates exist but none are selectable', () => {
-    const snapshots: SnapshotMessage[] = []
-    const { addBThreads, trigger, useSnapshot } = behavioral()
+describe(TRACE_MESSAGE_KINDS.deadlock, () => {
+  test('publishes deadlock trace when candidates exist but none are selectable', () => {
+    const traces: Trace[] = []
+    const { addThread, trigger, useTrace } = behavioral()
 
-    useSnapshot((snapshot: SnapshotMessage) => {
-      snapshots.push(snapshot)
+    useTrace((trace: Trace) => {
+      traces.push(trace)
     })
 
-    addBThreads({
-      safety: bThread([bSync({ block: onType('dangerous') })], true),
-      interruptor: bThread([bSync({ interrupt: onType('dangerous') })], true),
-    })
+    addThread({ label: 'safety', rules: [{ block: [onType('dangerous')] }] })
+    addThread({ label: 'interruptor', rules: [{ interrupt: [onType('dangerous')] }] })
 
     trigger({ type: 'dangerous' })
 
-    const deadlocks = snapshots.filter((s): s is DeadlockSnapshot => s.kind === SNAPSHOT_MESSAGE_KINDS.deadlock)
+    const frontiers = traces.filter((s): s is FrontierTrace => s.kind === TRACE_MESSAGE_KINDS.frontier)
+    expect(frontiers).toHaveLength(1)
+    expect(frontiers[0]!.status).toBe('deadlock')
+    expect(frontiers[0]!.candidates).toEqual([
+      {
+        type: 'dangerous',
+        ingress: true,
+        priority: 0,
+      },
+    ])
+    expect(frontiers[0]!.enabled).toEqual([])
+
+    const deadlocks = traces.filter((s): s is DeadlockTrace => s.kind === TRACE_MESSAGE_KINDS.deadlock)
     expect(deadlocks).toHaveLength(1)
+    expect(deadlocks[0]!.step).toBe(frontiers[0]!.step)
 
-    const dangerousBid = deadlocks[0]!.bids.find((bid) => bid.type === 'dangerous')
-    expect(dangerousBid).toBeDefined()
-    expect(dangerousBid!.selected).toBe(false)
-    expect(dangerousBid!.reason).toBe('blocked')
-    expect(dangerousBid!.blockedBy?.label).toBe('safety')
-    expect(typeof dangerousBid!.blockedBy?.id).toBe('string')
-    expect(dangerousBid!.interrupts?.label).toBe('interruptor')
-    expect(typeof dangerousBid!.interrupts?.id).toBe('string')
-    expect(deadlocks[0]!.summary.candidateCount).toBe(1)
-    expect(deadlocks[0]!.summary.blockedCount).toBe(1)
-    expect(deadlocks[0]!.summary.unblockedCount).toBe(0)
-    expect(deadlocks[0]!.summary.blockers[0]!.label).toBe('safety')
-    expect(deadlocks[0]!.summary.interrupters[0]!.label).toBe('interruptor')
+    const selectionTraces = traces.filter((s) => s.kind === TRACE_MESSAGE_KINDS.selection)
+    expect(selectionTraces).toHaveLength(0)
 
-    const selectionSnapshots = snapshots.filter((s) => s.kind === SNAPSHOT_MESSAGE_KINDS.selection)
-    expect(selectionSnapshots).toHaveLength(0)
+    const frontierIndex = traces.findIndex((trace) => trace.kind === TRACE_MESSAGE_KINDS.frontier)
+    const deadlockIndex = traces.findIndex((trace) => trace.kind === TRACE_MESSAGE_KINDS.deadlock)
+    expect(frontierIndex).toBeGreaterThanOrEqual(0)
+    expect(deadlockIndex).toBeGreaterThan(frontierIndex)
   })
 
-  test('does not publish deadlock snapshot when no candidates exist', () => {
-    const snapshots: SnapshotMessage[] = []
-    const { addBThreads, useSnapshot } = behavioral()
+  test('does not publish deadlock trace when no candidates exist', () => {
+    const traces: Trace[] = []
+    const { addThread, useTrace } = behavioral()
 
-    useSnapshot((snapshot: SnapshotMessage) => {
-      snapshots.push(snapshot)
+    useTrace((trace: Trace) => {
+      traces.push(trace)
     })
 
-    addBThreads({
-      watcher: bThread([bSync({ waitFor: onType('dangerous') })], true),
-    })
+    addThread({ label: 'watcher', rules: [{ waitFor: [onType('dangerous')] }] })
 
-    expect(snapshots).toHaveLength(0)
+    // Provisioning traces (thread_added) do not step the program — no
+    // pending_bids/frontier/deadlock until a trigger arrives.
+    expect(traces.map((t) => t.kind)).toEqual(['thread_added'])
   })
 
-  test('publishes selection snapshot when enabled candidates exist and keeps priority selection behavior', () => {
-    const snapshots: SnapshotMessage[] = []
+  test('publishes selection trace when enabled candidates exist and keeps priority selection behavior', () => {
+    const traces: Trace[] = []
     const selected: string[] = []
-    const { addBThreads, trigger, useFeedback, useSnapshot } = behavioral()
+    const { addThread, trigger, useTrace } = behavioral()
 
-    useSnapshot((snapshot: SnapshotMessage) => {
-      snapshots.push(snapshot)
+    useTrace((trace: Trace) => {
+      traces.push(trace)
+      if (trace.kind === 'selection') selected.push(trace.selected.type)
     })
 
-    useFeedback({
-      low: () => {
-        selected.push('low')
-      },
-      high: () => {
-        selected.push('high')
-      },
-    })
-
-    addBThreads({
-      low: bThread([bSync({ request: { type: 'low' } })]),
-      high: bThread([bSync({ request: { type: 'high' } })]),
-    })
+    addThread({ label: 'low', rules: [{ request: { type: 'low' } }], once: true })
+    addThread({ label: 'high', rules: [{ request: { type: 'high' } }], once: true })
 
     trigger({ type: 'tick' })
 
-    expect(selected[0]).toBe('low')
-    const deadlocks = snapshots.filter((s): s is DeadlockSnapshot => s.kind === SNAPSHOT_MESSAGE_KINDS.deadlock)
+    expect(selected.filter((t) => t !== 'tick')[0]).toBe('low')
+    const deadlocks = traces.filter((s): s is DeadlockTrace => s.kind === TRACE_MESSAGE_KINDS.deadlock)
     expect(deadlocks).toHaveLength(0)
-    const selections = snapshots.filter((s) => s.kind === SNAPSHOT_MESSAGE_KINDS.selection)
+    const frontiers = traces.filter((s): s is FrontierTrace => s.kind === TRACE_MESSAGE_KINDS.frontier)
+    const selections = traces.filter((s): s is SelectionTrace => s.kind === TRACE_MESSAGE_KINDS.selection)
+    expect(frontiers.length).toBeGreaterThan(0)
     expect(selections.length).toBeGreaterThan(0)
+    const lowSelection = selections.find((selection) => selection.selected.type === 'low')
+    expect(lowSelection).toBeDefined()
+    expect(lowSelection!.selected.ingress).toBeUndefined()
+    const lowFrontier = frontiers.find((frontier) => frontier.step === lowSelection!.step)
+    expect(lowFrontier).toBeDefined()
+    expect(lowFrontier!.enabled.some((candidate) => candidate.type === 'low')).toBe(true)
+    const frontierIndex = traces.findIndex((trace) => trace.kind === TRACE_MESSAGE_KINDS.frontier)
+    const selectionIndex = traces.findIndex((trace) => trace.kind === TRACE_MESSAGE_KINDS.selection)
+    expect(selectionIndex).toBeGreaterThan(frontierIndex)
   })
 
-  test('selection snapshot marks only the exact chosen candidate as selected', () => {
-    const snapshots: SnapshotMessage[] = []
-    const { addBThreads, trigger, useSnapshot } = behavioral()
+  test('selection trace reports the chosen candidate event', () => {
+    const traces: Trace[] = []
+    const { addThread, trigger, useTrace } = behavioral()
 
-    useSnapshot((snapshot: SnapshotMessage) => {
-      snapshots.push(snapshot)
+    useTrace((trace: Trace) => {
+      traces.push(trace)
     })
 
-    addBThreads({
-      blockSecond: bThread(
-        [
-          bSync({
-            block: {
+    addThread({
+      label: 'blockSecond',
+      rules: [
+        {
+          block: [
+            {
               type: 'same_type',
-              sourceSchema: z.literal('request'),
-              detailSchema: z.object({ n: z.literal(2) }),
+              detailSchema: {
+                type: 'object' as const,
+                properties: { n: { const: 2 } },
+                required: ['n'],
+                additionalProperties: false,
+              },
             },
-          }),
-        ],
-        true,
-      ),
-      first: bThread([bSync({ request: { type: 'same_type', detail: { n: 1 } } })]),
-      second: bThread([bSync({ request: { type: 'same_type', detail: { n: 2 } } })]),
+          ],
+        },
+      ],
     })
+    addThread({ label: 'first', rules: [{ request: { type: 'same_type', detail: { n: 1 } } }], once: true })
+    addThread({ label: 'second', rules: [{ request: { type: 'same_type', detail: { n: 2 } } }], once: true })
 
     trigger({ type: 'kickoff' })
 
-    const selections = snapshots.filter(
-      (snapshot): snapshot is SelectionSnapshot =>
-        snapshot.kind === SNAPSHOT_MESSAGE_KINDS.selection &&
-        snapshot.bids.some((bid) => bid.type === 'same_type' && bid.selected),
+    const frontier = traces.find(
+      (trace): trace is FrontierTrace =>
+        trace.kind === TRACE_MESSAGE_KINDS.frontier &&
+        trace.status === 'ready' &&
+        trace.candidates.some((candidate) => candidate.type === 'same_type'),
     )
-    expect(selections).toHaveLength(1)
-    const sameTypeBids = selections[0]!.bids.filter((bid) => bid.type === 'same_type')
-    expect(sameTypeBids).toHaveLength(2)
-    expect(sameTypeBids.filter((bid) => bid.selected)).toHaveLength(1)
-    expect(sameTypeBids.find((bid) => bid.selected)?.detail).toEqual({ n: 1 })
+    expect(frontier).toBeDefined()
+    expect(frontier!.candidates.filter((candidate) => candidate.type === 'same_type')).toHaveLength(2)
+
+    const selection = traces.find(
+      (trace): trace is SelectionTrace =>
+        trace.kind === TRACE_MESSAGE_KINDS.selection && trace.selected.type === 'same_type',
+    )
+    expect(selection).toBeDefined()
+    const selectionFrontier = traces.find(
+      (trace): trace is FrontierTrace => trace.kind === TRACE_MESSAGE_KINDS.frontier && trace.step === selection!.step,
+    )
+    expect(selectionFrontier).toBeDefined()
+    expect(selectionFrontier!.candidates.some((candidate) => candidate.type === 'same_type')).toBe(true)
+    expect(selection!.selected.detail).toEqual({ n: 1 })
   })
 })

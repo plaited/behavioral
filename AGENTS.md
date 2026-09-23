@@ -11,20 +11,10 @@
 **Path:** `Bun.resolveSync()` for modules, `import.meta.dir` for current dir. Keep `node:path` for join/resolve/dirname.
 **Executables:** `Bun.which(cmd)` to check existence. `bunx` not `npx`.
 **When Node.js OK:** readline, node:path, APIs without Bun equivalents.
-**JSONL batch scripts:** for long-running scripts that emit `.jsonl`, stream rows to disk as they complete instead of buffering the full run in memory and writing once at the end. Keep a final summary print, but prefer append-style output for observability and crash recovery.
-**Long-running summaries:** if a batch script runs for minutes or hours, write a rolling sidecar summary file (for example `output.jsonl.summary.json`) as rows complete. Do not keep summary state observable only in stdout.
-**Batch memory discipline:** for high-row-count runners, keep only the minimum rolling counters and write queue in memory. Do not accumulate full result arrays unless the total result set is trivially small.
-**Varlock-backed API calls:** when a repo script needs secrets injected by `varlock`, prefer direct Bun `fetch` or normal process env access inside the script. Avoid nested shell quoting pipelines for authenticated API calls because they are brittle and can masquerade as missing-key failures.
-**You.com scripted integrations:** prefer the official `@youdotcom-oss/api` client before raw `fetch` for Bun scripts. Fall back to manual HTTP only for debugging or when the official client cannot express the needed endpoint behavior.
-**API-bound evaluation matrices:** when a script is evaluating many independent rows against remote model APIs, prefer bounded concurrency instead of sequential execution. Default to a modest concurrency like `5` or `6` unless there is a clear provider-specific reason not to.
-**Concurrency ramping:** for remote-model batch runs, start at a bounded concurrency, observe parse stability / retry behavior / provider throughput, then raise concurrency only after the smaller run is clean. Do not jump straight to the highest plausible parallelism.
-**Throughput bottleneck assumption:** for OpenRouter or other remote-model lanes, assume network/provider latency is the main bottleneck before assuming local CPU or memory is. Optimize script architecture first, then raise concurrency.
-**Fanout observability:** for multi-attempt slice fanout or autoresearch with more than one concurrent attempt, use explicit `git worktree`-backed runs or an equivalent durable attempt directory. Each attempt must write observable artifacts while running:
-  - status/result JSON
-  - changed-file or diff summary
-  - targeted validation result
-Do not rely on long-running opaque subagent state as the only record for large fanout work.
-
+**Varlock-backed env:** when repo commands need secrets, use `.env.schema` and Varlock-injected
+environment variables. Avoid brittle nested shell quoting for authenticated calls.
+**Web research:** use the `you` skill for web search, research, and content extraction when
+repo-local evidence is insufficient or current external context is needed.
 
 # Workflow
 
@@ -34,107 +24,142 @@ Do not rely on long-running opaque subagent state as the only record for large f
 **File history** — `git log --oneline -- <path>` to understand why.
 **Branch scope** — `git diff main...HEAD --stat` for current changes.
 **History over stale prose** — code + git history wins. Update the doc.
-**Agent worktrees** — create new manual task worktrees under `.worktrees/<task-slug>/` from
-`origin/dev` unless a task explicitly says otherwise. Use that path with Cline CLI via
-`cline --cwd .worktrees/<task-slug>` or choose it in Cline Worktrees UI when prompted. Cline
-Kanban card worktrees are tool-managed and currently live under `~/.cline/worktrees/...`; do not
-assume Kanban can be configured to use `.worktrees/`. Existing external worktrees may finish in
-place. Worktrees are disposable after merge.
 
 ## Git Commits
 
 **Conventional commits** — `feat:`, `fix:`, `refactor:`, `docs:`, `chore:`, `test:`
 **Multi-line messages** for detailed context. **Never --no-verify**.
 **Wrap commit body lines at 100 chars or less** to satisfy commitlint.
-**When a multi-line message is awkward in shell quoting, use a commit message file** rather than
-forcing escaped newlines into `git commit -m`.
+**Prefer a commit message file for multi-line commits** (`git commit -F /tmp/message.txt`) so body
+wrapping is visible before hooks run. Use repeated `-m` flags only for short body lines already
+checked to be 100 chars or less.
+**Do not retry a failed commit with the same message shape** after commitlint rejects it. Rewrite
+the message with wrapped body lines first.
 
 **Git lock recovery:** if `/.git/index.lock` is present, first assume an interrupted or overlapping
 Git operation rather than corruption. Check that no Git process is still running, then remove the
 stale lock with `rm -f .git/index.lock` before retrying. Avoid starting a new commit while hook
 formatters or other Git operations are still in flight.
 
+## Pull Requests
+
+**Template required** — before opening or editing a PR, read `.github/pull_request_template.md`
+and preserve every required heading exactly.
+**Check after editing** — after opening or editing a PR, run
+`gh pr checks <pr-number> --repo behavioral-sh/behavioral`.
+**Fix description lint** — if `pr-description-lint` fails, inspect the failing job with
+`gh run view` and update the PR body with `gh pr edit` until the required heading check passes.
 
 ## Code Quality Gate
 
-Before committing code, always choose validation based on area of effect.
-
-Use Bun as the default test runner for repo validation commands.
+Before committing code, choose validation based on area of effect. Bun is the default test runner.
 
 Minimum gate:
 1. `bun --bun tsc --noEmit`
 2. targeted tests for the changed surface
 
-Use broader validation when:
-- runtime behavior changes
-- tool behavior changes
-- schemas or validators change
-- shared infrastructure changes
-- the area of effect is broad or uncertain
+Use broader validation when runtime behavior, tool behavior, schemas/validators, shared
+infrastructure, or any broad/uncertain surface changes. Use the minimum gate when the change is
+tightly bounded and verified by inspection or code search, or is path-only rename, link/reference
+cleanup, wording-only docs/skills text, or another edit that does not materially change executable
+faculty. If you choose targeted tests, state the scope and why the narrower gate suffices.
 
-Use the minimum gate when:
-- the change is tightly bounded and verified by file inspection or code search
-- only a small, clearly isolated executable surface changed
-- the change is path-only rename, link/reference cleanup, wording-only docs/skills text,
-  or another edit that does not materially change executable behavior
+Broader validation is still area-aware — it does not mean "run unrelated tests." Examples: if
+`skills/<name>/scripts` changed, run that skill's tests plus shared `src/` tests those scripts
+depend on; if a `src/<feature>` CLI command changed, run that feature's tests plus CLI/schema
+tests; if only `src/controller/` changed, run the controller test surfaces; if shared code changed
+and the impact is broad or unclear, expand coverage until the affected surface is credibly covered.
 
-If you choose targeted tests instead of the full suite, state the scope and why the narrower
-gate is sufficient.
-
-Broader validation is still area-aware. It does not mean “run unrelated tests.”
-Examples:
-- if only `scripts/` research infrastructure changed, run the relevant `scripts/tests/*`
-  plus any shared `src/` tests that those changes affect
-- if only `src/ui/` changed, run the relevant UI test surfaces
-- if shared code changed and the impact is broad or unclear, expand test coverage until the
-  affected surface is credibly covered
-
-`docs:` and `chore:` commits may skip executable validation when they do not change behavior.
+`docs:` and `chore:` commits may skip executable validation when they do not change
+behavior.
 
 ## Directory Boundaries
 
-**`src/`** — Framework code that ships with the node. CLI tools (`src/tools/`), runtime modules, schemas, types.
-**`scripts/`** — Calibration & eval infrastructure: graders, adapters, runners, MLX server launchers. Removed post-distillation.
-**`skills/`** — Implementation patterns + operational tools. Skill assets (prompts, references) live under their skill directory.
+**`src/faculties/`** — the process layer. Shared modules sit at the top: the
+faculty event wire (`faculties.types.ts` + `faculties.constants.ts` — every
+request/result event kind, validators, and the kind registry), the faculty
+wiring primitive (`use-faculty.ts`, `useFaculty` — Bun.spawn processes speaking
+the wire over stdio lines; it compiles the faculty's event schemas and returns
+them so the composition derives guard threads; exit-code crash synthesis as
+`faculty_error`; respawn on demand), the process lane (`process-lane.ts` — stdio
+emit/inbound, the envData bridge, bindEmit for the frontier embed),
+`behavioral-home.ts` (the `BEHAVIORAL_HOME` root), `resolve-faculty-entry.ts`
+(bundled/absolute/home-relative provider-entry paths), and `faculties.threads.ts`
+(the composition's root guard threads).
+Each faculty lives in its own subfolder — `faculty.ts` (the process entry),
+`threads.ts` (its default threads), `types.ts`/`schemas.ts`, `config.ts` (the system
+faculties), plus its `tests/`:
+- `system-two/` — Open Responses model calls; a provider entry —
+  `configSystemTwo(respond)` wires it, `useSystemTwo({ endpoints })` seeds the
+  endpoint map
+- `system-one/` — TypeSafe/OpenRouter Decisions; `configSystemOne` +
+  `useSystemOne({ endpoint })`, with 429/529 retry
+- `shell/` — bun-direct script execution — `run` op TS scripts via `bun run -`,
+  `shell` op Bun Shell commands through the wrapper; temp-file payloads over
+  ~100KB, deleted on every exit
+- `store/` — durable space-scoped persistence
+- `mcp/` — remote MCP connections/sessions/auth; `keychain-oauth-provider.ts`
+  is the MCP OAuth `BunKeychain` over `Bun.secrets` plus the issuer-binding v2
+  provider (faculty-only: nothing outside `mcp/` imports it)
+- `frontier/` — the in-process embed — imported and driven by the composition;
+  standalone spawns are a compatibility entry
+Each faculty owns its event types + input boundary; results echo the request
+`space`; op runners errors-as-data.
+**`src/tools/`** — deleted (fleet 0): the ICL conversion retired the CLI tool
+fleet. mcp-client is the mcp faculty (`src/faculties/mcp/faculty.ts`);
+skill/plugin operations are the shell faculty's threads
+(`src/faculties/shell/threads.ts`) + recipes + store, taught by
+`skills/skill-conventions/`.
+**`src/faculties.ts`** — the faculties public surface (package export `./faculties`): the
+`Faculty` union, the wire types + JSON schemas/validators (`faculties.types.ts`), the override thread
+threads (`shellThreads`, `mcpThreads`), their schemas/types, `useFaculty`, and the
+System One/Two config surface (`configSystemOne`/`useSystemOne`,
+`configSystemTwo`/`useSystemTwo`) — what a
+`config.ts` imports to compose. (`facultiesThreads`, the default root threads, is internal.) The runtime composition itself is `src/cli/b-program.ts`.
+**`src/behavioral/`** — the pure language layer: types, constants, utils, the interpreter core
+(`behavioral.ts`), and its internal jq subprocess (`jq.worker.ts` — engine-internal, wire-external;
+nothing outside behavioral/ speaks its wire). Zero process entries that speak the faculty wire —
+dependency arrow is one-way: `src/faculties/` → `src/behavioral/`.
+**`src/controller/`** — the browser Controller: a validation-free dumb relay over an injectable
+Transport, plus `controller.utils.ts` (DelegatedListener, swapBoundary, the deterministic floors
+`isInvalidTrigger`/`detectXssVectors`) and render-time scale error-back. `controller.schemas.ts`
+holds the AJV detail schemas for the `ui_*` wire shapes — imported by the host/threads, never
+the browser bundle (types in `controller.types.ts`, schemas in the separate file). The
+controller owns no AJV at runtime; its floors are hardcoded invariants (on*, malformed
+b-trigger, scale mismatch).
+**`src/cli/`** — the `behavioral` CLI framework (`makeCliRouter`/`parseCli`) and its commands,
+registered in `bin/behavioral.ts`. `init` (`src/cli/init.ts`) generates
+`<home>/config.ts` (+ optional provider entries under `<home>/providers/`):
+interactive tour by default at a TTY (injectable `ask` collector), agent JSON
+otherwise; api keys ride as env-var-name references, never literals. The
+`behavioral tools` fleet dispatcher is retired with the
+fleet (0 tools); turn/config commands land here as the composition rulings build out. The
+JSON-RPC IPC host lives here too: `b-program.ts` (the runtime composition, `bProgram`),
+`json-rpc.ts` (the line codec), `serve.ts` (the `serve`
+entry — ingress messages → triggers, `ui_*` selections → client notifications, redacted
+traces out), `load-config.ts` (`<BEHAVIORAL_HOME>/config.ts`), and `trace-consumer.ts`.
+**`src/utils/`** — shared pure utilities.
+**`src/faculties/<faculty>/threads.ts`** — faculty threads: `shell/threads.ts`
+(the ICL threads — skill/plugin scans, catalog/manifest schema gates, links dispatchers
++ stored recipes) and `mcp/threads.ts` (the auth replay spine). Threads ship with
+their faculty; `bProgram` mounts the faculty's threads when the faculty and its required
+faculties are on — except `faculties.threads.ts`, the composition's **root guard
+threads**, always mounted regardless of the allow-list. The
+former `src/threads/` is dissolved; its engine-layer specs live with their
+faculties (`src/faculties/<faculty>/tests/`), while specs for the shared modules
+stay in `src/faculties/tests/`.
+**`tasks/`** — Harbor skill-authoring task specs (challenge content; not shipped, not a plugin).
+**`scripts/`** — repo setup and package-maintenance shell glue.
+**`skills/`** — published reference skills.
+**`.agents/skills/`** — workspace-installed skills.
 
-**Never put graders, eval runners, or adapters in `src/tools/`.** Those are calibration infrastructure, not CLI commands.
-
-## Python Stack
-
-**Use `uv`** for Python environment and dependency management.
-
-**Project boundary:** Python belongs in dedicated subprojects, not the Bun repo root.
-- Good: `dev-research/native-model/training/`
-- Avoid: root-level `pyproject.toml` for the whole repo
-
-**Required files for Python subprojects:**
-- `pyproject.toml`
-- `.python-version`
-- `uv.lock`
-- local `.venv/` (ignored)
-
-**Default Python tools:**
-- **Lint/format:** `ruff`
-- **Tests:** `pytest`
-
-**Default Python workflow:**
-1. `uv sync`
-2. `uv run ruff check .`
-3. `uv run pytest`
-
-**Runtime smoke test first** — before wiring MLX/training/inference commands:
-```bash
-uv run python -c "import mlx.core as mx; print(mx.default_device())"
-```
-
-**Bun wrapper rule:** if a Python training/inference workflow is meant to be run from this repo, expose it through a Bun `scripts/*.ts` wrapper and a `package.json` command. Keep Python as the backend implementation, not the primary operator surface.
-
-**Do not ad hoc `pip install` into the repo root.** Python here supports training/inference workflows, not the shipped framework runtime.
+**CLI features** — a `makeCli` JSON-in/JSON-out command is exported through its `src/cli/<feature>.ts`
+module and registered in `bin/behavioral.ts`. Invoke as `behavioral <command> '<json>'`; each
+command supports `--schema <input|output>`, `--dry-run`, `--help`.
 
 ## GitHub CLI
 
 **Always use `gh` for GitHub URLs** — `gh api`, `gh pr view`, `gh issue view`. Never WebFetch for GitHub content.
-
 
 # Context Repository
 
@@ -145,14 +170,12 @@ uv run python -c "import mlx.core as mx; print(mx.default_device())"
 | `src/` code + types | What the system IS |
 | `git log` | Why it changed |
 | `AGENTS.md` | How to work here (rules) |
-| `dev-research/*/program.md` | Active research programs and execution goals |
 | `docs/*.md` | Design rationale (verify against code) |
 | `skills/` | Implementation patterns + operational tools |
 
 **When sources conflict:** Code + git history wins. Update the stale doc.
 
 **Keep docs in sync:** When code changes affect docs, update in the same commit.
-
 
 # Module Organization
 
@@ -166,17 +189,16 @@ uv run python -c "import mlx.core as mx; print(mx.default_device())"
 
 **File naming:**
 - Shared files use module prefix: `feature.types.ts`, `feature.schemas.ts`, `feature.utils.ts`, `feature.constants.ts`
-- Feature files use dash-case: `create-agent-loop.ts`, `control-island.ts`, `key-mirror.ts`
-- Name the file after its primary export: `createA2AHandler` → `create-a2a-handler.ts`
+- Feature files use dash-case: `resolve-relative-path.ts`, `limit-text-bytes.ts`, `key-mirror.ts`
+- Name the file after its primary export: `resolveRelativePath` → `resolve-relative-path.ts`
 - Main entry uses module name: `behavioral.ts`, `server.ts`, `controller.ts`
 - **Never prefix feature files with the directory name** — the directory already provides context
 
 **File organization:**
 - `feature.types.ts` — types only
-- `feature.schemas.ts` — Zod schemas + `z.infer<>` types
+- `feature.schemas.ts` — `JSONSchemaType<T>` schemas + AJV-compiled validators
 - `feature.constants.ts` — constants
 - `feature.ts` — main implementation
-
 
 # Testing
 
@@ -188,38 +210,89 @@ uv run python -c "import mlx.core as mx; print(mx.default_device())"
 **Run:** choose tests by affected surface. Do not run unrelated areas just to satisfy a blanket rule.
 Expand test coverage when the impact is broad, shared, or uncertain.
 
-
 # Accuracy
 
 **95% confidence threshold** — report uncertainty rather than guess.
 **Verification first** — read files before stating implementation details.
 **When uncertain:** state the discrepancy, explain why, present to user. Never invent solutions.
-**TypeScript verification** — use the `lsp` tool for type-aware analysis (hover, references, definitions, symbols, exports, find).
-
+**TypeScript verification** — use the `lsp` skill for type-aware analysis (hover, references, definitions, symbols, exports, find).
 
 # Core Conventions
 
 **Type over interface** — `type User = {` not `interface User {`
-**No any** — use `unknown` with type guards.
+**No any** — use `unknown` with type guards. At external boundaries (file/network/IPC/event-detail
+payloads), validate with AJV: define a `JSONSchemaType<T>` and compile with `ajv.compile` (the shared
+instance in `src/behavioral/behavioral.types.ts`; thread `detailSchema` gates and faculty
+input boundaries are the pattern homes). Trust the validated value downstream.
 **PascalCase types** — schemas get `Schema` suffix.
+**Schemas are AJV, not Zod.** Define wire shapes as `JSONSchemaType<T>` and compile with the shared
+`ajv` instance. Prefer structural schemas (`oneOf` branches, strict `additionalProperties: false` at
+every level) so constraints are explicit and JSON-schema replay contracts stay aligned. Do not
+hand-maintain a parallel Zod shape alongside an AJV one. Schema-data is exported for reuse (the
+catalog/manifest/recipe contracts in `src/faculties/shell/threads.ts`).
+**No cross-module schema drift.** When a CLI command returns a shape produced by another module,
+the output schema must derive from or reference that module's exported schema —
+not be hand-mirrored. Failure mode: a module's output type changes; a downstream CLI/tool schema
+silently rejects the new field (`additionalProperties: false` bites). Fix: one JSON-schema home for
+the shape (e.g. a faculty's event schema in `src/faculties/faculties.types.ts`), consumed
+downstream via `.schema` or export.
+**CLI schema reflection uses AJV.** The `makeCliRouter`/`parseCli` framework in `src/cli/cli.ts`
+reflects command schemas via `--schema input|output` — schemas are `JSONSchemaType<T>` objects,
+so reflection is `JSON.stringify(schema)`. The CLI AJV instance (`useDefaults: true`) matches
+Zod's `.default()` faculty; otherwise it is identical to the shared AJV.
 **Arrow functions** — `const fn = () =>` over `function fn()`.
 **Object params >2 args** — `fn({ a, b, c }: { ... })`.
 **Private fields** — `#field` (ES2022) not `private field`.
 **JSON imports** — `import x from 'file.json' with { type: 'json' }`.
 **@ts-ignore needs description** — `// @ts-ignore - reason here`.
+**Behavioral handlers:** do not use local `try/catch` for validation or side-effect errors
+inside `addHandler`/feedback handlers unless explicitly converting a known domain failure into a
+normal result event. Let behavioral publish `feedback_error` snapshots for handler failures.
 **Mermaid diagrams only** — no ASCII box-drawing.
-**Skills are internal research/runtime surfaces** until the skill module owns
-their operator story. Do not assume a public `validate-skill` CLI exists.
 
-# Skill Pointers
+## Minimal-Implementation Directive
 
-**TSDoc** — use `code-documentation` skill for conventions when writing/editing TSDoc.
-**BP patterns** — use `behavioral-core` skill when implementing behavioral programs.
-**UI development/testing** — use `plaited-ui` for controller protocol, custom
-elements, SSR, and the three-layer UI test strategy.
-**Agent pipeline** — use `behavioral-core` plus `src/agent/create-agent.ts` and `docs/AGENT-LOOP.md` when implementing module-owned orchestration or agent event flow.
-**Plaited development workflow** — use the repo-local `plaited-development` skill before
-starting agent-authored feature/fix branches, reviewing agent-authored changes, or preparing
-integration/promotion work.
-**Cline docs** — use the repo-local `search-cline-docs` skill when working with
-Cline, Cline Kanban, Cline MCP setup, or Cline provider configuration.
+Before writing code, resolve the task at the FIRST step that holds:
+1. Does this capability need to exist for the stated task? If it is speculative, do not build it.
+   Say so in one sentence and stop.
+2. Does something already in THIS codebase do it? Reuse it. Read before you write;
+   re-implementing a helper that lives three files over is the most common waste.
+   Check `src/utils.ts` first (`keyMirror`, `deepEqual`, `isTypeOf`, `trueTypeOf`, `ueid`,
+   case conversion, `htmlEscape`, `wait`); read `src/utils.ts` (it re-exports `src/utils/`) to
+   explore its exports when uncertain.
+3. Does the standard library or the runtime/platform already do it? (`<input type="date">`, a DB
+   unique constraint, a CSS rule.) Use it.
+4. Does an already-installed dependency do it? Use it. Do not add a new dependency for something
+   a few lines cover.
+5. Can it be one clear expression? Write the one expression.
+6. Otherwise: the smallest code that fully handles the task.
+
+NON-NEGOTIABLE FLOOR — none of the steps above may remove any of these, and "minimal" is never
+a reason to drop them:
+- input validation at trust boundaries (anything crossing a process, network, file, or user edge),
+- error handling that prevents data loss or silent corruption,
+- authn/authz and other security checks,
+- accessibility for anything a human interacts with.
+
+If a step would require cutting one of these, that step does not apply.
+
+Leave exactly one runnable check behind for any non-trivial logic.
+Mark deliberate shortcuts with a `MINIMAL:` comment naming the ceiling and the upgrade path,
+so "later" is greppable instead of forgotten.
+
+## Runtime Wiring Style
+
+Prefer direct callsite wiring when logic is local, stable, and used once.
+
+- Do not add wrapper helpers that only rename or pass through one existing function; do not
+  extract one-off shell commands, single-use handlers, or small runtime checks into local
+  helpers just to "clean up" a callsite. Inline unless the extraction removes real duplication or
+  improves correctness.
+- Do not replace a short set of direct event registrations with forwarding maps or event
+  lists unless there is a demonstrated maintenance benefit.
+- Keep runtime boundary code explicit at callsites: IPC handlers, event-emitter wiring, path
+  resolution at security-sensitive boundaries, process lifecycle wiring.
+- Prefer tests that exercise the real runtime boundary (process, IPC, event, lifecycle) over
+  helper-only tests that bypass the contract. Small abstractions are justified only when they
+  remove real cross-callsite duplication, materially improve correctness, encode a real domain
+  concept, or improve testing without hiding the runtime contract.

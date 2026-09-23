@@ -1,0 +1,16 @@
+// Bun Snapshot v1, https://bun.sh/docs/test/snapshots
+
+exports[`generated output is schema-only — one export, no ajv, no validation functions 1`] = `
+{
+  "head": 
+"export const CSSPropertiesSchema = {
+  type: 'object',
+  properties: {"
+,
+  "tail": 
+"  additionalProperties: { type: ['string', 'number'] },
+}
+"
+,
+}
+`;

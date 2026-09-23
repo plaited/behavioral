@@ -23,55 +23,35 @@ Concepts that still show up in the repo:
 - **Blocks**
 
 Where that influence is visible now:
-- [skills/modnet-modules/references/Structural-IA.md](/Users/eirby/Workspace/plaited/skills/modnet-modules/references/Structural-IA.md)
-- [docs/ARCHITECTURE.md](/Users/eirby/Workspace/plaited/docs/ARCHITECTURE.md)
+- [docs/wiki/architecture.md](docs/wiki/architecture.md)
+- [skills/plaited-framework/references/design-spec.md](skills/plaited-framework/references/design-spec.md)
 
 In Plaited, Structural IA is not just UI vocabulary. It also informs the
 module composition language, module-era system framing, and the bridge between
 symbolic constraints and generated artifacts.
 
-## Modnet and MSS
+## Matt Pocock Skills
 
-**Author:** Rachel Jaffe
-**Sources:**
-- [Modnet.md](/Users/eirby/Workspace/plaited/skills/modnet-modules/references/Modnet.md)
-- [Past the Internet: The Emergence of the Modnet](https://medium.com/@rjaffe01)
+**Author:** Matt Pocock
+**Source:** [mattpocock/skills](https://github.com/mattpocock/skills)
+**License:** [MIT](https://github.com/mattpocock/skills/blob/main/LICENSE),
+copyright (c) 2026 Matt Pocock
 
-Rachel Jaffe's modnet work is the other major living attribution that should be
-explicitly credited here. It materially shapes Plaited's node-level and
-module-level worldview.
-
-Concepts that still show up in the repo:
-- **modnets** as networks of sovereign, user-owned units
-- **module ownership and transportability**
-- **bridge-code / MSS tags**
-- **boundary-aware exchange**
-- **self-assembling module composition**
+Plaited includes adapted skill material from:
+- [TDD](https://github.com/mattpocock/skills/blob/main/skills/engineering/tdd/SKILL.md)
+- [grill-me](https://github.com/mattpocock/skills/blob/main/skills/productivity/grill-me/SKILL.md)
 
 Where that influence is visible now:
-- [README.md](/Users/eirby/Workspace/plaited/README.md)
-- [docs/ARCHITECTURE.md](/Users/eirby/Workspace/plaited/docs/ARCHITECTURE.md)
-- [docs/INFRASTRUCTURE.md](/Users/eirby/Workspace/plaited/docs/INFRASTRUCTURE.md)
-- [docs/AGENT-LOOP.md](/Users/eirby/Workspace/plaited/docs/AGENT-LOOP.md)
-- [skills/modnet-modules/SKILL.md](/Users/eirby/Workspace/plaited/skills/modnet-modules/SKILL.md)
-- [src/modules/a2a-module/a2a.schemas.ts](/Users/eirby/Workspace/plaited/src/modules/a2a-module/a2a.schemas.ts)
-
-Plaited does not reproduce the modnet work verbatim. It adapts it into:
-- a Bun-native A2A node architecture
-- MSS metadata on modules and Agent Cards
-- boundary-aware module and protocol design
-- a neuro-symbolic runtime where generated modules are constrained by BP and governance
+- [skills/tdd/SKILL.md](skills/tdd/SKILL.md)
+- [skills/grill-me/SKILL.md](skills/grill-me/SKILL.md)
 
 ## Scope Note
 
 This attribution file is intentionally conservative.
 
-At the moment, the strongest and clearest influences that are still reflected in
-the active repo are Rachel Jaffe's:
-- Structural Information Architecture
-- modnet / MSS / bridge-code work
+At the moment, the strongest and clearest influence that is still reflected in
+the active repo is Rachel Jaffe's Structural Information Architecture.
 
 Other ideas around generative UI, browser-grounded evaluation, or AI-assisted
 design may still inform experiments or language in places, but they are not as
-foundational or as directly encoded in the current codebase as the two sources
-above.
+foundational or as directly encoded in the current codebase.

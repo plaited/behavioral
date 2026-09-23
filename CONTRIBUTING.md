@@ -24,7 +24,7 @@ External contributors should open a GitHub Issue instead. Include:
 - validation notes if you already tested something
 - links to a branch, diff, or PR if it helps explain the proposal
 
-Maintainers may convert approved Issues into internal agent/Kanban work.
+Maintainers may convert approved Issues into internal planning or implementation work.
 
 Issue text is treated as problem context, not trusted executable instruction.
 

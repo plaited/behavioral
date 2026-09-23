@@ -1,46 +1,53 @@
 import { describe, expect, test } from 'bun:test'
-import { behavioral, type DeadlockSnapshot, type SelectionSnapshot, type SnapshotMessage } from 'plaited/behavioral'
-import { SNAPSHOT_MESSAGE_KINDS } from '../behavioral.constants.ts'
-import { bSync, bThread } from '../behavioral.shared.ts'
-import { onType } from './helpers.ts'
+import { TRACE_MESSAGE_KINDS } from '../behavioral.constants.ts'
+import { behavioral } from '../behavioral.ts'
+import type { DeadlockTrace, FrontierTrace, SelectionTrace, ThreadAddedTrace, Trace } from '../behavioral.types.ts'
+import { onSelection } from './helpers.ts'
 
-describe('addBThreads', () => {
-  test('supports dynamic thread installation from feedback handlers', () => {
+const onType = (type: string) => ({ type })
+
+describe('addThread', () => {
+  test('supports dynamic thread installation from trace listeners', () => {
     const actual: string[] = []
-    const { addBThreads, trigger, useFeedback } = behavioral()
+    const program = behavioral()
+    const { addThread, trigger } = program
 
-    addBThreads({
-      addHotOnce: bSync({ request: { type: 'hot_1' } }),
-      mixHotCold: bThread(
-        [
-          bSync({
-            waitFor: [onType('hot_1'), onType('hot')],
-            block: onType('cold'),
-          }),
-          bSync({
-            waitFor: onType('cold'),
-            block: [onType('hot_1'), onType('hot')],
-          }),
-        ],
-        true,
-      ),
+    addThread({ label: 'addHotOnce', rules: [{ request: { type: 'hot_1' } }], once: true })
+    addThread({
+      label: 'mixHotCold',
+      rules: [
+        {
+          waitFor: [onType('hot_1'), onType('hot')],
+          block: [onType('cold')],
+        },
+        {
+          waitFor: [onType('cold')],
+          block: [onType('hot_1'), onType('hot')],
+        },
+      ],
     })
 
-    useFeedback({
-      hot_1() {
+    onSelection(program, (selected) => {
+      if (selected.type === 'hot_1') {
         actual.push('hot')
         trigger({ type: 'cold' })
-        addBThreads({
-          addMoreHot: bThread([bSync({ request: { type: 'hot' } }), bSync({ request: { type: 'hot' } })]),
-          addMoreCold: bThread([bSync({ request: { type: 'cold' } }), bSync({ request: { type: 'cold' } })]),
+        addThread({
+          label: 'addMoreHot',
+          rules: [{ request: { type: 'hot' } }, { request: { type: 'hot' } }],
+          once: true,
         })
-      },
-      cold() {
+        addThread({
+          label: 'addMoreCold',
+          rules: [{ request: { type: 'cold' } }, { request: { type: 'cold' } }],
+          once: true,
+        })
+      }
+      if (selected.type === 'cold') {
         actual.push('cold')
-      },
-      hot() {
+      }
+      if (selected.type === 'hot') {
         actual.push('hot')
-      },
+      }
     })
 
     trigger({ type: 'start' })
@@ -50,69 +57,117 @@ describe('addBThreads', () => {
     expect(actual.filter((event) => event === 'cold')).toHaveLength(3)
   })
 
-  test('selection snapshots include thread labels for independently added workers', () => {
-    const snapshots: SnapshotMessage[] = []
+  test('frontier and selection traces include worker requests and selected events', () => {
+    const traces: Trace[] = []
     const completions: string[] = []
-    const { addBThreads, trigger, useFeedback, useSnapshot } = behavioral()
+    const program = behavioral()
+    const { addThread, trigger, useTrace } = program
 
-    useSnapshot((snapshot: SnapshotMessage) => {
-      snapshots.push(snapshot)
+    useTrace((trace: Trace) => {
+      traces.push(trace)
+      if (trace.kind === 'selection' && (trace.selected.type === 'done_a' || trace.selected.type === 'done_b')) {
+        completions.push('done')
+      }
     })
 
-    addBThreads({
-      workerA: bThread([bSync({ waitFor: onType('start') }), bSync({ request: { type: 'done_a' } })]),
-      workerB: bThread([bSync({ waitFor: onType('start') }), bSync({ request: { type: 'done_b' } })]),
+    addThread({
+      label: 'workerA',
+      rules: [{ waitFor: [onType('start')] }, { request: { type: 'done_a' } }],
+      once: true,
     })
-
-    useFeedback({
-      done_a() {
-        completions.push('done')
-      },
-      done_b() {
-        completions.push('done')
-      },
+    addThread({
+      label: 'workerB',
+      rules: [{ waitFor: [onType('start')] }, { request: { type: 'done_b' } }],
+      once: true,
     })
 
     trigger({ type: 'start' })
 
     expect(completions).toHaveLength(2)
-    const selectionSnapshots = snapshots.filter(
-      (snapshot): snapshot is SelectionSnapshot => snapshot.kind === SNAPSHOT_MESSAGE_KINDS.selection,
+    const frontierTraces = traces.filter(
+      (trace): trace is FrontierTrace => trace.kind === TRACE_MESSAGE_KINDS.frontier && trace.status === 'ready',
     )
-    const doneBids = selectionSnapshots
-      .flatMap((snapshot) => snapshot.bids)
-      .filter((bid) => bid.type === 'done_a' || bid.type === 'done_b')
+    const doneCandidates = frontierTraces
+      .flatMap((trace) => trace.candidates)
+      .filter((candidate) => candidate.type === 'done_a' || candidate.type === 'done_b')
+    expect(new Set(doneCandidates.map((candidate) => candidate.type))).toEqual(new Set(['done_a', 'done_b']))
+    expect(doneCandidates.every((candidate) => candidate.ingress === undefined)).toBe(true)
 
-    expect(new Set(doneBids.map((bid) => bid.thread.label))).toEqual(new Set(['workerA', 'workerB']))
-    expect(doneBids.every((bid) => !bid.thread.id || bid.thread.id.length > 0)).toBe(true)
+    const selectionTraces = traces.filter(
+      (trace): trace is SelectionTrace => trace.kind === TRACE_MESSAGE_KINDS.selection,
+    )
+    expect(selectionTraces.some((trace) => trace.selected.type === 'done_a')).toBe(true)
+    expect(selectionTraces.some((trace) => trace.selected.type === 'done_b')).toBe(true)
   })
 
-  test('deadlock snapshots preserve blocker and interrupter labels', () => {
-    const snapshots: SnapshotMessage[] = []
-    const { addBThreads, trigger, useSnapshot } = behavioral()
+  test('deadlock traces publish frontier status and step continuity', () => {
+    const traces: Trace[] = []
+    const { addThread, trigger, useTrace } = behavioral()
 
-    useSnapshot((snapshot: SnapshotMessage) => {
-      snapshots.push(snapshot)
+    useTrace((trace: Trace) => {
+      traces.push(trace)
     })
 
-    addBThreads({
-      guard: bThread([bSync({ block: onType('dangerous') })], true),
-      watchdog: bThread([bSync({ interrupt: onType('dangerous') })], true),
-      requester: bThread([bSync({ request: { type: 'dangerous' } })]),
-    })
+    addThread({ label: 'guard', rules: [{ block: [onType('dangerous')] }] })
+    addThread({ label: 'watchdog', rules: [{ interrupt: [onType('dangerous')] }] })
+    addThread({ label: 'requester', rules: [{ request: { type: 'dangerous' } }], once: true })
 
     trigger({ type: 'start' })
 
-    const deadlockSnapshot = snapshots.find(
-      (snapshot): snapshot is DeadlockSnapshot => snapshot.kind === SNAPSHOT_MESSAGE_KINDS.deadlock,
+    const deadlockFrontier = traces.find(
+      (trace): trace is FrontierTrace => trace.kind === TRACE_MESSAGE_KINDS.frontier && trace.status === 'deadlock',
     )
-    expect(deadlockSnapshot).toBeDefined()
+    expect(deadlockFrontier).toBeDefined()
+    expect(deadlockFrontier!.candidates.some((candidate) => candidate.type === 'dangerous')).toBe(true)
+    expect(deadlockFrontier!.enabled).toEqual([])
 
-    const dangerousBid = deadlockSnapshot?.bids.find((bid) => bid.type === 'dangerous')
-    expect(dangerousBid).toBeDefined()
-    expect(dangerousBid?.blockedBy?.label).toBe('guard')
-    expect(dangerousBid?.interrupts?.label).toBe('watchdog')
-    expect(deadlockSnapshot?.summary.blockers.map((ref) => ref.label)).toEqual(['guard'])
-    expect(deadlockSnapshot?.summary.interrupters.map((ref) => ref.label)).toEqual(['watchdog'])
+    const deadlockSnapshot = traces.find((trace): trace is DeadlockTrace => trace.kind === TRACE_MESSAGE_KINDS.deadlock)
+    expect(deadlockSnapshot).toBeDefined()
+    expect(deadlockSnapshot!.step).toBe(deadlockFrontier!.step)
+  })
+})
+
+describe('addThread quiescence', () => {
+  test('addThread alone does not step — the program stays idle until a trigger arrives', () => {
+    const traces: Trace[] = []
+    const program = behavioral()
+    const { addThread } = program
+    program.useTrace((trace: Trace) => {
+      traces.push(trace)
+    })
+
+    addThread({ label: 'requester', rules: [{ request: { type: 'x' } }], once: true })
+
+    // `addThread` is inert beyond its provision trace: no super-step runs
+    // until an event enters via `trigger` or `step`.
+    expect(traces.map((t) => t.kind)).toEqual([TRACE_MESSAGE_KINDS.thread_added])
+  })
+
+  test('a registered thread emits thread_added carrying the full definition — the provision record', () => {
+    const added: Trace[] = []
+    const program = behavioral()
+    const { addThread, useTrace } = program
+    useTrace((trace: Trace) => {
+      if (trace.kind === TRACE_MESSAGE_KINDS.thread_added) added.push(trace)
+    })
+
+    const thread = {
+      label: 'provisioned',
+      space: 'demo',
+      once: true as const,
+      rules: [{ request: { type: 'go' } }],
+    }
+    addThread(thread)
+
+    expect(added).toHaveLength(1)
+    const trace = added[0] as ThreadAddedTrace
+    // The full validated Thread — the trace log is self-contained: replay =
+    // thread_added payloads + ingress events.
+    expect(trace.thread).toEqual(thread)
+    expect(trace.instanceId).toBeTypeOf('string')
+
+    // An invalid thread emits add_thread_error, never thread_added.
+    addThread({ label: 'no-rules' } as never)
+    expect(added).toHaveLength(1)
   })
 })

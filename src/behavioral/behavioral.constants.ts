@@ -6,55 +6,48 @@ import { keyMirror } from '../utils.ts'
  * @remarks
  * Use the `kind` field to narrow the union:
  * - `'deadlock'` — no unblocked candidate could be selected
- * - `'selection'` — event selection snapshot
- * - `'feedback_error'` — handler threw during side-effect execution
+ * - `'idle'` — no candidates at all; the program is quiescent (not deadlocked)
+ * - `'frontier'` — frontier snapshot per super-step
+ * - `'pending_bids'` — pending thread bids per super-step
+ * - `'selection'` — event selection trace
+ * - `'step'` — a super-step began; `ingress: true` marks an externally
+ *   initiated step
+ * - `'interrupt'` — a b-thread was terminated by a matching interrupt listener
+ * - `'transform'` — a b-thread's transform listener matched; the engine
+ *   evaluates the listener's jq `query` over the selected event's detail and
+ *   re-enters with the result as the `target` event (in-engine, 2026-09-18)
+ * - `'transform_error'` — a transform contract failed (jq error, no detail,
+ *   empty or non-object output); the target never fires
+ * - `'trigger_error'` — event rejected at the `trigger` ingress boundary
+ * - `'add_thread_error'` — invalid thread arguments passed to `useAddThread`
  *
  * @public
  */
-export const SNAPSHOT_MESSAGE_KINDS = keyMirror('deadlock', 'feedback_error', 'selection', 'extension_error')
-
-/**
- * Runtime brand attached to `Extension` callables created by `useExtension`.
- *
- * @remarks
- * `useInstaller` validates `extension.$` against this identifier before
- * installing module handlers.
- *
- * @internal
- */
-export const EXTENSION_FUNCTION_IDENTIFIER = '🪢' as const
-
-/**
- * Defines how a b-thread listens for or specifies events in `waitFor`, `block`, or `interrupt` idioms.
- * This type provides a flexible way to match events based on simple string identifiers or complex conditions.
- *
- * It can be one of:
- * 1. A simple `string`: Matches events exactly by their `type` property.
- * 2. A structured match object: Matches by event `type`, validates source provenance with
- *    `sourceSchema`, and validates `detail` with `detailSchema`.
- * 3. A predicate function: Takes an event object and returns `true` if the event matches the desired criteria.
- *
- * @see {@link Idioms} for using listeners in synchronization
- * @see {@link bSync} for creating synchronization points
- */
-export const EVENT_SOURCES = keyMirror('trigger', 'request')
-
-export const FRONTIER_STATUS = keyMirror('ready', 'deadlock', 'idle')
-
-export const BTHREAD_ID_PREFIX = 'bt_'
-
-export const TRIGGER_ID_PREFIX = 'trg_'
-
-export const EXPLORE_STRATEGIES = keyMirror('dfs', 'bfs')
-
-export const VERIFICATION_STATUSES = keyMirror('verified', 'failed', 'truncated')
-
-export const EXTENSION_MEMORY_EVENTS = keyMirror(
-  'memory_disconnect',
-  'memory_request',
-  'memory_response',
-  'memory_subscribe',
-  'memory_transaction',
+export const TRACE_MESSAGE_KINDS = keyMirror(
+  'deadlock',
+  'idle',
+  'frontier',
+  'pending_bids',
+  'selection',
+  'trigger_error',
+  'add_thread_error',
+  'thread_added',
+  'interrupt',
+  'transform',
+  'transform_error',
+  'step',
 )
 
-export const EXTENSION_REQUEST_EVENT = 'extension_request_event' as const
+/**
+ * Discriminant values for the scheduler-facing frontier status.
+ *
+ * @remarks
+ * - `'ready'` — enabled candidates are available for selection
+ * - `'deadlock'` — candidates exist but all are blocked
+ * - `'idle'` — no candidates at all
+ *
+ * @public
+ */
+export const FRONTIER_STATUS = keyMirror('ready', 'deadlock', 'idle')
+
+export const IDIOMS = keyMirror('waitFor', 'interrupt', 'request', 'block', 'transform')

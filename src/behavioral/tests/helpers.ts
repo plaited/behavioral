@@ -1,34 +1,45 @@
-import type { BPListener } from 'plaited/behavioral'
-import * as z from 'zod'
+import { TRACE_MESSAGE_KINDS } from '../behavioral.constants.ts'
+import type { behavioral } from '../behavioral.ts'
+import type { Disconnect, SelectionTrace, Trace } from '../behavioral.types.ts'
 
-const sourceSchema = z.enum(['trigger', 'request'])
+type BehavioralApi = ReturnType<typeof behavioral>
 
-export const onType = (type: string): BPListener => ({
-  type,
-  sourceSchema,
-  detailSchema: z.unknown(),
-})
+/**
+ * Collects all traces emitted by a behavioral program.
+ *
+ * Post-hoc filtering in the test body — the collector captures everything so
+ * tests can join across kinds (e.g. `deadlock.step === frontier.step`).
+ *
+ * @returns `{ traces, disconnect }` — the array fills as the program runs.
+ */
+export const traceCollector = (program: BehavioralApi): { traces: Trace[]; disconnect: Disconnect } => {
+  const traces: Trace[] = []
+  const disconnect = program.useTrace((msg: Trace) => {
+    traces.push(msg)
+  })
+  return { traces, disconnect }
+}
 
-export const onTypeWithDetail = ({
-  type,
-  detailSchema,
-}: {
-  type: string
-  detailSchema: z.ZodType<unknown>
-}): BPListener => ({
-  type,
-  sourceSchema,
-  detailSchema,
-})
+/**
+ * Subscribes a handler to Selection traces, optionally filtered by `space`.
+ *
+ * Replaces the old `useAddHandler(type, handler)` pattern — the handler fires
+ * when an event of the matching type is selected.
+ *
+ * @returns A disconnect function.
+ */
+export const onSelection = (
+  program: BehavioralApi,
+  handler: (selected: SelectionTrace['selected']) => void | Promise<void>,
+  space?: string,
+): Disconnect => {
+  return program.useTrace((msg: Trace) => {
+    if (msg.kind !== TRACE_MESSAGE_KINDS.selection) return
+    if (space !== undefined && msg.selected.space !== space) return
+    void handler(msg.selected)
+  })
+}
 
-export const onTypeWhere = ({
-  type,
-  predicate,
-}: {
-  type: string
-  predicate: (detail: unknown) => boolean
-}): BPListener => ({
-  type,
-  sourceSchema,
-  detailSchema: z.unknown().refine(predicate),
-})
+/** Extracts all Selection traces from a collected array. */
+export const selections = (traces: Trace[]): SelectionTrace[] =>
+  traces.filter((trace): trace is SelectionTrace => trace.kind === TRACE_MESSAGE_KINDS.selection)

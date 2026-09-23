@@ -1,57 +1,61 @@
 {
-  "name": "plaited",
-  "version": "8.0.0-next.0",
+  "name": "@behavioral/sh",
+  "version": "0.0.1",
+  "description": "Behavioral agent harness — a neuro-symbolic, self-improving agent built on the behavioral-programming runtime.",
   "license": "ISC",
   "engines": {
-    "bun": ">= v1.2.9"
+    "bun": ">= v1.4.2"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/plaited/plaited.git"
+    "url": "git+https://github.com/plaited/behavioral.git"
   },
   "bugs": {
-    "url": "https://github.com/plaited/plaited/issues"
+    "url": "https://github.com/plaited/behavioral/issues"
   },
-  "homepage": "https://github.com/plaited/plaited/tree/main#readme",
+  "homepage": "https://behavioral.sh",
+  "keywords": [
+    "behavioral-programming",
+    "b-threads",
+    "agent",
+    "neuro-symbolic",
+    "self-improving",
+    "mcp",
+    "cli"
+  ],
   "bin": {
-    "plaited": "./bin/plaited.ts"
+    "behavioral": "./bin/behavioral.ts"
   },
   "type": "module",
+  "main": "./src/main.ts",
   "exports": {
-    "./agent": "./src/agent.ts",
-    "./behavioral": "./src/behavioral.ts",
-    "./cli": "./src/cli.ts",
-    "./modules": "./src/modules.ts",
-    "./jsx-dev-runtime": "./src/jsx-dev-runtime.ts",
-    "./jsx-runtime": "./src/jsx-runtime.ts",
-    "./mcp": "./src/mcp.ts",
-    "./ui": "./src/ui.ts",
+    ".": "./src/main.ts",
+    "./faculties": "./src/faculties.ts",
+    "./controller": "./src/controller.ts",
     "./utils": "./src/utils.ts"
   },
   "files": [
     "./.bin/**",
     "./AGENTS.md",
-    "./skills/**",
     "./src/**"
   ],
+  "config": {
+    "commitizen": {
+      "path": "cz-conventional-changelog"
+    }
+  },
   "publishConfig": {
     "access": "public"
   },
   "scripts": {
-    "agent:execute": "bun scripts/execute-agent-issue.ts",
-    "agent:issues:lifecycle": "bun scripts/plan-agent-issue-lifecycle.ts",
-    "agent:issues:plan": "bun scripts/ingest-agent-issues.ts",
-    "check": "bun run check:biome && bun run check:types && bun run check:package",
+    "betterleaks:generate": "bun run scripts/betterleaks/run.ts",
+    "betterleaks:install": "bun run scripts/betterleaks/install.ts",
+    "check": "bun run check:biome && bun run check:types",
     "check:biome": "biome check",
-    "check:package": "format-package --check",
     "check:types": "tsc --noEmit",
     "check:write": "biome check --write && format-package --write",
-    "cline:auth": "cline auth",
-    "cline:auth:openrouter": "bun scripts/cline-auth-openrouter.ts",
-    "cline:version": "cline version",
-    "kanban": "kanban",
-    "kanban:help": "kanban --help",
-    "prepare": "git rev-parse --git-dir > /dev/null 2>&1 && git config core.hooksPath .hooks || true",
+    "generate:css-schemas": "bun run scripts/css-schemas/run.ts generate",
+    "prepare": "git config core.hooksPath .hooks",
     "test": "bun test"
   },
   "lint-staged": {
@@ -63,35 +67,23 @@
     ]
   },
   "dependencies": {
-    "@agentclientprotocol/sdk": "^0.18.2",
-    "@modelcontextprotocol/sdk": "1.29.0",
-    "@youdotcom-oss/api": "^0.5.1",
-    "zod": "4.3.6"
+    "ajv": "8.20.0"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.4.11",
-    "@commitlint/cli": "20.5.0",
-    "@commitlint/config-conventional": "20.5.0",
-    "@happy-dom/global-registrator": "^20.9.0",
-    "@mermaid-js/mermaid-cli": "11.12.0",
-    "@playwright/cli": "^0.1.7",
-    "@types/beautify": "0.0.3",
-    "@types/bun": "1.3.12",
-    "@types/node": "25.6.0",
-    "@types/sinon": "21.0.1",
-    "@varlock/1password-plugin": "^0.3.5",
-    "assemblyscript": "^0.28.14",
-    "axe-core": "4.11.3",
-    "beautify": "0.0.8",
-    "cline": "^2.14.0",
-    "csstype": "3.2.3",
+    "@biomejs/biome": "2.5.12",
+    "@commitlint/cli": "21.2.2",
+    "@commitlint/config-conventional": "21.2.2",
+    "@modelcontextprotocol/client": "^2.0.0",
+    "@modelcontextprotocol/server": "^2.0.0",
+    "@types/bun": "^1.4.1",
+    "@webref/css": "^8.7.4",
+    "commitlint": "21.2.2",
+    "css-tree": "^3.2.1",
     "cz-conventional-changelog": "3.3.0",
-    "format-package": "7.0.0",
-    "kanban": "^0.1.60",
-    "lint-staged": "16.4.0",
-    "sinon": "21.1.2",
-    "typescript": "6.0.2",
-    "typescript-language-server": "5.1.3",
-    "varlock": "^0.7.4"
+    "format-package": "8.0.0",
+    "jq-wasm": "^3.0.0-jq-1.8.2",
+    "lint-staged": "17.4.1",
+    "typescript": "7.0.2",
+    "zod": "4.5.4"
   }
 }
