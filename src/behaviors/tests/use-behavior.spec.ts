@@ -8,13 +8,13 @@ import {
   validateShellRequestEvent,
   validateShellRequestResultEvent,
 } from '../behaviors.types.ts'
-import { useProcess } from '../use-process.ts'
+import { useBehavior } from '../use-behavior.ts'
 
 /**
- * useProcess — the spawn-based family primitive — against a real process on
+ * useBehavior — the spawn-based family primitive — against a real process on
  * the real wire (the engine runs in-process via behavioral(); the spec plays
  * the composition's pump role: selected request events forward to the
- * family's send, exactly as useBehavioral does). Process-native behaviors:
+ * family's send, exactly as getBehavioral does). Process-native behaviors:
  *
  * - a request line goes out; the result line re-enters as an event
  * - a crashed process (exit mid-request) synthesizes ONE worker_error
@@ -41,13 +41,14 @@ const addThreadsWithStep =
     program.step()
   }
 
-const spawnProbe = () => {
+const spawnProbe = (env?: Record<string, string>) => {
   const program = behavioral()
   const traces: Trace[] = []
-  const family = useProcess({
+  const family = useBehavior({
     command: ['bun', 'run', 'tests/fixtures/probe.proc.ts'],
     name: 'probe',
     threads: [],
+    ...(env === undefined ? {} : { env }),
     validateRequestEvent: validateShellRequestEvent,
     validateEventCancel: validateShellCancelEvent,
     validateResultEvent: validateShellRequestResultEvent,
@@ -87,7 +88,7 @@ const request = (id: string, op: string): BPEvent => ({
   detail: { id, label: 'probe', input: { op } },
 })
 
-describe('useProcess — the spawn-based family primitive', () => {
+describe('useBehavior — the spawn-based family primitive', () => {
   test('a request round-trips through the process and its result re-enters', async () => {
     const { program, traces, family } = spawnProbe()
     try {
@@ -105,6 +106,25 @@ describe('useProcess — the spawn-based family primitive', () => {
         'no result',
       )
       expect((result.selected.detail as { ok?: boolean } | undefined)?.ok).toBe(true)
+    } finally {
+      family.terminate()
+    }
+  })
+
+  test('env is merged over the inherited environment for the spawned process', async () => {
+    const { program, traces, family } = spawnProbe({ PROBE_ENV: 'from-env-option' })
+    try {
+      program.addThread({ label: 'env-caller', once: true, rules: [{ request: request('e1', 'env') }] })
+      program.trigger({ type: 'probe_pump', detail: {} })
+      const result = await awaitSelection(
+        traces,
+        (t) =>
+          t.selected.type === BEHAVIOR_MESSAGE_KINDS.shell_request_result &&
+          (t.selected.detail as { id?: string } | undefined)?.id === 'e1',
+        'no env result',
+      )
+      const detail = result.selected.detail as { result?: { env?: string } } | undefined
+      expect(detail?.result?.env).toBe('from-env-option')
     } finally {
       family.terminate()
     }

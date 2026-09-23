@@ -2,7 +2,7 @@
  * The mcp family's default thread pack — the cross-turn auth replay spine:
  * capture-on-auth-required, host surfacing, grant-triggered store get, and
  * the replayer. Ships with the family ("threads arrive with the worker they
- * drive"); requires store + mcp — useBehavioral mounts it only when both
+ * drive"); requires store + mcp — getBehavioral mounts it only when both
  * are on.
  *
  * Moved from src/threads/mcp-client.ts when the packs became family-shipped.

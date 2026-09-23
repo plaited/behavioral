@@ -23,7 +23,8 @@ type WireMessage = {
  * without dead-port stragglers — killing a process closes its pipes.
  *
  * Curried like its Worker ancestor: the initial call captures the family's
- * command, wire name, thread pack, and two validators; the returned function
+ * command, wire name, thread pack, validators, and an optional `env` override
+ * (merged over the inherited environment); the returned function
  * — awaiting `(addThreads, space?)` — wires:
  *
  * - **the line pump** — stdout lines parsed, gated by `validateResultEvent`
@@ -44,11 +45,12 @@ type WireMessage = {
  * in-flight requests at death simply never answer, which the waitFor pair
  * already covers.
  */
-export const useProcess =
+export const useBehavior =
   ({
     command,
     name,
     threads,
+    env,
     validateRequestEvent,
     validateEventCancel,
     validateResultEvent,
@@ -56,6 +58,8 @@ export const useProcess =
     command: string[]
     name: string
     threads: Thread[]
+    /** Extra environment for the spawned process, merged over `process.env`. */
+    env?: Record<string, string>
     validateRequestEvent: ValidateFunction<WireMessage>
     validateEventCancel: ValidateFunction<WireMessage>
     validateResultEvent: ValidateFunction<WireMessage>
@@ -100,6 +104,7 @@ export const useProcess =
         stdout: 'pipe',
         stderr: 'inherit',
         cwd: import.meta.dir,
+        ...(env === undefined ? {} : { env: { ...process.env, ...env } }),
       })
       // One crash synthesis per death — the listener itself is per-process,
       // so a respawn arms a fresh listener for the next death.

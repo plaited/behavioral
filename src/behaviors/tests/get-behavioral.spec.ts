@@ -7,17 +7,17 @@ import {
   validateShellRequestEvent,
   validateShellRequestResultEvent,
 } from '../behaviors.types.ts'
-import { useBehavioral } from '../use-behavioral.ts'
-import { useProcess } from '../use-process.ts'
+import { getBehavioral } from '../get-behavioral.ts'
+import { useBehavior } from '../use-behavior.ts'
 import { startMcpServer } from './mcp-server-fixture.ts'
 
 /**
- * useBehavioral — the runtime composition — through its REAL surface: the
+ * getBehavioral — the runtime composition — through its REAL surface: the
  * hook spawns every family itself (engine + frontier router-owned, always
  * on; mcp/shell/responses/store default-on, pruned by the `behaviors`
  * allow-list). The host attaches ingress and observation through the
  * returned handle — `runtime.trigger(...)` and `runtime.useTrace(...)`.
- * `shell` is the one instance-level override: the pre-curried useProcess
+ * `shell` is the one instance-level override: the pre-curried useBehavior
  * return substituting the default shell family.
  *
  * Lifecycle note: the composition does NOT flush its deferred pack mounts at
@@ -54,9 +54,9 @@ const storeRequest = (traces: Trace[], op: string, collection: string): Selectio
   })
 
 /** Construct the composition, attach observation, then start (the boot flush). */
-const startRuntime = (options: Parameters<typeof useBehavioral>[0] = {}) => {
+const startRuntime = (options: Parameters<typeof getBehavioral>[0] = {}) => {
   const traces: Trace[] = []
-  const runtime = useBehavioral(options)
+  const runtime = getBehavioral(options)
   runtime.useTrace((trace) => {
     traces.push(trace)
   })
@@ -64,7 +64,7 @@ const startRuntime = (options: Parameters<typeof useBehavioral>[0] = {}) => {
   return { runtime, traces }
 }
 
-describe('useBehavioral — the runtime composition', () => {
+describe('getBehavioral — the runtime composition', () => {
   test('the shell pack ships with the shell family: the skill scan self-starts through the composition', async () => {
     const { runtime, traces } = startRuntime()
     try {
@@ -178,7 +178,7 @@ describe('useBehavioral — the runtime composition', () => {
   })
 
   test('shell overrides the default family — a host-constructed shell takes the route', async () => {
-    const hostShell = useProcess({
+    const hostShell = useBehavior({
       command: ['bun', 'run', 'tests/fixtures/probe.proc.ts'],
       name: 'shell',
       threads: [],
@@ -209,7 +209,7 @@ describe('useBehavioral — the runtime composition', () => {
   })
 
   test('a crashed satellite re-enters one worker_error event', async () => {
-    const hostShell = useProcess({
+    const hostShell = useBehavior({
       command: ['bun', 'run', 'tests/fixtures/probe.proc.ts'],
       name: 'shell',
       threads: [],
@@ -234,7 +234,7 @@ describe('useBehavioral — the runtime composition', () => {
 
   test('trigger does not flush deferred pack mounts — start() owns the boot', async () => {
     const traces: Trace[] = []
-    const runtime = useBehavioral({})
+    const runtime = getBehavioral({})
     runtime.useTrace((trace) => {
       traces.push(trace)
     })
@@ -250,7 +250,7 @@ describe('useBehavioral — the runtime composition', () => {
   })
 
   test('terminate kills overridden families too — the composition owns every process it invokes', async () => {
-    const factory = useProcess({
+    const factory = useBehavior({
       command: ['bun', 'run', 'tests/fixtures/probe.proc.ts'],
       name: 'shell',
       threads: [],

@@ -77,9 +77,9 @@ and the impact is broad or unclear, expand coverage until the affected surface i
 **`src/behaviors/`** — the process layer: the behavior event wire
 (`behaviors.types.ts` + `behaviors.constants.ts` — every request/result event kind,
 validators, and the kind registry), the in-process engine composition
-(`use-behavioral.ts`, `useBehavioral` — behavioral() runs in-process; pack mounts
+(`get-behavioral.ts`, `getBehavioral` — behavioral() runs in-process; pack mounts
 defer until the pump subscribes; every re-entry pumps one super-step), the behavior
-wiring primitive (`use-process.ts`, `useProcess` — Bun.spawn processes speaking the
+wiring primitive (`use-behavior.ts`, `useBehavior` — Bun.spawn processes speaking the
 wire over stdio lines; exit-code crash synthesis as `behavior_error`; respawn on
 demand), the process lane (`process-lane.ts` — stdio emit/inbound, the envData
 bridge, bindEmit for the frontier embed), and the behavior families:
@@ -111,7 +111,7 @@ fleet (0 tools); turn/config commands land here as the composition rulings build
 **`src/behaviors/*.threads.ts`** — behavior thread packs: `shell.threads.ts` (the
 ICL pack — skill/plugin scans, catalog/manifest schema gates, links dispatchers
 + stored recipes) and `mcp.threads.ts` (the auth replay spine). Packs ship with
-their family; `useBehavioral` mounts a pack when the family and its required
+their family; `getBehavioral` mounts a pack when the family and its required
 families are on. The former `src/threads/` is dissolved; its engine-layer specs
 live in `src/behaviors/tests/*.threads.spec.ts`.
 **`tasks/`** — Harbor skill-authoring task specs (challenge content; not shipped, not a plugin).

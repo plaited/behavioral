@@ -13,7 +13,7 @@
  * Composed contents of the former src/threads/{skill-client,
  * plugin-client, skill-links}.ts, moved wholesale when the packs became
  * family-shipped. The pack requires the shell family (its executor) and
- * the store family (its tenants) — useBehavioral mounts it only when both
+ * the store family (its tenants) — getBehavioral mounts it only when both
  * are on.
  *
  * @packageDocumentation

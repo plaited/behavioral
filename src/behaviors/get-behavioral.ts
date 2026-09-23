@@ -20,7 +20,7 @@ import { handleFrontierMessage } from './frontier.behavior.ts'
 import { mcpThreads } from './mcp.threads.ts'
 import { bindEmit } from './process-lane.ts'
 import { shellThreads } from './shell.threads.ts'
-import { useProcess } from './use-process.ts'
+import { useBehavior } from './use-behavior.ts'
 
 /*
  * The runtime composition — IN-PROCESS. The engine is behavioral() in the
@@ -31,7 +31,7 @@ import { useProcess } from './use-process.ts'
  * to the composition's reenter. The four capability families (shell, store,
  * responses, mcp) are Bun.spawn PROCESSES speaking the unchanged wire over
  * stdio lines — per-space isolatable, abort-able, head-of-line-free — wired
- * by the useProcess primitive.
+ * by the useBehavior primitive.
  *
  * The in-process re-entry law: addThread alone is inert — every re-entry
  * (satellite results, crash synthesis, pack mounts) pumps one super-step.
@@ -39,7 +39,7 @@ import { useProcess } from './use-process.ts'
  * now.
  *
  * `behaviors` is the allow-list (unset = all four behaviors on); `shell` and
- * `store` are the two instance overrides — pre-curried useProcess returns
+ * `store` are the two instance overrides — pre-curried useBehavior returns
  * for host-constructed families (sandboxed shell, durable store). The
  * composition invokes every factory and owns the resulting process
  * lifecycles, overrides included (the host hands over a factory, not a
@@ -82,17 +82,17 @@ const frontierFamily = (
   }
 }
 
-export const useBehavioral = ({
+export const getBehavioral = ({
   behaviors,
   shell: shellOverride,
   store: storeOverride,
 }: {
   /** Allow-list: unset = all default behaviors on; set = only the named behaviors spawn. */
   behaviors?: Behavior[]
-  /** The shell family override: a pre-curried useProcess return (sandboxed shell). */
-  shell?: ReturnType<typeof useProcess>
-  /** The store family override: a pre-curried useProcess return (durable store). */
-  store?: ReturnType<typeof useProcess>
+  /** The shell family override: a pre-curried useBehavior return (sandboxed shell). */
+  shell?: ReturnType<typeof useBehavior>
+  /** The store family override: a pre-curried useBehavior return (durable store). */
+  store?: ReturnType<typeof useBehavior>
 }) => {
   const enabled = new Set<Behavior>(behaviors === undefined ? ['shell', 'responses', 'store', 'mcp'] : behaviors)
   const has = (family: Behavior): boolean => enabled.has(family)
@@ -124,14 +124,14 @@ export const useBehavioral = ({
 
   const frontier = frontierFamily(familyAddThreads)
 
-  // The shell family: a host override (pre-curried useProcess return) is
+  // The shell family: a host override (pre-curried useBehavior return) is
   // invoked with OUR addThreads — the host never touches the program port;
   // a default construction runs otherwise. The pack requires shell + store —
   // the selector gates the mount; a pruned shell still routes but mounts no
   // pack.
   const shell =
     shellOverride === undefined
-      ? useProcess({
+      ? useBehavior({
           command: ['bun', 'run', 'shell.behavior.ts'],
           name: 'shell',
           threads: has('shell') && has('store') ? shellThreads : [],
@@ -141,7 +141,7 @@ export const useBehavioral = ({
         })(familyAddThreads)
       : shellOverride(familyAddThreads)
 
-  const responses = useProcess({
+  const responses = useBehavior({
     command: ['bun', 'run', 'responses-client.behavior.ts'],
     name: 'responses',
     threads: [],
@@ -155,7 +155,7 @@ export const useBehavioral = ({
   // construction runs otherwise.
   const store =
     storeOverride === undefined
-      ? useProcess({
+      ? useBehavior({
           command: ['bun', 'run', 'store.behavior.ts'],
           name: 'store',
           threads: [],
@@ -165,7 +165,7 @@ export const useBehavioral = ({
         })(familyAddThreads)
       : storeOverride(familyAddThreads)
 
-  const mcp = useProcess({
+  const mcp = useBehavior({
     command: ['bun', 'run', 'mcp-client.behavior.ts'],
     name: 'mcp',
     // The spine requires mcp + store.

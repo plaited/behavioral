@@ -30,7 +30,11 @@ for (;;) {
     }
     const response = {
       type: 'shell_request_result',
-      detail: { id: message.detail.id, ok: true, result: { echoed: message.detail.input.op } },
+      detail: {
+        id: message.detail.id,
+        ok: true,
+        result: { echoed: message.detail.input.op, env: process.env.PROBE_ENV },
+      },
       ...(message.space === undefined ? {} : { space: message.space }),
     }
     process.stdout.write(encoder.encode(`${JSON.stringify(response)}\n`))
