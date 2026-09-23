@@ -9,8 +9,8 @@
 import { describe, expect, test } from 'bun:test'
 import { TRACE_MESSAGE_KINDS } from '../../behavioral/behavioral.constants.ts'
 import type { BPEvent, SelectionTrace, Thread, Trace } from '../../behavioral/behavioral.types.ts'
-import { WORKER_MESSAGE_KINDS } from '../../workers/workers.constants.ts'
-import { SKILL_EXTRACT_LINKS_SCRIPT, skillLinksThreads } from '../skill-links.ts'
+import { SKILL_EXTRACT_LINKS_SCRIPT, skillLinksThreads } from '../shell.threads.ts'
+import { WORKER_MESSAGE_KINDS } from '../workers.constants.ts'
 
 type Selected = { type: string; detail: Record<string, unknown> | undefined }
 

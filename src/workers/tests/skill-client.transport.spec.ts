@@ -1,17 +1,20 @@
 /**
- * The plugin threads through the ENGINE WORKER TRANSPORT
- * (`behavioral.worker.ts`) — the transport semantics the pure-engine spec
- * never exercises: `add_threads` provisions and runs its trailing step (the
- * scan boot is a REQUESTER, so it must self-start with no trigger), and a
- * triggered result cascades the manifests put (the router's re-entry role
- * played by this mock worker client). Satellite routing stays covered by the
- * useBehavioral spec.
+ * The skill threads through the ENGINE WORKER TRANSPORT
+ * (`behavioral.worker.ts`) — not the pure in-process engine, and not the
+ * full useBehavioral composition.
+ *
+ * The load-bearing assertion here is the inverse of the mcp spine's
+ * quiet-boot test: the scan boot thread is a REQUESTER, and the transport's
+ * `add_threads` provisions it AND runs the trailing step — so the scan
+ * `shell_request` must self-start with NO trigger at all. The catalog transform
+ * cascade rides a triggered result (the router's re-entry role played by
+ * the mock client). Satellite routing stays covered by the useBehavioral spec.
  */
 import { describe, expect, test } from 'bun:test'
 import { TRACE_MESSAGE_KINDS } from '../../behavioral/behavioral.constants.ts'
 import type { BPEvent, SelectionTrace, Thread, Trace } from '../../behavioral/behavioral.types.ts'
-import { WORKER_MESSAGE_KINDS } from '../../workers/workers.constants.ts'
-import { PLUGIN_SCAN_CALL_ID, pluginThreads } from '../plugin-client.ts'
+import { SKILL_SCAN_CALL_ID, skillThreads } from '../shell.threads.ts'
+import { WORKER_MESSAGE_KINDS } from '../workers.constants.ts'
 
 type Selected = { type: string; detail: Record<string, unknown> | undefined }
 
@@ -43,18 +46,18 @@ const spawnEngineTransport = () => {
   return { addThreads, trigger, waitFor, terminate: () => worker.terminate() }
 }
 
-describe('plugin threads — through the engine worker transport', () => {
+describe('skill threads — through the engine worker transport', () => {
   test('add_threads self-starts the scan boot — the trailing step fires the requester with no trigger', async () => {
     const engine = spawnEngineTransport()
     try {
-      engine.addThreads(pluginThreads)
+      engine.addThreads(skillThreads)
       const selections = await engine.waitFor((s) =>
-        s.some((x) => x.type === WORKER_MESSAGE_KINDS.shell_request && x.detail?.id === PLUGIN_SCAN_CALL_ID),
+        s.some((x) => x.type === WORKER_MESSAGE_KINDS.shell_request && x.detail?.id === SKILL_SCAN_CALL_ID),
       )
       const call = selections.find(
-        (s) => s.type === WORKER_MESSAGE_KINDS.shell_request && s.detail?.id === PLUGIN_SCAN_CALL_ID,
+        (s) => s.type === WORKER_MESSAGE_KINDS.shell_request && s.detail?.id === SKILL_SCAN_CALL_ID,
       )
-      expect(call?.detail?.label).toBe('plugin-scan')
+      expect(call?.detail?.label).toBe('skill-scan')
       const input = call?.detail?.input as Record<string, unknown>
       expect(input.op).toBe('run')
       expect(input.format).toBe('json')
@@ -63,20 +66,17 @@ describe('plugin threads — through the engine worker transport', () => {
     }
   })
 
-  test('a scan result cascades the manifests put through the transport', async () => {
+  test('a scan result cascades the catalog put through the transport', async () => {
     const engine = spawnEngineTransport()
     try {
-      engine.addThreads(pluginThreads)
+      engine.addThreads(skillThreads)
       engine.trigger({
         type: WORKER_MESSAGE_KINDS.shell_request_result,
         detail: {
-          id: PLUGIN_SCAN_CALL_ID,
+          id: SKILL_SCAN_CALL_ID,
           result: {
             status: 'completed',
-            jsonData: {
-              plugins: [{ name: 'a', mcps: {}, skills: [], threads: [], warnings: [] }],
-              warnings: [],
-            },
+            jsonData: { skills: [{ name: 'a', description: 'd', location: '/x/SKILL.md' }], warnings: [] },
           },
         },
       })
@@ -85,10 +85,10 @@ describe('plugin threads — through the engine worker transport', () => {
       )
       const put = selections.find((s) => s.type === WORKER_MESSAGE_KINDS.store_request && s.detail?.op === 'put')
       const input = put?.detail?.input as Record<string, unknown>
-      expect(input.collection).toBe('plugins')
-      expect(input.key).toBe('manifests')
+      expect(input.collection).toBe('skills')
+      expect(input.key).toBe('catalog')
       expect(input.value).toEqual({
-        plugins: [{ name: 'a', mcps: {}, skills: [], threads: [], warnings: [] }],
+        skills: [{ name: 'a', description: 'd', location: '/x/SKILL.md' }],
         warnings: [],
       })
     } finally {

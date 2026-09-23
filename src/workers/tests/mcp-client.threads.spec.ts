@@ -13,8 +13,8 @@ import { describe, expect, test } from 'bun:test'
 import { TRACE_MESSAGE_KINDS } from '../../behavioral/behavioral.constants.ts'
 import { behavioral } from '../../behavioral/behavioral.ts'
 import type { BPEvent, JsonObject, SelectionTrace, Trace } from '../../behavioral/behavioral.types.ts'
-import { WORKER_MESSAGE_KINDS } from '../../workers/workers.constants.ts'
-import { MCP_CALLS_COLLECTION, MCP_EVENT_TYPES, mcpThreads } from '../mcp-client.ts'
+import { MCP_CALLS_COLLECTION, MCP_EVENT_TYPES, mcpThreads } from '../mcp.threads.ts'
+import { WORKER_MESSAGE_KINDS } from '../workers.constants.ts'
 
 type Selected = { type: string; detail: Record<string, unknown> | undefined }
 

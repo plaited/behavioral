@@ -14,8 +14,8 @@ import { join } from 'node:path'
 import { TRACE_MESSAGE_KINDS } from '../../behavioral/behavioral.constants.ts'
 import { behavioral } from '../../behavioral/behavioral.ts'
 import type { BPEvent, JsonObject, SelectionTrace, Trace } from '../../behavioral/behavioral.types.ts'
-import { WORKER_MESSAGE_KINDS } from '../../workers/workers.constants.ts'
-import { SKILL_SCAN_CALL_ID, SKILL_SCAN_SCRIPT, skillThreads } from '../skill-client.ts'
+import { SKILL_SCAN_CALL_ID, SKILL_SCAN_SCRIPT, skillThreads } from '../shell.threads.ts'
+import { WORKER_MESSAGE_KINDS } from '../workers.constants.ts'
 
 type Selected = { type: string; detail: Record<string, unknown> | undefined }
 

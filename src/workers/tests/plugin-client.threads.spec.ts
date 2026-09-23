@@ -13,14 +13,14 @@ import { join } from 'node:path'
 import { TRACE_MESSAGE_KINDS } from '../../behavioral/behavioral.constants.ts'
 import { behavioral } from '../../behavioral/behavioral.ts'
 import type { BPEvent, JsonObject, SelectionTrace, Trace } from '../../behavioral/behavioral.types.ts'
-import { WORKER_MESSAGE_KINDS } from '../../workers/workers.constants.ts'
 import {
   PLUGIN_MANIFESTS_COLLECTION,
   PLUGIN_MANIFESTS_KEY,
   PLUGIN_SCAN_CALL_ID,
   PLUGIN_SCAN_SCRIPT,
   pluginThreads,
-} from '../plugin-client.ts'
+} from '../shell.threads.ts'
+import { WORKER_MESSAGE_KINDS } from '../workers.constants.ts'
 
 type Selected = { type: string; detail: Record<string, unknown> | undefined }
 

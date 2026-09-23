@@ -88,8 +88,9 @@ space-scoped persistence). Spawn-by-URL entries end in
 `space`.
 **`src/tools/`** — deleted (fleet 0): the ICL conversion retired the CLI tool
 fleet. mcp-client is the mcp worker family (`src/workers/mcp-client.worker.ts`);
-skill/plugin operations are threads + recipes + store (`src/threads/`), taught
-by `skills/skill-conventions/`.
+skill/plugin operations are the shell family's thread pack
+(`src/workers/shell.threads.ts`) + recipes + store, taught by
+`skills/skill-conventions/`.
 **`src/behavioral/`** — the pure language layer: types, constants, utils, the interpreter core
 (`behavioral.ts`), and its internal jq subprocess (`jq.worker.ts` — engine-internal, wire-external;
 nothing outside behavioral/ speaks its wire). Zero process entries that speak the worker wire —
@@ -102,6 +103,12 @@ AJV; its floors are hardcoded invariants (on*, malformed b-trigger, scale mismat
 registered in `bin/behavioral.ts`. The `behavioral tools` fleet dispatcher is retired with the
 fleet (0 tools); turn/config commands land here as the composition rulings build out.
 **`src/utils/`** — shared pure utilities.
+**`src/workers/*.threads.ts`** — family thread packs: `shell.threads.ts` (the
+ICL pack — skill/plugin scans, catalog/manifest schema gates, links dispatchers
++ stored recipes) and `mcp.threads.ts` (the auth replay spine). Packs ship with
+their family; `useBehavioral` mounts a pack when the family and its required
+families are on. The former `src/threads/` is dissolved; its engine-layer specs
+live in `src/workers/tests/*.threads.spec.ts`.
 **`tasks/`** — Harbor skill-authoring task specs (challenge content; not shipped, not a plugin).
 **`scripts/`** — repo setup and package-maintenance shell glue.
 **`skills/`** — published reference skills.
@@ -183,7 +190,7 @@ input boundaries are the pattern homes). Trust the validated value downstream.
 `ajv` instance. Prefer structural schemas (`oneOf` branches, strict `additionalProperties: false` at
 every level) so constraints are explicit and JSON-schema replay contracts stay aligned. Do not
 hand-maintain a parallel Zod shape alongside an AJV one. Schema-data is exported for reuse (the
-catalog/manifest/recipe contracts in `src/threads/`).
+catalog/manifest/recipe contracts in `src/workers/shell.threads.ts`).
 **No cross-module schema drift.** When a CLI command returns a shape produced by another module,
 the output schema must derive from or reference that module's exported schema —
 not be hand-mirrored. Failure mode: a module's output type changes; a downstream CLI/tool schema

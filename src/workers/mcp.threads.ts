@@ -1,36 +1,17 @@
 /**
- * The mcp-client thread library — the CROSS-TURN REPLAY SPINE over the mcp
- * worker's wire. Composes ON TOP of the mcp-client worker family; the worker
- * works standalone (the reusability test).
+ * The mcp family's default thread pack — the cross-turn auth replay spine:
+ * capture-on-auth-required, host surfacing, grant-triggered store get, and
+ * the replayer. Ships with the family ("threads arrive with the worker they
+ * drive"); requires store + mcp — useBehavioral mounts it only when both
+ * are on.
  *
- * The worker (src/workers/mcp-client.worker.ts) owns connections, sessions,
- * in-flight calls, and STRUCTURED auth-state: an unauthorized call returns a
- * typed `authorization_required` result that echoes the originating
- * request. Cold-per-turn means that state dies with the turn — so the only
- * thing these threads do is what crosses turns:
+ * Moved from src/threads/mcp-client.ts when the packs became family-shipped.
  *
- * - `auth-capture` — an `authorization_required` result is filed in the
- *   store (`mcp-calls`) keyed by call id, value = the echoed request. ONLY
- *   auth failures are captured — successful calls never touch the store
- *   (the per-call capture/clean churn of the pre-worker design is dead).
- * - `auth-surfacer` — the same result re-enters as
- *   `mcp_authorization_required` (host-routable: the shell's "authorize X"
- *   prompt per the broker ruling).
- * - `auth-retry` — `mcp_authorization_granted` (host ingress after the shell
- *   completes the flow) triggers the store get.
- * - `replayer` — a store get whose value carries a captured request replays
- *   the original `mcp_request` and deletes the capture.
- *
- * Vocabulary (thread-owned): `mcp_authorization_required { id, reason }`,
- * `mcp_authorization_granted { id }`.
- *
- * MINIMAL: the replayer fires on any store get whose value carries `op` —
- * the captured-request shape is `{ op, input }`, distinct from every other
- * planned tenant (the skill catalog is `{ skills, warnings }`). Tighten with
- * a collection tag when a colliding tenant shape appears.
+ * @packageDocumentation
  */
+
 import type { Thread } from '../behavioral/behavioral.types.ts'
-import { WORKER_MESSAGE_KINDS } from '../workers/workers.constants.ts'
+import { WORKER_MESSAGE_KINDS } from './workers.constants.ts'
 
 // ── Vocabulary ───────────────────────────────────────────────────────────────
 

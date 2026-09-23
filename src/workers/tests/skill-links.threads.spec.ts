@@ -15,14 +15,14 @@ import { join } from 'node:path'
 import { TRACE_MESSAGE_KINDS } from '../../behavioral/behavioral.constants.ts'
 import { behavioral } from '../../behavioral/behavioral.ts'
 import type { BPEvent, JsonObject, SelectionTrace, Trace } from '../../behavioral/behavioral.types.ts'
-import { WORKER_MESSAGE_KINDS } from '../../workers/workers.constants.ts'
 import {
   LINKS_EXTRACT_RECIPE_KEY,
   LINKS_RECIPES_COLLECTION,
   SKILL_EXTRACT_LINKS_SCRIPT,
   SKILL_VALIDATE_LINKS_SCRIPT,
   skillLinksThreads,
-} from '../skill-links.ts'
+} from '../shell.threads.ts'
+import { WORKER_MESSAGE_KINDS } from '../workers.constants.ts'
 
 type Selected = { type: string; detail: Record<string, unknown> | undefined }
 

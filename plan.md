@@ -154,6 +154,41 @@ ingress + a plugin-shipped behavior surface.
      the conventions skill, docs sweep. Remaining: the deletion sweep (fleet 6 → 0)
      and the governor thread (plugin admission). -->
 
+### 2026-09-21 — landed: the per-space composition — useWorker + useBehavioral recast; the packs move home
+
+- **THE RECAST IS GREEN (235/235 workers tests):** `useBehavioral({ traceListener,
+  useTrigger, workers?, shell?, store? })` — engine + frontier router-owned
+  and always on; shell/responses/store/mcp default-on, pruned by the
+  allow-list; packs gated on their required families. `shell` AND `store`
+  are the two instance overrides (both pre-curried useWorker returns —
+  sandboxed shell; durable store where the default is :memory:).
+- **THE BUG THE RED RUN CAUGHT (worth the log):** useWorker originally gated
+  its INBOUND lane (worker.onmessage) with the REQUEST validator — every
+  satellite RESULT failed validation and was silently dropped; the
+  composition booted, scans fired, and the cascade died one hop short. The
+  primitive now takes THREE validators: request + cancel (the routing-side
+  gate) and RESULT (the inbound lane). Found by instrumenting the pump and
+  the worker — the request reached the shell, executed, and the result
+  vanished at the wiring boundary.
+- **The space-stamp fix:** useWorker spreads `{...thread, space}` even when
+  space is undefined — an explicit `space: undefined` breaks the strict
+  Thread schema. Stamps only when set (the reenter rule, applied to packs).
+- **PROMOTED:** src/workers/use-worker.ts tracked, the `|| false` residue
+  dead, per-family gates replacing the union chain, the product now returns
+  { name, port, invalidEventGate }.
+- **PACKS MOVED:** shell.threads.ts (skill scan + catalog gate, plugin scan
+  + manifest gate, links seeders/dispatchers + the recipe constants) and
+  mcp.threads.ts (the replay spine). src/threads/ DISSOLVED — the pilot's
+  default.ts stake (holding only "responses") went with it; specs re-homed
+  to src/workers/tests/*.threads.spec.ts + *.transport.spec.ts. AGENTS.md
+  boundary rewritten.
+- **Composition-level coverage (use-behavioral.spec.ts):** the shell pack
+  self-starts (scan → catalog put, collection-matched); the links
+  round-trip (l1:completed with exact links jsonData); the mcp spine mount
+  (granted → mcp-calls get); the allow-list prune (workers: ['responses']
+  → no shell events, no pack); the shell override (satellite's ok:true
+  shape proves the route); store override; crash → worker_error.
+
 ### 2026-09-21 — ruled: the selector + the shell pack; space clarified
 
 - **`workers` IS a family allow-list (pilot):** `workers?: Family[]` —

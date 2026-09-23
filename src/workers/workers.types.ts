@@ -433,3 +433,5 @@ export type TriggerMessage = {
 }
 
 export type WorkerMessage = AddThreadsMessage | TriggerMessage
+
+export type AddThreads = (newThreads: Thread[]) => void
