@@ -51,10 +51,10 @@ const resolveSource = (path: string): string => PATH_TO_SOURCE[path] ?? 'documen
 // ─── Server message helpers ──────────────────────────────────────────────────
 
 const renderMsg = (detail: Record<string, unknown>) => ({
-  type: 'render',
+  type: 'ui_render',
   detail: { swap: 'innerHTML', ...detail },
 })
-const attrsMsg = (detail: Record<string, unknown>) => ({ type: 'attrs', detail })
+const attrsMsg = (detail: Record<string, unknown>) => ({ type: 'ui_attrs', detail })
 
 // ─── Static HTML fixtures ────────────────────────────────────────────────────
 
@@ -190,7 +190,7 @@ const sendRenderPrefixMessages = (ws: ServerWebSocket<{ source: string }>) => {
 const sendDispatchMessages = (ws: ServerWebSocket<{ source: string }>) => {
   ws.send(
     JSON.stringify({
-      type: 'dispatch_custom_event',
+      type: 'ui_dispatch_custom_event',
       detail: { id: 'd1', target: 'main', event: { type: 'app:ping', detail: { ok: true } } },
     }),
   )
@@ -358,12 +358,12 @@ export const startServer = (port = 0): FixtureServer => {
             sendFormInitialRender(ws)
             break
           case 'navigate-test':
-            ws.send(JSON.stringify({ type: 'navigate', detail: { id: 'n1', url: '/test/swap-test' } }))
+            ws.send(JSON.stringify({ type: 'ui_navigate', detail: { id: 'n1', url: '/test/swap-test' } }))
             break
           case 'scale-check-test':
             ws.send(
               JSON.stringify({
-                type: 'scale_check',
+                type: 'ui_scale_check',
                 detail: { id: 'sc1', target: 'slot', swap: 'innerHTML' },
               }),
             )
@@ -371,7 +371,7 @@ export const startServer = (port = 0): FixtureServer => {
           case 'scale-check-parent-test':
             ws.send(
               JSON.stringify({
-                type: 'scale_check',
+                type: 'ui_scale_check',
                 detail: { id: 'sc2', target: 'slot', swap: 'outerHTML' },
               }),
             )
@@ -401,7 +401,7 @@ export const startServer = (port = 0): FixtureServer => {
       message(ws, message) {
         const data = JSON.parse(String(message))
         const entry = { source: ws.data.source, message: data }
-        if (data.type === 'error') state.errors.push(entry)
+        if (data.type === 'ui_error') state.errors.push(entry)
         else if (data.type === 'ui_event') {
           state.uiEvents.push(entry)
           if (data.detail?.event?.type === 'test_click') {
@@ -415,9 +415,9 @@ export const startServer = (port = 0): FixtureServer => {
               ),
             )
           }
-        } else if (data.type === 'success') state.successes.push(entry)
-        else if (data.type === 'scale_check_result') state.scaleCheckResults.push(entry)
-        else if (data.type === 'snapshot') state.snapshots.push(entry)
+        } else if (data.type === 'ui_success') state.successes.push(entry)
+        else if (data.type === 'ui_scale_check_result') state.scaleCheckResults.push(entry)
+        else if (data.type === 'ui_snapshot') state.snapshots.push(entry)
       },
       close() {},
     },

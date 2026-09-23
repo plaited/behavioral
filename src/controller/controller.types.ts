@@ -150,7 +150,7 @@ export type ControllerConstructorArgs = {
  * @public
  */
 export type RenderMessage = {
-  type: typeof CONTROLLER_INCOMING_MESSAGE_TYPES.render
+  type: typeof CONTROLLER_INCOMING_MESSAGE_TYPES.ui_render
   detail: {
     id: string
     target: string
@@ -172,7 +172,7 @@ export type RenderMessage = {
  * @public
  */
 export type ErrorMessage = {
-  type: typeof CONTROLLER_OUTGOING_MESSAGE_TYPES.error
+  type: typeof CONTROLLER_OUTGOING_MESSAGE_TYPES.ui_error
   detail: { timeStamp: number; id?: string; name: string; error?: string; stack?: string; violations?: JsonValue[] }
 }
 
@@ -193,7 +193,7 @@ export type SelectorMatch = '=' | '~=' | '|=' | '^=' | '$=' | '*='
  * @public
  */
 export type AttrsMessage = {
-  type: typeof CONTROLLER_INCOMING_MESSAGE_TYPES.attrs
+  type: typeof CONTROLLER_INCOMING_MESSAGE_TYPES.ui_attrs
   detail: {
     id: string
     target: string
@@ -209,7 +209,7 @@ export type AttrsMessage = {
  * @public
  */
 export type DispatchCustomEventMessage = {
-  type: typeof CONTROLLER_INCOMING_MESSAGE_TYPES.dispatch_custom_event
+  type: typeof CONTROLLER_INCOMING_MESSAGE_TYPES.ui_dispatch_custom_event
   detail: {
     id: string
     target: string
@@ -231,7 +231,7 @@ export type DispatchCustomEventMessage = {
  * @public
  */
 export type NavigateMessage = {
-  type: typeof CONTROLLER_INCOMING_MESSAGE_TYPES.navigate
+  type: typeof CONTROLLER_INCOMING_MESSAGE_TYPES.ui_navigate
   detail: { id: string; url: string; replace?: boolean }
 }
 
@@ -248,7 +248,7 @@ export type NavigateMessage = {
  * @public
  */
 export type ScaleCheckMessage = {
-  type: typeof CONTROLLER_INCOMING_MESSAGE_TYPES.scale_check
+  type: typeof CONTROLLER_INCOMING_MESSAGE_TYPES.ui_scale_check
   detail: { id: string; target: string; swap: (typeof SWAP_MODES)[keyof typeof SWAP_MODES]; match?: SelectorMatch }
 }
 
@@ -285,7 +285,7 @@ export type UiEventMessage = {
  * @public
  */
 export type FormSubmitMessage = {
-  type: typeof CONTROLLER_OUTGOING_MESSAGE_TYPES.form_submit
+  type: typeof CONTROLLER_OUTGOING_MESSAGE_TYPES.ui_form_submit
   detail: {
     name?: string | null
     timeStamp: number
@@ -301,7 +301,7 @@ export type FormSubmitMessage = {
  * @public
  */
 export type SuccessMessage = {
-  type: typeof CONTROLLER_OUTGOING_MESSAGE_TYPES.success
+  type: typeof CONTROLLER_OUTGOING_MESSAGE_TYPES.ui_success
   detail: { id: string; timeStamp: number }
 }
 
@@ -312,7 +312,7 @@ export type SuccessMessage = {
  * @public
  */
 export type PageSnapshot = {
-  type: typeof CONTROLLER_OUTGOING_MESSAGE_TYPES.snapshot
+  type: typeof CONTROLLER_OUTGOING_MESSAGE_TYPES.ui_snapshot
   detail: { timeStamp: number; type: (typeof PAGE_EVENTS)[keyof typeof PAGE_EVENTS]; serializedHTML: string }
 }
 
@@ -323,7 +323,7 @@ export type PageSnapshot = {
  * @public
  */
 export type ScaleCheckResultMessage = {
-  type: typeof CONTROLLER_OUTGOING_MESSAGE_TYPES.scale_check_result
+  type: typeof CONTROLLER_OUTGOING_MESSAGE_TYPES.ui_scale_check_result
   detail: { id: string; target: string; effectiveScale: (typeof SCALE)[keyof typeof SCALE]; timeStamp: number }
 }
 

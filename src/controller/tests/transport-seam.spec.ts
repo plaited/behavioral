@@ -103,7 +103,7 @@ describe('controller: injectable transport seam', () => {
     await using view = await open()
     // Push a render ServerMessage through the transport's incoming registration.
     await view.evaluate<void>(
-      'window.__transport.__deliver({ type: "render", detail: { id: "r1", target: "main", html: "<p id=\\"injected\\">injected via transport</p>", swap: "innerHTML" } })',
+      'window.__transport.__deliver({ type: "ui_render", detail: { id: "r1", target: "main", html: "<p id=\\"injected\\">injected via transport</p>", swap: "innerHTML" } })',
     )
     const text = await waitFor(async () => {
       const t = await view.evaluate<string | undefined>('document.getElementById("injected")?.textContent')

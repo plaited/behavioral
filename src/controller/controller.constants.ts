@@ -108,11 +108,11 @@ export const ERROR_TYPES = keyMirror(
  */
 export const CONTROLLER_OUTGOING_MESSAGE_TYPES = keyMirror(
   'ui_event',
-  'error',
-  'form_submit',
-  'success',
-  'snapshot',
-  'scale_check_result',
+  'ui_error',
+  'ui_form_submit',
+  'ui_success',
+  'ui_snapshot',
+  'ui_scale_check_result',
 )
 
 /**
@@ -122,11 +122,11 @@ export const CONTROLLER_OUTGOING_MESSAGE_TYPES = keyMirror(
  * @public
  */
 export const CONTROLLER_INCOMING_MESSAGE_TYPES = keyMirror(
-  'attrs',
-  'render',
-  'dispatch_custom_event',
-  'navigate',
-  'scale_check',
+  'ui_attrs',
+  'ui_render',
+  'ui_dispatch_custom_event',
+  'ui_navigate',
+  'ui_scale_check',
 )
 
 /**

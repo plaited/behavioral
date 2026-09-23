@@ -152,7 +152,7 @@ export class Controller {
   }
   #sendSnapshot(type: keyof typeof PAGE_EVENTS) {
     this.#send({
-      type: CONTROLLER_OUTGOING_MESSAGE_TYPES.snapshot,
+      type: CONTROLLER_OUTGOING_MESSAGE_TYPES.ui_snapshot,
       detail: {
         timeStamp: Date.now(),
         type,
@@ -162,7 +162,7 @@ export class Controller {
   }
   #reportError(error: ControllerErrors, id?: string) {
     this.#send({
-      type: CONTROLLER_OUTGOING_MESSAGE_TYPES.error,
+      type: CONTROLLER_OUTGOING_MESSAGE_TYPES.ui_error,
       detail: {
         timeStamp: Date.now(),
         id,
@@ -332,7 +332,7 @@ export class Controller {
     for (let i = 0; i < length; i++) {
       const element = nodelist[i]
       if (!element)
-        throw new ElementNotFoundError(`${CONTROLLER_INCOMING_MESSAGE_TYPES.render}`, {
+        throw new ElementNotFoundError(`${CONTROLLER_INCOMING_MESSAGE_TYPES.ui_render}`, {
           cause: {
             id,
             target,
@@ -352,7 +352,7 @@ export class Controller {
     for (let i = 0; i < length; i++) {
       const element = nodelist[i]
       if (!element)
-        throw new ElementNotFoundError(`${CONTROLLER_INCOMING_MESSAGE_TYPES.attrs}`, {
+        throw new ElementNotFoundError(`${CONTROLLER_INCOMING_MESSAGE_TYPES.ui_attrs}`, {
           cause: {
             id,
             target,
@@ -381,7 +381,7 @@ export class Controller {
   }: DispatchCustomEventMessage['detail']) {
     const element = document.querySelector(`[${B_TARGET}="${target}"]`)
     if (!element)
-      throw new ElementNotFoundError(`${CONTROLLER_INCOMING_MESSAGE_TYPES.dispatch_custom_event}`, {
+      throw new ElementNotFoundError(`${CONTROLLER_INCOMING_MESSAGE_TYPES.ui_dispatch_custom_event}`, {
         cause: {
           id,
           target,
@@ -414,7 +414,7 @@ export class Controller {
     const effectiveScale =
       scales.filter((s) => s !== SCALE.rel).sort((a, b) => SCALE_RANK[a] - SCALE_RANK[b])[0] ?? SCALE.rel
     this.#send({
-      type: CONTROLLER_OUTGOING_MESSAGE_TYPES.scale_check_result,
+      type: CONTROLLER_OUTGOING_MESSAGE_TYPES.ui_scale_check_result,
       detail: { id, target, effectiveScale, timeStamp: Date.now() },
     })
   }
@@ -432,29 +432,29 @@ export class Controller {
       const { type, detail } = message
       id = detail.id
       switch (type) {
-        case CONTROLLER_INCOMING_MESSAGE_TYPES.render: {
+        case CONTROLLER_INCOMING_MESSAGE_TYPES.ui_render: {
           this.#render(detail)
           break
         }
-        case CONTROLLER_INCOMING_MESSAGE_TYPES.attrs: {
+        case CONTROLLER_INCOMING_MESSAGE_TYPES.ui_attrs: {
           this.#attrs(detail)
           break
         }
-        case CONTROLLER_INCOMING_MESSAGE_TYPES.dispatch_custom_event: {
+        case CONTROLLER_INCOMING_MESSAGE_TYPES.ui_dispatch_custom_event: {
           this.#dispatchCustomEvent(detail)
           break
         }
-        case CONTROLLER_INCOMING_MESSAGE_TYPES.navigate: {
+        case CONTROLLER_INCOMING_MESSAGE_TYPES.ui_navigate: {
           this.#navigate(detail)
           break
         }
-        case CONTROLLER_INCOMING_MESSAGE_TYPES.scale_check: {
+        case CONTROLLER_INCOMING_MESSAGE_TYPES.ui_scale_check: {
           this.#scaleCheck(detail)
           return
         }
       }
       this.#send({
-        type: CONTROLLER_OUTGOING_MESSAGE_TYPES.success,
+        type: CONTROLLER_OUTGOING_MESSAGE_TYPES.ui_success,
         detail: {
           id,
           timeStamp: Date.now(),
