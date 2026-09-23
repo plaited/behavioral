@@ -56,8 +56,12 @@ yarn.lock
 # Git worktrees
 .worktrees/
 
+# Session working docs — the navigator's plan, research notes, prompt drafts.
+# Never shipped, never reviewed: content lives on disk only.
+plan.md
+.prompts/
+.research/
+
 # autoresearch
 .plaited
-.prompts/
 .src/.archive-modules
-research
