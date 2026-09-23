@@ -232,6 +232,23 @@ describe('useBehavioral — the runtime composition', () => {
     }
   })
 
+  test('trigger does not flush deferred pack mounts — start() owns the boot', async () => {
+    const traces: Trace[] = []
+    const runtime = useBehavioral({})
+    runtime.useTrace((trace) => {
+      traces.push(trace)
+    })
+    try {
+      // Without start(), the deferred pack mounts are not flushed: a trigger is
+      // admitted (the engine is live) but the shell/mcp boot cascades never run.
+      runtime.trigger({ type: 'noop', detail: {} })
+      await Bun.sleep(200)
+      expect(selectionsOf(traces).some((t) => t.selected.type === BEHAVIOR_MESSAGE_KINDS.shell_request)).toBe(false)
+    } finally {
+      runtime.terminate()
+    }
+  })
+
   test('terminate kills overridden families too — the composition owns every process it invokes', async () => {
     const factory = useProcess({
       command: ['bun', 'run', 'tests/fixtures/probe.proc.ts'],

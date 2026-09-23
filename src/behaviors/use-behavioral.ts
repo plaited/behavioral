@@ -1,6 +1,6 @@
 import { TRACE_MESSAGE_KINDS } from '../behavioral/behavioral.constants.ts'
 import { behavioral } from '../behavioral/behavioral.ts'
-import type { BPEvent, JsonObject, SelectionTrace, Thread, Trace, Trigger } from '../behavioral/behavioral.types.ts'
+import type { BPEvent, JsonObject, SelectionTrace, Thread, Trace } from '../behavioral/behavioral.types.ts'
 import { BEHAVIOR_MESSAGE_KINDS } from './behaviors.constants.ts'
 import {
   validateFrontierRequestEvent,
@@ -49,7 +49,8 @@ import { useProcess } from './use-process.ts'
  * routes but does NOT flush the deferred pack mounts. The host subscribes
  * (`runtime.useTrace`) first, then calls `runtime.start()` — the boot
  * cascade runs after subscribers attach, so boot traces are observable.
- * `runtime.trigger` auto-starts (idempotent) for trigger-only hosts.
+ * `runtime.trigger` admits events only; start/terminate are the host's
+ * lifecycle, never the event lane's.
  */
 
 /** The selectable worker families (engine and frontier are never selectable — always on). */
@@ -98,7 +99,7 @@ export const useBehavioral = ({
 
   // ── The engine, in-process ────────────────────────────────────────────────
 
-  const { addThread, step, trigger: engineTrigger, useTrace } = behavioral()
+  const { addThread, step, trigger, useTrace } = behavioral()
 
   /** The in-process re-entry law: addThread + the trailing step. */
   const addThreads = (threads: Thread[]): void => {
@@ -226,19 +227,13 @@ export const useBehavioral = ({
   // subscribes (useTrace) FIRST, then calls start() — the boot cascade
   // (scan boots → shell_requests → family processes) runs in a world whose
   // subscribers are attached, so boot traces are observable. Idempotent;
-  // `trigger` calls it so trigger-only hosts still boot on their first event.
+  // start/terminate are the host's lifecycle, never the event lane's.
   let started = false
   const start = (): void => {
     if (started) return
     started = true
     mounting = false
     addThreads(pendingThreads)
-  }
-
-  // Ingress: the returned trigger flushes the boot cascade first (idempotent).
-  const trigger: Trigger = (event) => {
-    start()
-    engineTrigger(event)
   }
 
   // ── The runtime handle ────────────────────────────────────────────────────
