@@ -41,9 +41,31 @@ describe('loadConfig', () => {
     })
   })
 
-  test('rejects an unknown behavior name', async () => {
+  test('rejects an unknown behavior name with the allowed set', async () => {
     await withConfig(`export default { behaviors: ['nope'] }`, async (file) => {
-      await expect(loadConfig(file)).rejects.toThrow(/nope/)
+      await expect(loadConfig(file)).rejects.toThrow(
+        /unknown behavior "nope".*expected one of: shell, responses, store, mcp/,
+      )
+    })
+  })
+
+  test('defaults to <BEHAVIORAL_HOME>/config.ts', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'behavioral-home-'))
+    const previous = process.env.BEHAVIORAL_HOME
+    process.env.BEHAVIORAL_HOME = home
+    try {
+      await Bun.write(join(home, 'config.ts'), `export default { behaviors: ['store'] }`)
+      expect(await loadConfig()).toEqual({ behaviors: ['store'] })
+    } finally {
+      if (previous === undefined) delete process.env.BEHAVIORAL_HOME
+      else process.env.BEHAVIORAL_HOME = previous
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  test('an unloadable config fails fast with the path', async () => {
+    await withConfig(`export default {`, async (file) => {
+      await expect(loadConfig(file)).rejects.toThrow(/failed to load/)
     })
   })
 
