@@ -154,6 +154,38 @@ ingress + a plugin-shipped behavior surface.
      the conventions skill, docs sweep. Remaining: the deletion sweep (fleet 6 → 0)
      and the governor thread (plugin admission). -->
 
+### 2026-09-21 — ruled: the selector + the shell pack; space clarified
+
+- **`workers` IS a family allow-list (pilot):** `workers?: Family[]` —
+  unset = all default families on (mcp, shell, responses, store); SET =
+  only the named families spawn (their routes and thread packs gated on
+  the selector; a requesting thread simply waits on a pruned family — the
+  no-route behavior). **ENGINE + FRONTIER ARE NEVER SELECTABLE** — always
+  on, router-owned. `workers: []` = the maximally-pruned agent: a pure
+  reasoning + self-verification loop. THREAD PACKS REQUIRE THEIR FAMILIES
+  (confirmed by pilot): a pack mounts only when every family it drives is
+  on — skill/plugin scans need shell+store; links need shell; the mcp
+  spine needs store+mcp.
+- **THE OVERRIDE PARAM RENAMES: `shellWorker` → `shell`** (pilot) — still
+  the pre-curried useWorker return (the function waiting for
+  addThreads/space); `useBehavioral({ traceListener, useTrigger, workers?,
+  shell? })`.
+- **THE SHELL PACK MOVES HOME (pilot): the skill + plugin thread libraries
+  merge into `src/workers/shell.threads.ts`** — the shell family's default
+  pack, shipped with the family ("threads arrive with the worker they
+  drive" made physical): the two scan boots, the catalog/manifest
+  transforms with their schema gates, the links dispatchers + seeder, and
+  the recipe constants (they travel with the dispatchers that embed them).
+  The family's useWorker construction carries `threads: shellThreads`.
+  Specs follow the move (their engine/transport coverage unchanged; the
+  mocks/repo-recipes dogfood stays).
+- **SPACE CLARIFIED (navigator, pilot's pushback accepted):** space is the
+  ISOLATION DOMAIN, not the agent — the tag threaded through events,
+  store PKs, worker stacks. `workers: []` is still an ENTIRE agent (engine
+  + frontier = the fixed floor: reasoning + self-verification); spaces are
+  what the one agent hosts. Capabilities are optional per composition;
+  agent-ness never is.
+
 ### 2026-09-21 — ruled: useBehavioral owns the runtime — all workers router-spawned; shellWorker is the only override
 
 - **THE SIGNATURE COLLAPSES (pilot: "just shellWorker as optional"; "I
