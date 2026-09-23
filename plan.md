@@ -154,6 +154,39 @@ ingress + a plugin-shipped behavior surface.
      the conventions skill, docs sweep. Remaining: the deletion sweep (fleet 6 → 0)
      and the governor thread (plugin admission). -->
 
+### 2026-09-21 — ruled (Q1/A): the per-space composition — useWorker primitive, useWorkers as root, frontier router-owned
+
+- **The pilot's `useWorker` (src/workers/use-worker.ts, authored pilot-side):
+  the per-family wiring primitive** — reenter (space-PRESERVING: result
+  re-entries stamp message.space, so root threads stay root and space
+  results stay space), onerror → worker_error, thread-pack mounting stamped
+  with the wiring space, and a per-family validation gate. Curried
+  `(addThreads, space?)`: one family definition wires N times — one per
+  space, that space stamped on its default threads. Three rulings made
+  literal: threads arrive with the worker they drive; workers are addable;
+  space isolation is a stamp, not a convention.
+- **THE ENGINE STAYS MULTIPLEXED (Q1/A):** one engine worker hosts root
+  threads (engine-global: mcp spine, catalog gates, links dispatchers —
+  "a lot of threads will be root") plus per-space threads; satellites spin
+  up PER SPACE (per-space = new Worker instances — one useWorker wiring
+  per instance). Satellite crashes contain to a space; the engine is the
+  acknowledged shared blast radius. `useWorkers` recasts as the ROOT
+  COMPOSITION built on the primitive: hosts layer per-space stacks above it.
+- **Frontier folds in as ROUTER-OWNED in the root composition** (resolves
+  the pending frontier grill): zero deployment knobs, zero deps, pure TS —
+  the runtime's mirror, not a config-selected satellite. The router spawns
+  it alongside the engine, always available to every space. Store/mcp/shell
+  stay config-selected (real deployment dimensions: db path, network+auth,
+  bun+fs); the store rider (intrinsic after ICL?) was NOT taken up — stays
+  optional until ruled.
+- **Build notes from the navigator review:** the `|| false` residue dies;
+  the per-family gate replaces the router's cross-family union chain when
+  consumed (equivalent by type-const discrimination — family owns its
+  boundary, the cleaner law); the one-wiring-per-worker contract gets a
+  doc pin (a second wiring silently clobbers onmessage/onerror).
+- **Amends the config-composition ruling's satellite list:** frontier exits
+  config-selected; engine + frontier are the router-owned root.
+
 ### 2026-09-21 — landed: the shell worker (bun-direct, op-shaped, temp-file payloads); the tool_call wire is gone
 
 - **One atomic commit per Q3:** wire kinds (`shell_request`/
