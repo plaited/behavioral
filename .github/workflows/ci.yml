@@ -21,6 +21,14 @@ jobs:
       - name: Install dependencies
         run: |
           bun install
+      - name: Cache betterleaks
+        uses: actions/cache@v4
+        with:
+          path: scripts/betterleaks/.bin
+          key: betterleaks-${{ runner.os }}-${{ runner.arch }}-v1.8.1
+      - name: Install betterleaks
+        run: |
+          bun run betterleaks:install
       - name: Run check
         run: |
           bun run check
