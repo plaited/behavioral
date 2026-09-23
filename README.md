@@ -64,8 +64,12 @@ generic over events and never imports the wire.
 **Faculties are processes.** Spawned per wiring (per space) via `useFaculty`:
 isolated by OS construction, killable as a process tree, respawned on demand,
 crash-synthesized as exactly one `faculty_error` re-entry. The pump discards
-only what cannot be this lane's event; a parsed-but-invalid result re-enters and
-is blocked by the faculty guard — visibly, in the traces.
+only what cannot be this lane's event; a parsed-but-invalid result never
+vanishes — it re-enters the engine and is observable in the traces. The
+system faculties' guards block such a result outright (visible in the
+frontier/deadlock traces); the default faculties (shell/store/mcp) surface it
+as a selected-but-unmatched event. Guarding the default lanes is a recorded
+follow-up.
 
 **System faculties are endpoint-carrying overrides.** `systemOne` and `systemTwo`
 have no defaults: without an endpoint they are simply absent — no process, no

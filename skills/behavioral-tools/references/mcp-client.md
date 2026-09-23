@@ -22,20 +22,23 @@ call-tool, `name` for get-prompt, `uri` for read-resource) and an optional
 
 ## The result envelope
 
-`detail.result` is a typed envelope — errors-as-data, never a throw:
+`detail` is the uniform faculty result envelope — errors-as-data, never a
+throw (`postResult` in `src/faculties/mcp/faculty.ts`):
 
 ```json
-{ "id": "…", "status": "…", "durationMs": 42 }
+{ "id": "…", "ok": true,  "result": { "started": …, "output": … } }
+{ "id": "…", "ok": false, "error":  { "code": "…", "started": … } }
 ```
 
-- `completed` — `output` carries the remote MCP data (loose; consumers gate
-  with their own `detailSchema`).
-- `authorization_required` — the call hit a 401; `message` holds the reason
-  and `request` echoes `{ op, input }` (the replay spine's capture payload).
-- `timeout` / `canceled` — the two stop doors: the input `timeoutMs` (default
-  30s) or a `mcp_cancel` mid-flight.
-- `error` — invalid op input (the message names the AJV errors) or a failed
-  call/connection.
+- `ok: true` — `result.output` carries the remote MCP data (loose; consumers
+  gate with their own `detailSchema`).
+- `error.code = "authorization_required"` — the call hit a 401; `message`
+  holds the reason and `request` echoes `{ op, input }` (the replay spine's
+  capture payload).
+- `error.code = "timeout" / "canceled"` — the two stop doors: the input
+  `timeoutMs` (default 30s) or an `mcp_cancel` mid-flight.
+- `error.code = "error"` — invalid op input (the message names the AJV
+  errors) or a failed call/connection.
 
 ## Auth
 

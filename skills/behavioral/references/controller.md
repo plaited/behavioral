@@ -77,7 +77,7 @@ in both target hosts; the ICL conversion removed the fleet). What survives:
 - **Schemas as data** — `src/controller/html.schemas.ts` + `css.schemas.ts`:
   pure JSON-schema data (the classifier's context, not compiled validators).
 - **The classifier ceiling** — the System One/Jev gate story:
-  [prompts/html-classifier-gate.md](../../../prompts/html-classifier-gate.md)
+  
   — probabilistic admission over the schema context, with the floors as the
   deterministic backstop. Probabilistic gates never own security invariants.
 

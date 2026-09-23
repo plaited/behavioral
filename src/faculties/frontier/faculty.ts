@@ -1,23 +1,25 @@
 /**
- * Frontier worker — the reachability analysis engine as a satellite worker:
- * replays, explores, and verifies behavioral thread sets off the host thread.
+ * Frontier faculty — the reachability analysis engine: replays, explores,
+ * and verifies behavioral thread sets off the host thread.
  *
  * @remarks
- * Spawned by URL (never imported) and speaks the behavioral event wire:
- * `frontier_request` events in (dispatched by `detail.op`: replay / explore /
- * verify), one `frontier_request_result` out with the request `space`
- * echoed. Frontier is its own worker faculty, like the responses client — it
- * shares no event types with the tools faculty, and needs no cancel event:
- * analyses are synchronous, nothing is in flight to abort. The analysis
- * engine below is the former fleet tool implementation, moved wholesale;
- * only the boundary changed.
+ * The IN-PROCESS embed: the composition imports its dispatch
+ * (`handleFrontierMessage`) and drives it directly, its emit lane bound via
+ * `bindEmit` so results re-enter the engine instead of writing the host's
+ * stdout. It speaks the behavioral event wire — `frontier_request` events in
+ * (dispatched by `detail.op`: replay / explore / verify), one
+ * `frontier_request_result` out with the request `space` echoed. It needs no
+ * cancel event: analyses are synchronous, nothing is in flight to abort.
+ * The analysis engine below is the former fleet tool implementation, moved
+ * wholesale; only the boundary changed. Standalone spawns (stdio lines) remain
+ * a compatibility entry.
  *
  * Self-analysis is safe by construction: the trace a caller passes is a frozen
- * postMessage payload, this worker's simulation state is private, and its own
- * calls in the host trace are logical breakpoints (see plan Decision Log).
+ * structured-clone payload, this faculty's simulation state is private, and
+ * its own calls in the host trace are logical breakpoints.
  *
  * MINIMAL: results are synchronous analyses; a frontier call blocks this
- * worker only, never the host — no stream lane needed.
+ * faculty only, never the host — no stream lane needed.
  *
  * @packageDocumentation
  */
@@ -428,7 +430,7 @@ const getTriggerSuccessors = ({
  * Canonicalizes a listener set into a content-sorted array of JSON strings.
  *
  * Each listener (`waitFor`/`block`/`interrupt`/`transform`) is projected to its
- * JSON-only form — the zod `detailSchema` instance is converted to JSON Schema
+ * JSON-only form — the `detailSchema` JSON Schema is taken as-is
  * — and serialized. The resulting strings are sorted so two listener sets that
  * differ only by declaration order produce the same array. This is what lets
  * {@link frontierStateKey} treat structurally-equal pending sets as the same
@@ -453,8 +455,8 @@ const normalizeListeners = (listener: RegisteredBPListener[] | RegisteredTransfo
  *
  * @remarks
  * - Drops instance-identity and non-serializable artifacts: the `generator`
- *   closure and each listener's zod `detailSchema` instance (serialized to
- *   JSON Schema in its place).
+ *   closure and each listener's `detailSchema` (JSON Schema, taken as-is
+ *   in its place).
  * - `request` is projected to `{ type, detail, space }`. Bid order and listener
  *   order are canonicalized by sorting on serialized content, yielding a total
  *   order independent of input order.

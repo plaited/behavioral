@@ -1,13 +1,13 @@
 /**
- * Wire and option types shared by the model worker (`system-two.worker.ts`)
- * and its host consumer (`system-two.ts`).
+ * Wire and option types shared by the systemTwo faculty process
+ * (`system-two/faculty.ts` — Open Responses model calls) and its host-side
+ * config surface (`system-two/config.ts`).
  *
  * @remarks
- * `system-two.worker.ts` mounts `self.onmessage` at top level, so the host
- * must never import it; both sides import here instead. Types plus one
- * side-effect-free key constant — the key is the only runtime value, so both
- * sides agree on the `setEnvironmentData` / `getEnvironmentData` key without
- * a circular import.
+ * The faculty runs as a spawned process, never imported by the host; both
+ * sides import here instead. Types plus one side-effect-free key constant —
+ * the key is the only runtime value, so both sides agree on the
+ * environment-data key (env vars across the spawn) without a circular import.
  */
 
 import type {

@@ -502,11 +502,11 @@ const runOp = async ({
 // Result envelope
 // ---------------------------------------------------------------------------
 
-/** Post the single terminal result event for an execution, echoing any request space. */
 /**
- * Post the uniform result envelope (modified-B): `ok` beside the correlation
- * id; the success payload rides `result`, the failure payload rides `error`
- * with the terminal status as `code`.
+ * Post the single terminal result event for an execution (the uniform
+ * modified-B envelope: `ok` beside the correlation id; the success payload
+ * rides `result`, the failure payload rides `error` with the terminal status
+ * as `code`), echoing any request space.
  */
 const postResult = ({
   id,

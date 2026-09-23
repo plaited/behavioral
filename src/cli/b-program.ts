@@ -39,12 +39,11 @@ import type { Faculty } from '../faculties.ts'
  * now.
  *
  * `faculties` is the allow-list (unset = shell/store/mcp on); `shell` and
- * `store` are the two default-faculty instance overrides, and `systemTwo` (and
- * later `systemOne`) is an endpoint-carrying override with no default — all
- * pre-curried useFaculty returns for host-constructed faculties.
- * for host-constructed faculties (sandboxed shell, durable store). The
- * composition invokes every factory and owns the resulting process
- * lifecycles, overrides included (the host hands over a factory, not a
+ * `store` are the two default-faculty instance overrides (sandboxed shell,
+ * durable store), and `systemOne`/`systemTwo` are endpoint-carrying overrides
+ * with no default — all pre-curried useFaculty returns for host-constructed
+ * faculties. The composition invokes every factory and owns the resulting
+ * process lifecycles, overrides included (the host hands over a factory, not a
  * handle).
  *
  * The lifecycle is explicit: construction wires the engine, faculties, and

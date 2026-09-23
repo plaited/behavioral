@@ -7,12 +7,15 @@ runs: *can it deadlock?* and *can it spin forever without making progress?*
 
 ## Public surface
 
-Frontier analysis is a faculty, embedded **in-process** by the composition: `src/faculties/frontier.worker.ts`,
+Frontier analysis is a faculty, embedded **in-process** by the composition
+(`src/faculties/frontier/faculty.ts` — the composition imports its dispatch
+and drives it directly; standalone spawns are a compatibility entry),
 speaking the behavioral event wire — `frontier_request { id, op: replay |
 explore | verify, input }` in, one `frontier_request_result { id, result }`
-out. Mount it via the `getBehavioral` map (`frontier: new Worker(...)`); threads
-request it like any satellite. Ops are short-lived (no cancel event). The
-worker's event schemas live in `src/faculties/workers.types.ts`.
+out. The composition wires its emit lane via `bindEmit` (results re-enter
+the engine, never the host's stdout); threads request it like any satellite.
+Ops are short-lived (no cancel event). The event schemas live in
+`src/faculties/faculties.types.ts` (the wire's one home).
 
 Threads are JSON objects: `{ label: string, rules: Idioms[], once?: true }`.
 Each idiom is one sync point with `request` (propose an event), `waitFor`

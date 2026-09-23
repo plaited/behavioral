@@ -149,6 +149,10 @@ const streamEvents = async (
   const knownEvents: KnownStreamEvent[] = []
 
   const consumeFrame = (frame: string): StreamOutcome | 'continue' | 'done' => {
+    // MINIMAL: only the FIRST data: line of a frame is taken — the SSE spec
+    // allows multi-line data fields (concatenated). Our providers emit
+    // one-line data frames; upgrade path: join all data: lines if a
+    // multi-line-data provider ever appears.
     const line = frame.split('\n').find((l) => l.startsWith('data: '))
     if (line === undefined) return 'continue'
     const payload = line.slice('data: '.length).trim()

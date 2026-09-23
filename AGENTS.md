@@ -58,7 +58,7 @@ Minimum gate:
 1. `bun --bun tsc --noEmit`
 2. targeted tests for the changed surface
 
-Use broader validation when runtime faculty, tool faculty, schemas/validators, shared
+Use broader validation when runtime behavior, tool behavior, schemas/validators, shared
 infrastructure, or any broad/uncertain surface changes. Use the minimum gate when the change is
 tightly bounded and verified by inspection or code search, or is path-only rename, link/reference
 cleanup, wording-only docs/skills text, or another edit that does not materially change executable
@@ -70,7 +70,8 @@ depend on; if a `src/<feature>` CLI command changed, run that feature's tests pl
 tests; if only `src/controller/` changed, run the controller test surfaces; if shared code changed
 and the impact is broad or unclear, expand coverage until the affected surface is credibly covered.
 
-`docs:` and `chore:` commits may skip executable validation when they do not change faculty.
+`docs:` and `chore:` commits may skip executable validation when they do not change faculty
+behavior.
 
 ## Directory Boundaries
 

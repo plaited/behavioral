@@ -15,7 +15,8 @@ import Ajv2020 from 'ajv/dist/2020'
 /**
  * AJV instance for CLI validation — `useDefaults: true` applies JSON Schema
  * `default` values so optional fields with defaults behave like Zod's
- * `.default(...)`. Otherwise identical to the shared tools AJV.
+ * `.default(...)`. Otherwise identical to the shared AJV
+ * (`behavioral.types.ts`).
  */
 const cliAjv = new Ajv2020({ strict: true, validateSchema: true, strictRequired: false, useDefaults: true })
 

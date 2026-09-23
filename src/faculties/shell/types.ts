@@ -1,15 +1,16 @@
 /**
- * Types shared by the shell worker (`shell.worker.ts`) and its event-wire
- * consumers.
+ * Types shared by the shell faculty process (`shell/faculty.ts`) and its
+ * event-wire consumers.
  *
  * @remarks
  * Types only — no runtime values, so importing this module has no side
- * effects on either side of the worker boundary. The worker mounts
- * `self.onmessage` at top level, so the host must never import it for
- * types; both sides import here instead. The wire itself is the behavioral
- * event vocabulary (`shell_request` / `shell_cancel` in, one
- * `shell_request_result` out) defined in `src/faculties/workers.types.ts` —
- * only the `detail.input` and `detail.result` payload shapes live here.
+ * effects on either side of the process boundary. The faculty runs as a
+ * spawned process (stdio lines, never imported by the host), so the host
+ * must never import the faculty for types; both sides import here instead.
+ * The wire itself is the behavioral event vocabulary (`shell_request` /
+ * `shell_cancel` in, one `shell_request_result` out) defined in
+ * `src/faculties/faculties.types.ts` — only the `detail.input` and
+ * `detail.result` payload shapes live here.
  *
  * The input is OP-DISCRIMINATED (the bun-direct conversion): `'run'`
  * executes a TypeScript script bun-direct (`bun run -`, script on stdin —

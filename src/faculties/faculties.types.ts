@@ -3,10 +3,10 @@ import { ajv, type JsonObject, type Thread } from '../behavioral/behavioral.type
 import { FACULTY_MESSAGE_KINDS } from './faculties.constants.ts'
 
 /*
- * Worker event-wire vocabulary — every request/result event faculty plus validators.
+ * Faculty event-wire vocabulary — every request/result event faculty plus validators.
  *
- * Behavioral defines the protocol; worker faculties adapt to speak it. These are
- * the events the router moves between the engine port and the satellite worker
+ * Behavioral defines the protocol; faculty processes adapt to speak it. These are
+ * the events the router moves between the engine port and the satellite faculty
  * ports — the engine itself is generic over BPEvent and never imports these.
  *
  * Shape rules settled in the router design:
@@ -14,7 +14,7 @@ import { FACULTY_MESSAGE_KINDS } from './faculties.constants.ts'
  *   their results via listener `detailSchema` on `detail.id`
  * - requests carry `{ id, input }` (the shell faculty adds an optional `label`); results carry `{ id, result }`; cancels `{ id }`
  * - `input`/`result` are loose JsonObject payloads: their strict schemas keep
- *   their one home in the worker faculties (no cross-module drift)
+ *   their one home in the faculty modules (no cross-module drift)
  * - `ingress` never survives the boundary: routed events are synthesized by
  *   faculty files, and `additionalProperties: false` rejects its presence (proven in
  *   the spec) — so the field is deliberately absent from the types

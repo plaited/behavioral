@@ -1,16 +1,16 @@
 /**
- * Types shared by the mcp-client worker (`mcp/faculty.ts`) and its
+ * Types shared by the mcp faculty process (`mcp/faculty.ts`) and its
  * event-wire consumers.
  *
  * @remarks
- * Types + op-input schemas only — no runtime faculty beyond compiled
+ * Types + op-input schemas only — no runtime behavior beyond compiled
  * validators, so importing this module has no side effects on either side of
- * the worker boundary. The worker mounts `self.onmessage` at top level, so
- * the host must never import it for types; both sides import here instead.
- * The wire itself is the behavioral event vocabulary (`mcp_request` /
- * `mcp_cancel` in, one `mcp_request_result` out) defined in
- * `src/faculties/workers.types.ts` — only the `detail.input` and
- * `detail.result` payload shapes live here.
+ * the process boundary. The faculty runs as a spawned process (stdio lines,
+ * never imported by the host), so the host must never import the faculty for
+ * types; both sides import here instead. The wire itself is the behavioral
+ * event vocabulary (`mcp_request` / `mcp_cancel` in, one `mcp_request_result`
+ * out) defined in `src/faculties/faculties.types.ts` — only the
+ * `detail.input` and `detail.result` payload shapes live here.
  *
  * Per the 2026-09-21 worker-conversion ruling: per-call input
  * credentials are RETIRED — `detail.input` carries the server URL and the

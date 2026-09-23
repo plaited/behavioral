@@ -1,6 +1,6 @@
 ---
 name: behavioral-tools
-description: Remote MCP operations for the behavioral agent via the mcp faculty — the mcp_request/mcp_request_result/mcp_cancel event wire (seven ops, typed authorization_required results, the auth replay spine) plus the auth/broker binding rules. The CLI tool fleet is retired: skills and plugins run through the skill-conventions skill (threads + recipes + store), git and raw shell belong to the shell faculty, HTML validation belongs to the controller floors + the classifier story (prompts/html-classifier-gate.md), TypeScript LSP is a future faculty (TS 7.1 stable API).
+description: Remote MCP operations for the behavioral agent via the mcp faculty — the mcp_request/mcp_request_result/mcp_cancel event wire (seven ops, typed authorization_required results, the auth replay spine) plus the auth/broker binding rules. The CLI tool fleet is retired: skills and plugins run through the skill-conventions skill (threads + recipes + store), git and raw shell belong to the shell faculty, HTML validation belongs to the controller floors + the classifier story , TypeScript LSP is a future faculty (TS 7.1 stable API).
 license: ISC
 compatibility: Requires bun and the behavioral CLI
 allowed-tools: Bash
@@ -24,7 +24,8 @@ the CLI tool fleet is retired:
 - **Git and raw shell** belong to the shell faculty (`shell_request`, bun-direct —
   `run` op TS scripts, `shell` op Bun Shell commands).
 - **HTML validation** belongs to the controller floors and the classifier
-  story ([prompts/html-classifier-gate.md](../../prompts/html-classifier-gate.md)).
+  story (`src/controller/css.schemas.ts` doubles as classifier context — the
+  gate design is a local working doc, `.prompts/html-classifier-gate.md`).
 
 ## Module references
 
