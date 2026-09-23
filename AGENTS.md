@@ -78,10 +78,14 @@ and the impact is broad or unclear, expand coverage until the affected surface i
 (`behaviors.types.ts` + `behaviors.constants.ts` — every request/result event kind,
 validators, and the kind registry), the behavior
 wiring primitive (`use-behavior.ts`, `useBehavior` — Bun.spawn processes speaking the
-wire over stdio lines; exit-code crash synthesis as `behavior_error`; respawn on
-demand), the process lane (`process-lane.ts` — stdio emit/inbound, the envData
+wire over stdio lines; it compiles the family's event schemas and returns them so
+the composition derives guard threads; exit-code crash synthesis as `behavior_error`;
+respawn on demand), the process lane (`process-lane.ts` — stdio emit/inbound, the envData
 bridge, bindEmit for the frontier embed), and the behavior families:
-`responses-client.behavior.ts` (Open Responses model calls), `shell.behavior.ts`
+`system-two.behavior.ts` (Open Responses model calls; a provider entry —
+`configSystemTwo(respond)` wires it, `useSystemTwo({ endpoints })` seeds the endpoint
+map) and `system-one.behavior.ts` (TypeSafe/OpenRouter Decisions; `configSystemOne` +
+`useSystemOne({ endpoint })`, with 429/529 retry), `shell.behavior.ts`
 (bun-direct script execution — `run` op TS scripts via `bun run -`, `shell` op
 Bun Shell commands through the wrapper; temp-file payloads over ~100KB, deleted
 on every exit), `frontier.behavior.ts` (the in-process embed — imported and driven
@@ -99,7 +103,9 @@ skill/plugin operations are the shell family's thread pack
 `skills/skill-conventions/`.
 **`src/behaviors.ts`** — the behaviors public surface (package export `./behaviors`): the
 `Behavior` union, the wire types + JSON schemas/validators (`behaviors.types.ts`), the override thread
-packs (`shellThreads`, `mcpThreads`), their schemas/types, and `useBehavior` — what a
+packs (`shellThreads`, `mcpThreads`), their schemas/types, `useBehavior`, and the
+System One/Two config surface (`configSystemOne`/`useSystemOne`,
+`configSystemTwo`/`useSystemTwo`) — what a
 `config.ts` imports to compose. (`behaviorsThreads`, the default root pack, is internal.) The runtime composition itself is `src/cli/b-program.ts`.
 **`src/behavioral/`** — the pure language layer: types, constants, utils, the interpreter core
 (`behavioral.ts`), and its internal jq subprocess (`jq.worker.ts` — engine-internal, wire-external;

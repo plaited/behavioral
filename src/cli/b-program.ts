@@ -85,6 +85,7 @@ export const bProgram = ({
   behaviors,
   shell: shellOverride,
   store: storeOverride,
+  systemOne: systemOneOverride,
   systemTwo: systemTwoOverride,
 }: {
   /** Allow-list: unset = all default behaviors on; set = only the named behaviors spawn. */
@@ -94,7 +95,13 @@ export const bProgram = ({
   /** The store family override: a pre-curried useBehavior return (durable store). */
   store?: ReturnType<typeof useBehavior>
   /**
-   * The System Two family override (e.g. `useSystemTwo({ url, apiKey })`). No
+   * The System One family override (e.g. `useSystemOne({ endpoint })`). No
+   * default: with no override the family carries no endpoint, so it is simply
+   * absent — no process, no route.
+   */
+  systemOne?: ReturnType<typeof useBehavior>
+  /**
+   * The System Two family override (e.g. `useSystemTwo({ endpoints })`). No
    * default: with no override the family carries no endpoint, so it is simply
    * absent — no process, no route.
    */
@@ -148,8 +155,9 @@ export const bProgram = ({
       : shellOverride(familyAddThreads)
 
   // The system families: no default. A host override (a config helper
-  // return — `useSystemTwo({ url, apiKey })`) carries the endpoint it needs;
+  // return — `useSystemTwo({ endpoints })`) carries the endpoint it needs;
   // without one the family is simply absent.
+  const systemOne = systemOneOverride?.(familyAddThreads)
   const systemTwo = systemTwoOverride?.(familyAddThreads)
 
   // The store family: a host override is invoked with OUR addThreads (the
@@ -192,6 +200,16 @@ export const bProgram = ({
     send: (event: BPEvent): void => shell.send(event),
     gate: (event: BPEvent): boolean => shell.invalidEventGate(event),
   })
+  if (systemOne !== undefined) {
+    // The family's request/cancel/result guard derives from the same schemas
+    // useBehavior compiled — a malformed system_one event is blocked (visible
+    // in the frontier traces), not silently dropped.
+    familyAddThreads(guardThreads(`guard:${systemOne.name}-schema`, eventGuardEntries(systemOne.schemas)))
+    route([BEHAVIOR_MESSAGE_KINDS.system_one_request, BEHAVIOR_MESSAGE_KINDS.system_one_cancel], {
+      send: (event: BPEvent): void => systemOne.send(event),
+      gate: (event: BPEvent): boolean => systemOne.invalidEventGate(event),
+    })
+  }
   if (systemTwo !== undefined) {
     // The family's request/cancel/result guard derives from the same schemas
     // useBehavior compiled — a malformed system_two event is blocked (visible
@@ -260,6 +278,7 @@ export const bProgram = ({
       shell.terminate()
       store.terminate()
       mcp.terminate()
+      systemOne?.terminate()
       systemTwo?.terminate()
     },
   }

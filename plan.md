@@ -9,15 +9,26 @@ runtime through an egress/ingress vocabulary, and validation is threads.
 The runtime, config, observability, and IPC host are landed.
 
 - **Composition** — `src/cli/b-program.ts` (`bProgram`): the
-  in-process engine + frontier, the four capability families (shell, store,
-  responses, mcp) spawned per space, a `behaviors` allow-list, and shell/store
-  overrides. `start()` flushes the deferred pack mounts after subscribers
-  attach; `trigger` admits events only; `terminate` kills every family it
-  invoked. The process primitive is `useBehavior` (`src/behaviors/use-behavior.ts`).
+  in-process engine + frontier, the default capability families (shell, store,
+  mcp) spawned per space, a `behaviors` allow-list, and the override families
+  (`shell`, `store`, `systemOne`, `systemTwo`). `start()` flushes the deferred
+  pack mounts after subscribers attach; `trigger` admits events only;
+  `terminate` kills every family it invoked. The process primitive is
+  `useBehavior` (`src/behaviors/use-behavior.ts`): it takes a family's event
+  schemas, compiles them, and returns them so the composition derives a guard
+  thread (a malformed family message is blocked, visible in traces).
+- **System families** — `system-two.behavior.ts` (Open Responses; the bundled
+  provider entry) and `system-one.behavior.ts` (TypeSafe/OpenRouter Decisions;
+  429/529 retry). Each is a provider entry: `configSystemTwo(respond)` /
+  `configSystemOne(respond)` owns the wire plumbing, and `useSystemTwo({ endpoints })`
+  / `useSystemOne({ endpoint })` is the host helper that seeds the endpoint via
+  environment data and wires `useBehavior`. No defaults — `bProgram` takes them
+  as overrides; absent means no process and no route.
 - **Public surface** — `src/behaviors.ts` (package export `./behaviors`): the
   `Behavior` union, the wire types + schemas/validators, the override thread packs
-  (`shellThreads`, `mcpThreads`), and `useBehavior` — what a `config.ts` imports.
-  (`behaviorsThreads`, the root guard pack, is internal.)
+  (`shellThreads`, `mcpThreads`), the System One/Two config surface, and
+  `useBehavior` — what a `config.ts` imports. (`behaviorsThreads`, the root guard
+  pack, is internal.)
 - **Config & home** — `behavioralHome()` (`src/behaviors/behavioral-home.ts`) is
   the single `.behavioral` root, overridable by `BEHAVIORAL_HOME`.
   `loadConfig()` (`src/cli/load-config.ts`) loads `<home>/config.ts` — executable

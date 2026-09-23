@@ -37,7 +37,7 @@ const validate = (value: unknown, configPath: string): BehavioralConfig => {
       )
     }
   }
-  for (const key of ['shell', 'store', 'systemTwo'] as const) {
+  for (const key of ['shell', 'store', 'systemOne', 'systemTwo'] as const) {
     const override = config[key]
     if (override !== undefined && typeof override !== 'function') {
       const got = override === null ? 'null' : typeof override

@@ -40,6 +40,24 @@ export type SystemTwoCancelEvent = {
   space?: string
 }
 
+export type SystemOneRequestEvent = {
+  type: typeof BEHAVIOR_MESSAGE_KINDS.system_one_request
+  detail: { id: string; input: JsonObject }
+  space?: string
+}
+
+export type SystemOneRequestResultEvent = {
+  type: typeof BEHAVIOR_MESSAGE_KINDS.system_one_request_result
+  detail: WorkerResultDetail
+  space?: string
+}
+
+export type SystemOneCancelEvent = {
+  type: typeof BEHAVIOR_MESSAGE_KINDS.system_one_cancel
+  detail: { id: string }
+  space?: string
+}
+
 export type ShellRequestEvent = {
   type: typeof BEHAVIOR_MESSAGE_KINDS.shell_request
   /** `label` is an optional trace annotation (logical names like 'skill-scan') — no routing weight. */
@@ -160,6 +178,9 @@ export type WorkerEvent =
   | SystemTwoRequestEvent
   | SystemTwoRequestResultEvent
   | SystemTwoCancelEvent
+  | SystemOneRequestEvent
+  | SystemOneRequestResultEvent
+  | SystemOneCancelEvent
   | ShellRequestEvent
   | ShellRequestResultEvent
   | ShellCancelEvent
@@ -242,6 +263,40 @@ export const SystemTwoCancelEventSchema: JSONSchemaType<SystemTwoCancelEvent> = 
   type: 'object',
   properties: {
     type: { type: 'string', const: BEHAVIOR_MESSAGE_KINDS.system_two_cancel },
+    detail: {
+      type: 'object',
+      properties: { id: { type: 'string', minLength: 1 } },
+      required: ['id'],
+      additionalProperties: false,
+    },
+    space: { type: 'string', nullable: true },
+  },
+  required: ['type', 'detail'],
+  additionalProperties: false,
+}
+
+export const SystemOneRequestEventSchema: JSONSchemaType<SystemOneRequestEvent> = {
+  type: 'object',
+  properties: {
+    type: { type: 'string', const: BEHAVIOR_MESSAGE_KINDS.system_one_request },
+    detail: {
+      type: 'object',
+      properties: { id: { type: 'string', minLength: 1 }, input: jsonObjectSchema },
+      required: ['id', 'input'],
+      additionalProperties: false,
+    },
+    space: { type: 'string', nullable: true },
+  },
+  required: ['type', 'detail'],
+  additionalProperties: false,
+}
+
+export const SystemOneRequestResultEventSchema = resultEventSchema(BEHAVIOR_MESSAGE_KINDS.system_one_request_result)
+
+export const SystemOneCancelEventSchema: JSONSchemaType<SystemOneCancelEvent> = {
+  type: 'object',
+  properties: {
+    type: { type: 'string', const: BEHAVIOR_MESSAGE_KINDS.system_one_cancel },
     detail: {
       type: 'object',
       properties: { id: { type: 'string', minLength: 1 } },
@@ -360,6 +415,9 @@ export const BehaviorErrorEventSchema: JSONSchemaType<BehaviorErrorEvent> = {
 export const validateSystemTwoRequestEvent = ajv.compile(SystemTwoRequestEventSchema)
 export const validateSystemTwoRequestResultEvent = ajv.compile(SystemTwoRequestResultEventSchema)
 export const validateSystemTwoCancelEvent = ajv.compile(SystemTwoCancelEventSchema)
+export const validateSystemOneRequestEvent = ajv.compile(SystemOneRequestEventSchema)
+export const validateSystemOneRequestResultEvent = ajv.compile(SystemOneRequestResultEventSchema)
+export const validateSystemOneCancelEvent = ajv.compile(SystemOneCancelEventSchema)
 export const validateShellRequestEvent = ajv.compile(ShellRequestEventSchema)
 export const validateShellRequestResultEvent = ajv.compile(ShellRequestResultEventSchema)
 export const validateShellCancelEvent = ajv.compile(ShellCancelEventSchema)

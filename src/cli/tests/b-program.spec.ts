@@ -7,7 +7,9 @@ import {
   ShellRequestEventSchema,
   ShellRequestResultEventSchema,
 } from '../../behaviors/behaviors.types.ts'
+import { useSystemOne } from '../../behaviors/config-system-one.ts'
 import { useSystemTwo } from '../../behaviors/config-system-two.ts'
+import { startDecisionsServer } from '../../behaviors/tests/fixtures/decisions-server.ts'
 import { ASSISTANT_TEXT, startOpenResponsesServer } from '../../behaviors/tests/fixtures/model-server.ts'
 import { startMcpServer } from '../../behaviors/tests/mcp-server-fixture.ts'
 import { useBehavior } from '../../behaviors/use-behavior.ts'
@@ -359,6 +361,60 @@ describe('bProgram — the runtime composition', () => {
       runtime.trigger({ type: BEHAVIOR_MESSAGE_KINDS.system_two_request, detail: { id: 'bad' } })
       await Bun.sleep(100)
       expect(selectionsOf(traces).some((t) => t.selected.type === BEHAVIOR_MESSAGE_KINDS.system_two_request)).toBe(
+        false,
+      )
+      expect(traces.some((t) => t.kind === TRACE_MESSAGE_KINDS.deadlock)).toBe(true)
+    } finally {
+      runtime.terminate()
+      await server.close()
+    }
+  })
+
+  test('a systemOne override takes the route: the endpoint seeds the process and the result re-enters', async () => {
+    const server = await startDecisionsServer()
+    const { runtime, traces } = startRuntime({
+      systemOne: useSystemOne({ endpoint: { url: server.url, model: 'jev-latest' } }),
+    })
+    try {
+      runtime.trigger({
+        type: BEHAVIOR_MESSAGE_KINDS.system_one_request,
+        detail: {
+          id: 's1-1',
+          input: { state: 'x', questions: { is_urgent: { type: 'noul', instructions: 'Urgent?' } } },
+        },
+      })
+      await waitForTraces(traces, (s) =>
+        s.some(
+          (t) =>
+            t.selected.type === BEHAVIOR_MESSAGE_KINDS.system_one_request_result &&
+            (t.selected.detail as { id?: string } | undefined)?.id === 's1-1',
+        ),
+      )
+      const result = selectionsOf(traces).find(
+        (t) =>
+          t.selected.type === BEHAVIOR_MESSAGE_KINDS.system_one_request_result &&
+          (t.selected.detail as { id?: string } | undefined)?.id === 's1-1',
+      )
+      const detail = result?.selected.detail as
+        | { ok?: boolean; result?: { answers?: { is_urgent?: { noul?: number } } } }
+        | undefined
+      expect(detail?.ok).toBe(true)
+      expect(detail?.result?.answers?.is_urgent?.noul).toBe(0.9)
+    } finally {
+      runtime.terminate()
+      await server.close()
+    }
+  })
+
+  test('a malformed system_one_request is blocked by the family guard — never selected', async () => {
+    const server = await startDecisionsServer()
+    const { runtime, traces } = startRuntime({
+      systemOne: useSystemOne({ endpoint: { url: server.url, model: 'jev-latest' } }),
+    })
+    try {
+      runtime.trigger({ type: BEHAVIOR_MESSAGE_KINDS.system_one_request, detail: { id: 'bad' } })
+      await Bun.sleep(100)
+      expect(selectionsOf(traces).some((t) => t.selected.type === BEHAVIOR_MESSAGE_KINDS.system_one_request)).toBe(
         false,
       )
       expect(traces.some((t) => t.kind === TRACE_MESSAGE_KINDS.deadlock)).toBe(true)
