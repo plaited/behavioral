@@ -155,6 +155,34 @@ ingress + a plugin-shipped behavior surface.
      the conventions skill, docs sweep. Remaining: the deletion sweep (fleet 6 → 0)
      and the governor thread (plugin admission). -->
 
+### 2026-09-22 — landed: useBehavior / getBehavioral rename + `useBehavior` env
+
+- **Rename** (pilot): `src/behaviors/use-process.ts` → `use-behavior.ts`
+  (`useProcess` → `useBehavior`) and `src/behaviors/use-behavioral.ts` →
+  `get-behavioral.ts` (`useBehavioral` → `getBehavioral`). `useBehavior` wires
+  ONE behavior; `getBehavioral` gets the runtime. Specs renamed to match;
+  AGENTS.md + the frontier skill reference updated.
+- **`useBehavior` gains an optional `env`** (pilot): merged over the inherited
+  `process.env` at spawn, so a config can hand a family non-secret wiring
+  (model endpoints, broker URL) without mutating global `process.env`.
+
+### 2026-09-22 — ruled: the harness home + config.ts (pilot)
+
+- **One `.behavioral` root — `BEHAVIORAL_HOME`.** The harness always has exactly
+  one home (default `~/.behavioral`), overridable by env (and, eventually, a
+  CLI flag) so tests/evals/cloud instances isolate cleanly. All home-derived
+  paths (store db, traces, config) resolve from it.
+- **`<home>/config.ts` is executable config, loaded by the host.** TS because
+  it carries live values: the `behaviors` array and `shell`/`store` overrides
+  built with `useBehavior(...)`. The package exports the schemas, thread packs,
+  and family-default data so a consumer can build overrides — including new or
+  different threads (a skill will teach this). Absent file → defaults; present →
+  merged; bad → fail fast.
+- **Trust boundary:** only the single harness-home config is imported. A space
+  is a runtime scope (in cloud it need not be a project folder); it never
+  contributes executable config. There is one `.behavioral` folder per harness.
+- **Secrets** ride env/Varlock, never `config.ts`.
+
 ### 2026-09-22 — landed: the idle trace + the trigger/start split
 
 - **`idle` is a first-class trace** (pilot): `FRONTIER_STATUS.idle` (no
