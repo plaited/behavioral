@@ -54,7 +54,14 @@ const waitFor = async <T>(read: () => Promise<T | undefined>, timeoutMs = 8000):
 beforeAll(async () => {
   server = await startTransportServer(0)
   port = server.port
-})
+  // Warm the chrome backend: the first WebView in a process pays cold browser
+  // startup, which can exceed a test's 20s budget on a cold CI runner (the
+  // flaky `constructs and accepts` timeout). Pay it here, outside any test
+  // budget, so every spec runs against a warm browser.
+  const view = new Bun.WebView({ backend: { type: 'chrome', url: false } })
+  await view.navigate(`http://localhost:${port}/health`)
+  view.close()
+}, 60_000)
 
 afterAll(async () => {
   if (server) {

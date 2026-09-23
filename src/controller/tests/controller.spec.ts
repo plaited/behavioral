@@ -27,6 +27,9 @@
  *   ERR_INVALID_STATE on concurrent same-slot ops); the specs await sequentially.
  * - Ephemeral storage is the default; each test gets a fresh view disposed via
  *   `await using`. Chrome is spawned once per Bun process; each view is a tab.
+ * - `beforeAll` warms the backend with one throwaway view (60s hook budget):
+ *   the first view in a process pays cold Chrome startup, which can exceed a
+ *   test's 20s budget on a cold CI runner — pay it once, outside any test.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { type FixtureServer, startServer } from './fixtures/serve.ts'
@@ -63,7 +66,13 @@ const getFixture = (): FixtureServer => {
 
 beforeAll(async () => {
   fixture = startServer(0)
-})
+  // Warm the chrome backend: the first WebView in a process pays cold browser
+  // startup, which can exceed a test's 20s budget on a cold CI runner. Pay it
+  // here, outside any test budget, so every spec runs against a warm browser.
+  const view = new Bun.WebView({ backend: { type: 'chrome', url: false } })
+  await view.navigate(`http://localhost:${fixture.port}/health`)
+  view.close()
+}, 60_000)
 
 afterAll(async () => {
   if (fixture) {
