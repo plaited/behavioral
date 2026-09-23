@@ -105,8 +105,11 @@ nothing outside behavioral/ speaks its wire). Zero process entries that speak th
 dependency arrow is one-way: `src/behaviors/` → `src/behavioral/`.
 **`src/controller/`** — the browser Controller: a validation-free dumb relay over an injectable
 Transport, plus `controller.utils.ts` (DelegatedListener, swapBoundary, the deterministic floors
-`isInvalidTrigger`/`detectXssVectors`) and render-time scale error-back. The controller owns no
-AJV; its floors are hardcoded invariants (on*, malformed b-trigger, scale mismatch).
+`isInvalidTrigger`/`detectXssVectors`) and render-time scale error-back. `controller.schemas.ts`
+holds the AJV detail schemas for the `ui_*` wire shapes — imported by the host/threads, never
+the browser bundle (types in `controller.types.ts`, schemas in the separate file). The
+controller owns no AJV at runtime; its floors are hardcoded invariants (on*, malformed
+b-trigger, scale mismatch).
 **`src/cli/`** — the `behavioral` CLI framework (`makeCliRouter`/`parseCli`) and its commands,
 registered in `bin/behavioral.ts`. The `behavioral tools` fleet dispatcher is retired with the
 fleet (0 tools); turn/config commands land here as the composition rulings build out. The

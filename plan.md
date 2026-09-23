@@ -155,6 +155,18 @@ ingress + a plugin-shipped behavior surface.
      the conventions skill, docs sweep. Remaining: the deletion sweep (fleet 6 → 0)
      and the governor thread (plugin admission). -->
 
+### 2026-09-22 — landed: controller.schemas.ts — the ui_* AJV home (B)
+
+- The controller message detail schemas live in `src/controller/controller.schemas.ts`
+  (pilot's choice B): controller-specific, next to `controller.types.ts`, but in a
+  separate file so the browser bundle never pulls AJV. Mirrors the
+  `behavioral.types.ts` pattern (`JSONSchemaType<T>` + the shared `ajv`).
+- `CONTROLLER_DETAIL_SCHEMAS` keys by the `ui_*` type constants (no drift);
+  `validateControllerDetail(type, detail)` dispatches and unknown types fail
+  closed. The embedded BPEvent sub-shape reuses `BPEventSchema`.
+- These are the runtime gate the guard threads `block` with and the CLI
+  `--schema` reflection will expose — one home for both.
+
 ### 2026-09-22 — ruled: validation lives in threads; rejects are trace-visible
 
 - **One validation home — threads, not the host or controller** (pilot): the
