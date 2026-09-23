@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { ajv } from '../../behavioral/behavioral.types.ts'
 import { bProgram } from '../b-program.ts'
-import { type Ask, collectInitInput, type InitInput, InitInputSchema, init } from '../init.ts'
+import { type Ask, collectInitInput, type InitInput, InitInputSchema, init, runInit as runInitDirect } from '../init.ts'
 import { loadConfig } from '../load-config.ts'
 
 /**
@@ -21,6 +21,12 @@ import { loadConfig } from '../load-config.ts'
  *   specifiers, thanks to the global-install resolution) and points the
  *   faculty's `entry` at it.
  */
+
+/** Scripted ask seam: answers pop in order; an exhausted tour keeps returning empty. */
+const scriptedAsk = (answers: string[]): Ask => {
+  const queue = [...answers]
+  return async () => queue.shift() ?? ''
+}
 
 describe('behavioral init — the runner', () => {
   let home: string
@@ -125,6 +131,57 @@ describe('behavioral init — the runner', () => {
     expect(readConfig()).toContain("entry: 'providers/my-one.faculty.ts'")
   })
 
+  // The review's follow-up 3: the stub must match ITS faculty's contract —
+  // systemOne's context is a single endpoint and the Decisions output
+  // ({model, answers}); systemTwo's is the endpoint MAP and the Open
+  // Responses output ({items, status}). A stub that fails its own
+  // typecheck is a broken scaffold.
+  test('the systemTwo provider stub matches the systemTwo contract', async () => {
+    await runInit(
+      JSON.stringify({
+        providers: [{ faculty: 'systemTwo', file: 'my-two.faculty.ts' }],
+      }),
+    )
+    const entry = readFileSync(join(home, 'providers', 'my-two.faculty.ts'), 'utf8')
+    expect(entry).toContain('configSystemTwo')
+    expect(entry).toContain('SystemTwoRespond')
+    // systemTwo's respond context is the endpoint MAP, not a single endpoint.
+    expect(entry).toContain('{ endpoints, signal }')
+    // systemTwo's output is the Open Responses shape — items + status.
+    expect(entry).toContain("{ items: [], status: 'completed' }")
+    // Not the systemOne (Decisions) shape.
+    expect(entry).not.toContain('answers')
+    expect(entry).not.toContain('{ endpoint, signal }')
+  })
+
+  // The review's follow-up 6: control characters in URL/header values must
+  // not emit a broken string literal — init exits 0 and the config dies at
+  // load. The escape funnel (ts) covers every emitted value.
+  test('control characters in a url escape into a loadable string literal', async () => {
+    await runInit(
+      JSON.stringify({
+        systemOne: { url: 'http://localhost:9\n99/systemone' },
+        systemTwo: null,
+      }),
+    )
+    const content = readConfig()
+    // The newline rides ESCAPED inside the single-quoted literal — no raw
+    // control character is ever written into the config.
+    expect(content).toContain("'http://localhost:9\\n99/systemone'")
+    expect(content).not.toContain('http://localhost:9\n99/systemone')
+  })
+
+  test('the systemOne provider stub keeps the Decisions shape', async () => {
+    await runInit(
+      JSON.stringify({
+        providers: [{ faculty: 'systemOne', file: 'my-one.faculty.ts' }],
+      }),
+    )
+    const entry = readFileSync(join(home, 'providers', 'my-one.faculty.ts'), 'utf8')
+    expect(entry).toContain('{ endpoint, signal }')
+    expect(entry).toContain("{ model: 'custom', answers: {} }")
+  })
+
   test('two providers for one faculty are rejected', async () => {
     const input = JSON.stringify({
       providers: [
@@ -133,6 +190,24 @@ describe('behavioral init — the runner', () => {
       ],
     })
     await expect(init([input])).rejects.toThrow(/one provider per faculty/)
+  })
+
+  // The review's follow-up 7: the file-name pattern gates the JSON path via
+  // the input schema, but the interactive collector's free text flows into
+  // runInit raw — runInit is the one funnel both paths share, so the pattern
+  // is enforced there.
+  test('runInit rejects a traversal file name whatever path it arrives by', async () => {
+    // runInit directly: the CLI's schema gate (process.exit on bad JSON)
+    // already protects the JSON path — this proves the FUNNEL, which is what
+    // the interactive collector's free text flows through.
+    const bad: InitInput = { providers: [{ faculty: 'systemOne', file: '../../evil.ts' }] }
+    await expect(runInitDirect(bad)).rejects.toThrow(/file name/)
+    // The collector path: collected input reaches the same gate.
+    const collected = await collectInitInput(
+      // systemOne×4 defaults, systemTwo×3 defaults, then scaffold y → faculty → file.
+      scriptedAsk(['', '', '', '', '', '', '', 'y', 'systemOne', '../../evil.ts']),
+    )
+    await expect(runInitDirect(collected)).rejects.toThrow(/file name/)
   })
 
   test('the input schema rejects path traversal in a provider file name', () => {
@@ -145,11 +220,6 @@ describe('behavioral init — the runner', () => {
 })
 
 describe('behavioral init — the interactive collector', () => {
-  const scriptedAsk = (answers: string[]): Ask => {
-    const queue = [...answers]
-    return async () => queue.shift() ?? ''
-  }
-
   test('empty answers keep every default', async () => {
     const input = await collectInitInput(scriptedAsk(['', '', '', '', '', '', '', '']))
     expect(input.systemOne).toEqual({

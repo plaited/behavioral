@@ -9,9 +9,9 @@
  *   with `--schema input|output`, `--dry-run`, `--help`. Absent faculties
  *   default on (TypeSafe/OpenAI urls); `null` omits a faculty; api keys ride as
  *   env-var-NAME references that fail fast when unset — never literals.
- * - **humans** — with no input and a TTY (or `--interactive`), a prompt tour
- *   collects the same {@link InitInput} through an injectable `ask` seam and
- *   hands it to the same runner.
+ * - **humans** — with no input and a TTY, a prompt tour collects the same
+ *   {@link InitInput} through an injectable `ask` seam and hands it to the
+ *   same runner.
  *
  * Provider scaffolding writes `<home>/providers/<file>` — a provider entry
  * that imports the faculty factory by bare specifier (resolvable anywhere under
@@ -162,6 +162,14 @@ const InitOutputSchema = {
 const providerTemplate = (faculty: 'systemOne' | 'systemTwo'): string => {
   const factory = faculty === 'systemOne' ? 'configSystemOne' : 'configSystemTwo'
   const respondType = faculty === 'systemOne' ? 'SystemOneRespond' : 'SystemTwoRespond'
+  // Each stub matches ITS faculty's respond contract: systemOne gets a
+  // single endpoint + the Decisions output; systemTwo gets the endpoint map
+  // + the Open Responses output. (A stub that fails its own typecheck is a
+  // broken scaffold.)
+  const stub =
+    faculty === 'systemOne'
+      ? "async (input, { endpoint, signal }) => {\n  return { model: 'custom', answers: {} }\n}"
+      : "async (input, { endpoints, signal }) => {\n  return { items: [], status: 'completed' }\n}"
   return `/**
  * A custom System ${faculty === 'systemOne' ? 'One' : 'Two'} provider entry.
  * ${factory} owns the wire plumbing (inbound lane, result envelope, cancel and
@@ -171,9 +179,7 @@ import { ${factory}, type ${respondType} } from '@behavioral/sh/faculties'
 
 // MINIMAL: stub transport — replace with your call. Keep the contract: one
 // validated input in; the output shape or { isError: true, message } out.
-const respond: ${respondType} = async (input, { endpoint, signal }) => {
-  return { model: 'custom', answers: {} }
-}
+const respond: ${respondType} = ${stub}
 
 if (import.meta.main) ${factory}(respond)
 `
@@ -191,8 +197,25 @@ const envHelper = (): string =>
     '',
   ].join('\n')
 
-/** A single-quoted TS string literal — the generated file follows repo style. */
-const ts = (value: string): string => `'${value.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`
+const CONTROL_ESCAPES: Record<string, string> = {
+  '\n': '\\n',
+  '\r': '\\r',
+  '\t': '\\t',
+}
+
+/**
+ * A single-quoted TS string literal — the generated file follows repo style.
+ * Escapes backslashes, quotes, AND control characters: a raw newline in a
+ * URL/header would otherwise emit an unterminated literal (init exits 0,
+ * the config dies at load).
+ */
+const ts = (value: string): string =>
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: the control-char class IS the point — escaping them
+  `'${value.replace(/[\\\x00-\x1f\x7f]/g, (ch) => {
+    if (ch === "'") return "\\'"
+    if (ch === '\\') return '\\\\'
+    return CONTROL_ESCAPES[ch] ?? `\\u${ch.charCodeAt(0).toString(16).padStart(4, '0')}`
+  })}'`
 
 /** A single-line TS object literal over string values. */
 const tsObject = (record: Record<string, string>): string =>
@@ -281,6 +304,14 @@ export const runInit = async (input: InitInput): Promise<InitOutput> => {
     for (const provider of input.providers) {
       if (entryByFaculty.has(provider.faculty)) {
         throw new Error(`only one provider per faculty — a second ${provider.faculty} entry was requested`)
+      }
+      // The file-name gate lives in the FUNNEL, not just the input schema —
+      // the interactive collector's free text bypasses the schema, and a
+      // bare file name keeps the write inside <home>/providers/ (no traversal).
+      if (!/^[A-Za-z0-9][A-Za-z0-9._-]*\.ts$/.test(provider.file)) {
+        throw new Error(
+          `provider file name must be a bare .ts file name (letters, digits, dot, dash, underscore) — got ${JSON.stringify(provider.file)}`,
+        )
       }
       const providerPath = `providers/${provider.file}`
       await Bun.write(join(home, providerPath), providerTemplate(provider.faculty))
