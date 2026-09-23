@@ -14,31 +14,31 @@ the engine's super-step scheduler interprets. Hosts attach ingress through
 ## Architecture
 
 ```mermaid
-flowchart TD
-  subgraph HOST["HOST (the consumer)"]
-    direction TB
+block-beta
+  columns 1
+
+  block:HOST["HOST — the consumer"]
+    columns 1
     CONFIG["&lt;BEHAVIORAL_HOME&gt;/config.ts — executable TS (defineConfig)"]
     INGRESS["ingress: ui_event · ui_form_submit · trigger"]
     OUT["observation: trace stream via useTrace"]
   end
 
-  subgraph COMPOSE["COMPOSITION — src/cli/b-program.ts (bProgram)"]
-    direction TB
-    ENGINE["BEHAVIORAL ENGINE — src/behavioral (in-process, super-step scheduler: request · waitFor · block · transform bids)"]
-    ROUTER["the pump — selected events route to their faculty lane; traces out"]
+  block:COMPOSE["COMPOSITION — src/cli/b-program.ts (bProgram)"]
+    columns 1
     GUARDS["guard threads — block malformed events at their schema (detailMatch:false); rejects visible in frontier/pending_bids/deadlock"]
     PACKS["thread packs — the root guard pack always; shell/mcp packs when their faculties are on"]
-    ENGINE --> ROUTER
-    GUARDS --> ENGINE
-    PACKS --> ENGINE
+    ENGINE["BEHAVIORAL ENGINE — src/behavioral (in-process, super-step scheduler: request · waitFor · block · transform bids)"]
+    ROUTER["the pump — selected events route to their faculty lane; traces out"]
   end
 
-  subgraph EMBED["IN-PROCESS EMBED"]
-    FRONTIER["frontier — analysis dispatch driven directly by the composition"]
+  block:EMBED["IN-PROCESS EMBED — driven directly by the composition; results re-enter the engine (bindEmit)"]
+    columns 1
+    FRONTIER["frontier — the reachability analysis dispatch (replay · explore · verify)"]
   end
 
-  subgraph FACULTIES["CAPABILITY FACULTIES — src/faculties/&lt;faculty&gt; (Bun.spawn processes, one wire over stdio lines)"]
-    direction TB
+  block:FACULTIES["CAPABILITY FACULTIES — src/faculties/&lt;faculty&gt; (Bun.spawn processes, one wire over stdio lines — requests in, results re-enter)"]
+    columns 1
     SHELL["shell — bun-direct script + Bun Shell ops"]
     STORE["store — durable space-scoped persistence"]
     MCP["mcp — remote connections/sessions/auth"]
@@ -46,20 +46,12 @@ flowchart TD
     S2["systemTwo — Open Responses model calls (SSE assembled to terminal results)"]
   end
 
-  IPC["serve — src/cli/serve.ts: line-framed JSON-RPC over stdio; ingress → triggers, ui_* selections → client notifications, redacted traces out"]
+  block:IPC["SERVE — src/cli/serve.ts: line-framed JSON-RPC over stdio; ingress → triggers, ui_* selections → client notifications, redacted traces out"]
 
-  CONFIG --> COMPOSE
-  INGRESS --> COMPOSE
-  COMPOSE --> OUT
+  HOST --> COMPOSE
   COMPOSE --> EMBED
-  ROUTER -->|"one JSON event per stdin line"| FACULTIES
-  FACULTIES -->|"result lines re-enter the engine (space preserved)"| ROUTER
-  COMPOSE <-->|"ui_* wire (dumb relay, schema-gated at threads)"| IPC
-
-  %% Layout-only rank hints (invisible edges) — stack the ranks top to bottom
-  %% so the diagram flows vertically instead of spreading horizontally.
-  EMBED ~~~ FACULTIES
-  FACULTIES ~~~ IPC
+  COMPOSE --> FACULTIES
+  COMPOSE --> IPC
 ```
 
 **One wire.** Every faculty speaks the same behavioral event vocabulary
