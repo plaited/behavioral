@@ -109,7 +109,10 @@ Transport, plus `controller.utils.ts` (DelegatedListener, swapBoundary, the dete
 AJV; its floors are hardcoded invariants (on*, malformed b-trigger, scale mismatch).
 **`src/cli/`** — the `behavioral` CLI framework (`makeCliRouter`/`parseCli`) and its commands,
 registered in `bin/behavioral.ts`. The `behavioral tools` fleet dispatcher is retired with the
-fleet (0 tools); turn/config commands land here as the composition rulings build out.
+fleet (0 tools); turn/config commands land here as the composition rulings build out. The
+JSON-RPC IPC host lives here too: `json-rpc.ts` (the line codec), `serve.ts` (the `serve`
+entry — ingress messages → triggers, `ui_*` selections → client notifications, redacted
+traces out), `load-config.ts` (`<BEHAVIORAL_HOME>/config.ts`), and `trace-consumer.ts`.
 **`src/utils/`** — shared pure utilities.
 **`src/behaviors/*.threads.ts`** — behavior thread packs: `shell.threads.ts` (the
 ICL pack — skill/plugin scans, catalog/manifest schema gates, links dispatchers

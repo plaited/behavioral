@@ -155,6 +155,24 @@ ingress + a plugin-shipped behavior surface.
      the conventions skill, docs sweep. Remaining: the deletion sweep (fleet 6 → 0)
      and the governor thread (plugin admission). -->
 
+### 2026-09-22 — landed: serve — the JSON-RPC IPC host
+
+- **`src/cli/json-rpc.ts`** — a line codec: requests (`id`) answered with a
+  result/error, notifications fire-and-forget, malformed → `-32700`; `notify`
+  pushes framed notifications. Carrier-thin (`ReadableStream` + `write`), so
+  stdio wiring lives at the host and tests drive it in memory.
+- **`src/cli/serve.ts`** — `createHost({ runtime, input, write, home })`: ingress
+  `trigger`/`ui_event` → `runtime.trigger`; other `ui_*` → a namespaced BPEvent;
+  `ui_*` selections → client notifications (egress-as-selection); the redacted
+  trace consumer fans out to the JSONL log and a `trace` notification;
+  subscribe then `start()`, then `ready`. `serve()` composes
+  `getBehavioral(await loadConfig())` over stdio and terminates on EOF.
+- **Entry:** `bin/behavioral.ts` registers a `serve` command (lazy import so
+  `--help`/`--version` don't load the composition graph).
+- **Tested at the runtime boundary:** the host against a fake runtime, plus a
+  spawned `bun bin/behavioral.ts serve` with `behaviors: []` — ready → trigger →
+  kick selection trace → idle trace → exit 0.
+
 ### 2026-09-22 — landed: the process-layer consolidation (home + oauth)
 
 - **`behavioralHome()` → `src/behaviors/behavioral-home.ts`** (pilot): it is a
