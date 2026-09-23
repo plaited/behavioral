@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { ajv } from '../../behavioral/behavioral.types.ts'
+import { bProgram } from '../b-program.ts'
 import { type Ask, collectInitInput, type InitInput, InitInputSchema, init } from '../init.ts'
+import { loadConfig } from '../load-config.ts'
 
 /**
  * `behavioral init` — the config generator — through its real CLI handler
@@ -51,7 +53,7 @@ describe('behavioral init — the runner', () => {
   test('an empty input generates the default config — both faculties, env-name secrets', async () => {
     const output = await runInit('{}')
     expect(output.configPath).toBe(configPath())
-    expect(output.files).toEqual(['config.ts'])
+    expect(output.files).toContain('config.ts')
     const content = readConfig()
     expect(content).toContain("import { defineConfig } from '@behavioral/sh'")
     expect(content).toContain("import { useSystemOne, useSystemTwo } from '@behavioral/sh/faculties'")
@@ -62,6 +64,29 @@ describe('behavioral init — the runner', () => {
     expect(content).toContain("apiKey: env('OPENAI_API_KEY')")
     // No literal secrets anywhere.
     expect(content).not.toMatch(/sk-[a-zA-Z0-9]/)
+  })
+
+  // The review's missing load-test: the generated config must not merely look
+  // right — it must LOAD (module resolution from the home) and COMPOSE.
+  test('init links the package into the home — the generated config loads and composes', async () => {
+    process.env.TYPESAFE_API_KEY = 'test'
+    process.env.OPENAI_API_KEY = 'test'
+    try {
+      const output = await runInit('{}')
+      // The home is self-resolving: the running package is linked under
+      // <home>/node_modules, so serve's dynamic import of the config resolves.
+      expect(output.files).toContain('node_modules/@behavioral/sh')
+      expect(existsSync(join(home, 'node_modules/@behavioral/sh/package.json'))).toBe(true)
+      // The full loop: loadConfig (dynamic import from the home) + compose.
+      const config = await loadConfig(configPath())
+      expect(typeof config.systemOne).toBe('function')
+      expect(typeof config.systemTwo).toBe('function')
+      const runtime = bProgram(config)
+      runtime.terminate()
+    } finally {
+      delete process.env.TYPESAFE_API_KEY
+      delete process.env.OPENAI_API_KEY
+    }
   })
 
   test('a null faculty is omitted; a custom spec overrides the defaults', async () => {

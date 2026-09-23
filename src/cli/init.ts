@@ -21,7 +21,8 @@
  * @packageDocumentation
  */
 
-import { join } from 'node:path'
+import { existsSync, mkdirSync, symlinkSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
 import type { JSONSchemaType } from 'ajv'
 import { behavioralHome } from '../faculties/behavioral-home.ts'
@@ -298,6 +299,23 @@ export const runInit = async (input: InitInput): Promise<InitOutput> => {
 
   await Bun.write(configPath, renderConfig({ systemOne, systemTwo, entryByFaculty }))
   files.unshift('config.ts')
+
+  // The home must be self-resolving: the generated config imports
+  // `@behavioral/sh`, and a host process (serve) resolves that from the
+  // CONFIG FILE'S directory — a bare home has no node_modules on that walk,
+  // and Bun's global fallback covers only entry execution, not dynamic
+  // imports. Link the running package under <home>/node_modules so the
+  // config loads from any host. Idempotent: an existing link/install wins.
+  // MINIMAL: symlinkSync — POSIX/Bun environments; on Windows without
+  // symlink privileges init degrades to the documented `bun add -g` story.
+  const linkDir = join(home, 'node_modules', '@behavioral')
+  const linkPath = join(linkDir, 'sh')
+  if (!existsSync(linkPath)) {
+    mkdirSync(linkDir, { recursive: true })
+    symlinkSync(resolve(import.meta.dir, '..', '..'), linkPath)
+    files.push('node_modules/@behavioral/sh')
+  }
+
   return { home, configPath, files }
 }
 
