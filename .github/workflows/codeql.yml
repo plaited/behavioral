@@ -29,5 +29,10 @@ jobs:
         with:
           languages: ${{ matrix.language }}
           config-file: ./.github/codeql/codeql-config.yml
+          # Reuse the default setup's category (`/language:<lang>`) so these
+          # analyses supersede the old default-setup ones — otherwise the
+          # already-open alerts live in a different category and are never
+          # closed by the new (paths-ignored, zero-result) analysis.
+          category: /language:${{ matrix.language }}
       # javascript-typescript and actions are interpreted — no build step.
       - uses: github/codeql-action/analyze@v4
