@@ -1,8 +1,8 @@
 import { TRACE_MESSAGE_KINDS } from '../behavioral/behavioral.constants.ts'
 import { behavioral } from '../behavioral/behavioral.ts'
 import type { BPEvent, JsonObject, SelectionTrace, Thread, Trace } from '../behavioral/behavioral.types.ts'
-import { BEHAVIOR_MESSAGE_KINDS } from './behaviors.constants.ts'
-import { behaviorsThreads } from './behaviors.threads.ts'
+import { BEHAVIOR_MESSAGE_KINDS } from '../behaviors/behaviors.constants.ts'
+import { behaviorsThreads } from '../behaviors/behaviors.threads.ts'
 import {
   validateFrontierRequestEvent,
   validateMcpCancelEvent,
@@ -16,12 +16,13 @@ import {
   validateShellRequestResultEvent,
   validateStoreRequestEvent,
   validateStoreRequestResultEvent,
-} from './behaviors.types.ts'
-import { handleFrontierMessage } from './frontier.behavior.ts'
-import { mcpThreads } from './mcp.threads.ts'
-import { bindEmit } from './process-lane.ts'
-import { shellThreads } from './shell.threads.ts'
-import { useBehavior } from './use-behavior.ts'
+} from '../behaviors/behaviors.types.ts'
+import { handleFrontierMessage } from '../behaviors/frontier.behavior.ts'
+import { mcpThreads } from '../behaviors/mcp.threads.ts'
+import { bindEmit } from '../behaviors/process-lane.ts'
+import { shellThreads } from '../behaviors/shell.threads.ts'
+import { useBehavior } from '../behaviors/use-behavior.ts'
+import type { Behavior } from '../behaviors.ts'
 
 /*
  * The runtime composition — IN-PROCESS. The engine is behavioral() in the
@@ -54,9 +55,6 @@ import { useBehavior } from './use-behavior.ts'
  * lifecycle, never the event lane's.
  */
 
-/** The selectable worker families (engine and frontier are never selectable — always on). */
-export type Behavior = 'shell' | 'responses' | 'store' | 'mcp'
-
 /** The in-process frontier embed family: the dispatch driven directly, emit bound to reenter. */
 const frontierFamily = (
   addThreads: (threads: Thread[]) => void,
@@ -83,7 +81,7 @@ const frontierFamily = (
   }
 }
 
-export const getBehavioral = ({
+export const bProgram = ({
   behaviors,
   shell: shellOverride,
   store: storeOverride,

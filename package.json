@@ -28,7 +28,7 @@
   },
   "type": "module",
   "exports": {
-    "./cli": "./src/cli.ts",
+    "./behaviors": "./src/behaviors.ts",
     "./controller": "./src/controller.ts",
     "./utils": "./src/utils.ts"
   },

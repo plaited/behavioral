@@ -2,17 +2,17 @@ import { join } from 'node:path'
 import { TRACE_MESSAGE_KINDS } from '../behavioral/behavioral.constants.ts'
 import type { BPEvent, JsonObject } from '../behavioral/behavioral.types.ts'
 import { behavioralHome } from '../behaviors/behavioral-home.ts'
-import { getBehavioral } from '../behaviors/get-behavioral.ts'
+import { bProgram } from './b-program.ts'
 import { createJsonRpcServer, type JsonRpcMessage, type JsonRpcServer } from './json-rpc.ts'
 import { loadConfig } from './load-config.ts'
 import { collectSecretValues, createTraceConsumer, traceLogSink } from './trace-consumer.ts'
 
 /**
- * The host's runtime surface — a narrow view of {@link getBehavioral}'s handle.
+ * The host's runtime surface — a narrow view of {@link bProgram}'s handle.
  *
  * @public
  */
-export type HostRuntime = Pick<ReturnType<typeof getBehavioral>, 'trigger' | 'useTrace' | 'start' | 'terminate'>
+export type HostRuntime = Pick<ReturnType<typeof bProgram>, 'trigger' | 'useTrace' | 'start' | 'terminate'>
 
 /** Map one inbound JSON-RPC message onto the engine. */
 const dispatch = (runtime: HostRuntime, message: JsonRpcMessage): unknown => {
@@ -79,7 +79,7 @@ export const createHost = ({
  * @public
  */
 export const serve = async (): Promise<void> => {
-  const runtime = getBehavioral(await loadConfig())
+  const runtime = bProgram(await loadConfig())
   const { rpc } = createHost({
     runtime,
     input: Bun.stdin.stream(),

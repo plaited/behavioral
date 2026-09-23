@@ -14,7 +14,7 @@ import { useBehavior } from '../use-behavior.ts'
  * useBehavior — the spawn-based family primitive — against a real process on
  * the real wire (the engine runs in-process via behavioral(); the spec plays
  * the composition's pump role: selected request events forward to the
- * family's send, exactly as getBehavioral does). Process-native behaviors:
+ * family's send, exactly as bProgram does). Process-native behaviors:
  *
  * - a request line goes out; the result line re-enters as an event
  * - a crashed process (exit mid-request) synthesizes ONE worker_error

@@ -1,15 +1,15 @@
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { behavioralHome } from '../behaviors/behavioral-home.ts'
-import type { getBehavioral } from '../behaviors/get-behavioral.ts'
+import type { bProgram } from './b-program.ts'
 
 /**
- * The host config shape — the {@link getBehavioral} options a `config.ts` may
+ * The host config shape — the {@link bProgram} options a `config.ts` may
  * set. A config file default-exports a value of this shape.
  *
  * @public
  */
-export type BehavioralConfig = Parameters<typeof getBehavioral>[0]
+export type BehavioralConfig = Parameters<typeof bProgram>[0]
 
 /** The selectable behaviors a config may enable (mirrors the `Behavior` union). */
 const KNOWN_BEHAVIORS: readonly string[] = ['shell', 'responses', 'store', 'mcp']

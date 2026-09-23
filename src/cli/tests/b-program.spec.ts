@@ -1,18 +1,18 @@
 import { describe, expect, test } from 'bun:test'
 import { TRACE_MESSAGE_KINDS } from '../../behavioral/behavioral.constants.ts'
 import type { SelectionTrace, Trace } from '../../behavioral/behavioral.types.ts'
-import { BEHAVIOR_MESSAGE_KINDS } from '../behaviors.constants.ts'
+import { BEHAVIOR_MESSAGE_KINDS } from '../../behaviors/behaviors.constants.ts'
 import {
   validateShellCancelEvent,
   validateShellRequestEvent,
   validateShellRequestResultEvent,
-} from '../behaviors.types.ts'
-import { getBehavioral } from '../get-behavioral.ts'
-import { useBehavior } from '../use-behavior.ts'
-import { startMcpServer } from './mcp-server-fixture.ts'
+} from '../../behaviors/behaviors.types.ts'
+import { startMcpServer } from '../../behaviors/tests/mcp-server-fixture.ts'
+import { useBehavior } from '../../behaviors/use-behavior.ts'
+import { bProgram } from '../b-program.ts'
 
 /**
- * getBehavioral — the runtime composition — through its REAL surface: the
+ * bProgram — the runtime composition — through its REAL surface: the
  * hook spawns every family itself (engine + frontier router-owned, always
  * on; mcp/shell/responses/store default-on, pruned by the `behaviors`
  * allow-list). The host attaches ingress and observation through the
@@ -54,9 +54,9 @@ const storeRequest = (traces: Trace[], op: string, collection: string): Selectio
   })
 
 /** Construct the composition, attach observation, then start (the boot flush). */
-const startRuntime = (options: Parameters<typeof getBehavioral>[0] = {}) => {
+const startRuntime = (options: Parameters<typeof bProgram>[0] = {}) => {
   const traces: Trace[] = []
-  const runtime = getBehavioral(options)
+  const runtime = bProgram(options)
   runtime.useTrace((trace) => {
     traces.push(trace)
   })
@@ -64,7 +64,7 @@ const startRuntime = (options: Parameters<typeof getBehavioral>[0] = {}) => {
   return { runtime, traces }
 }
 
-describe('getBehavioral — the runtime composition', () => {
+describe('bProgram — the runtime composition', () => {
   test('the shell pack ships with the shell family: the skill scan self-starts through the composition', async () => {
     const { runtime, traces } = startRuntime()
     try {
@@ -234,7 +234,7 @@ describe('getBehavioral — the runtime composition', () => {
 
   test('trigger does not flush deferred pack mounts — start() owns the boot', async () => {
     const traces: Trace[] = []
-    const runtime = getBehavioral({})
+    const runtime = bProgram({})
     runtime.useTrace((trace) => {
       traces.push(trace)
     })
