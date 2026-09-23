@@ -34,10 +34,11 @@ describe('redactTrace', () => {
     expect(detail.url).toBe('https://x')
   })
 
-  test('redacts known credential shapes even when undeclared', () => {
-    const trace = selection({ command: 'curl -H "Authorization: Bearer ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345"' })
+  test('redacts a known provider credential shape even when undeclared', () => {
+    const token = `ghp_${'a'.repeat(36)}`
+    const trace = selection({ command: `curl -H "Authorization: Bearer ${token}"` })
     const redacted = redactTrace(trace, [])
-    expect(JSON.stringify(redacted)).not.toContain('ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345')
+    expect(JSON.stringify(redacted)).not.toContain(token)
   })
 
   test('leaves benign detail untouched', () => {
@@ -45,9 +46,10 @@ describe('redactTrace', () => {
     expect(redactTrace(trace, ['not-present'])).toEqual(trace)
   })
 
-  test('injected patterns replace the default credential-shape set', () => {
+  test('injected rules replace the default credential set', () => {
     const trace = selection({ note: 'deploy with my-custom-ACME-1234-token' })
-    const redacted = redactTrace(trace, [], [/ACME-\d{4}/g])
+    const rules = [{ id: 'acme', description: '', pattern: /ACME-\d{4}/g, keywords: ['acme-'] }]
+    const redacted = redactTrace(trace, [], rules)
     expect(JSON.stringify(redacted)).toContain('[REDACTED]')
     expect(JSON.stringify(redacted)).not.toContain('ACME-1234')
   })

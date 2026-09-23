@@ -7,8 +7,8 @@
  * the host owns egress. This module is that egress boundary: one redaction
  * pass feeds every sink (the JSONL trace log, the JSON-RPC notification
  * stream, a UI). Redaction is a deterministic floor — a value registry
- * (declared secrets), sensitive field names, and well-known credential shapes
- * — never a probabilistic classifier.
+ * (declared secrets), sensitive field names, and the generated betterleaks
+ * provider rules (keyword-prefiltered) — never a probabilistic classifier.
  *
  * The engine's trace publisher passes the SAME trace object by reference to
  * every listener and the composition's routing listener reads
@@ -27,6 +27,7 @@ import * as path from 'node:path'
 import { TRACE_MESSAGE_KINDS } from '../behavioral/behavioral.constants.ts'
 import type { Trace, TraceListener } from '../behavioral/behavioral.types.ts'
 import { ROOT_SPACE } from '../behaviors/store.types.ts'
+import { CREDENTIAL_RULES, type CredentialRule } from './credential-patterns.ts'
 
 /** Marker substituted for every redacted value. */
 export const REDACTED = '[REDACTED]'
@@ -40,21 +41,6 @@ const SENSITIVE_KEY = /(^|_)(TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|API_?KEY|PR
 /** Object field names whose string values are always redacted. */
 const SENSITIVE_FIELD =
   /^(authorization|proxy-authorization|cookie|set-cookie|x-api-key|api[_-]?key|access[_-]?token|refresh[_-]?token|secret|password|credential|token)s?$/i
-
-/**
- * A small, curated starter set of well-known credential shapes — the fallback
- * for undeclared secrets (a token pasted into a command string). The upgrade
- * path is a generated registry from a maintained ruleset (betterleaks'
- * `config/betterleaks.toml`), kept as data with provenance. Redaction
- * over-redacts rather than under-redacts, so the detection-time entropy/CEL
- * filters are intentionally omitted.
- */
-export const KNOWN_CREDENTIAL_PATTERNS: RegExp[] = [
-  /sk-[A-Za-z0-9._-]{16,}/g, // OpenAI/OpenRouter-style keys
-  /ghp_[A-Za-z0-9]{20,}/g, // GitHub personal access tokens
-  /AKIA[0-9A-Z]{16}/g, // AWS access key ids
-  /Bearer\s+[A-Za-z0-9._-]{20,}/g, // bearer tokens pasted into command strings
-]
 
 /**
  * The redaction registry — secret VALUES. A key is in scope when it matches
@@ -75,19 +61,27 @@ export const collectSecretValues = (
   return [...values]
 }
 
-const scrubString = (value: string, secrets: string[], patterns: RegExp[]): string => {
+/** The keyword prefilter — run a rule's regex only when a keyword is present (betterleaks' own optimization). */
+const keywordHit = (lower: string, rule: CredentialRule): boolean =>
+  rule.keywords.length === 0 || rule.keywords.some((keyword) => lower.includes(keyword.toLowerCase()))
+
+const scrubString = (value: string, secrets: string[], rules: CredentialRule[]): string => {
   let out = value
   for (const secret of secrets) {
     if (out.includes(secret)) out = out.split(secret).join(REDACTED)
   }
-  for (const shape of patterns) out = out.replace(shape, REDACTED)
+  const lower = out.toLowerCase()
+  for (const rule of rules) {
+    if (!keywordHit(lower, rule)) continue
+    out = out.replace(rule.pattern, REDACTED)
+  }
   return out
 }
 
-const scrubInPlace = (value: unknown, secrets: string[], patterns: RegExp[]): unknown => {
-  if (typeof value === 'string') return scrubString(value, secrets, patterns)
+const scrubInPlace = (value: unknown, secrets: string[], rules: CredentialRule[]): unknown => {
+  if (typeof value === 'string') return scrubString(value, secrets, rules)
   if (Array.isArray(value)) {
-    for (let i = 0; i < value.length; i++) value[i] = scrubInPlace(value[i], secrets, patterns)
+    for (let i = 0; i < value.length; i++) value[i] = scrubInPlace(value[i], secrets, rules)
     return value
   }
   if (value !== null && typeof value === 'object') {
@@ -98,7 +92,7 @@ const scrubInPlace = (value: unknown, secrets: string[], patterns: RegExp[]): un
         record[key] = REDACTED
         continue
       }
-      record[key] = scrubInPlace(current, secrets, patterns)
+      record[key] = scrubInPlace(current, secrets, rules)
     }
     return record
   }
@@ -106,11 +100,8 @@ const scrubInPlace = (value: unknown, secrets: string[], patterns: RegExp[]): un
 }
 
 /** Deep-clone a trace and scrub it (registry values, sensitive fields, credential shapes). */
-export const redactTrace = (
-  trace: Trace,
-  secrets: string[] = [],
-  patterns: RegExp[] = KNOWN_CREDENTIAL_PATTERNS,
-): Trace => scrubInPlace(structuredClone(trace), secrets, patterns) as Trace
+export const redactTrace = (trace: Trace, secrets: string[] = [], rules: CredentialRule[] = CREDENTIAL_RULES): Trace =>
+  scrubInPlace(structuredClone(trace), secrets, rules) as Trace
 
 /** A sink receives one redacted trace. Keep it synchronous (ordering is the log's contract). */
 export type TraceSink = (trace: Trace) => void
@@ -120,14 +111,14 @@ export const createTraceConsumer =
   ({
     sinks,
     secrets = [],
-    patterns = KNOWN_CREDENTIAL_PATTERNS,
+    rules = CREDENTIAL_RULES,
   }: {
     sinks: TraceSink[]
     secrets?: string[]
-    patterns?: RegExp[]
+    rules?: CredentialRule[]
   }): TraceListener =>
   (trace) => {
-    const redacted = redactTrace(trace, secrets, patterns)
+    const redacted = redactTrace(trace, secrets, rules)
     for (const sink of sinks) {
       try {
         sink(redacted)
