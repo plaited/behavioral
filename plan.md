@@ -154,6 +154,36 @@ ingress + a plugin-shipped behavior surface.
      the conventions skill, docs sweep. Remaining: the deletion sweep (fleet 6 → 0)
      and the governor thread (plugin admission). -->
 
+### 2026-09-21 — ruled (supersedes the wide-guard consequence): modified-B envelope; mimicry is the only floor
+
+- **THE ENVELOPE IS MODIFIED B (pilot):** the `ok` discriminant sits at the
+  DETAIL LEVEL beside the correlation id — `detail: { id, ok: true, result }
+  | { id, ok: false, error: { code, message?, … } }`. Result/error are XOR
+  branches (oneOf on the ok const); family statuses ride as error.code;
+  mcp authorization_required = ok:false + error.code + request echo
+  (first-class preserved). Uniform gate: select($d.ok). JSON-RPC maps
+  near-identity. HONEST COST LOGGED: the wire-wide sweep is real — result
+  no longer always exists, so every pack query, family result schema, the
+  reenter gate, and the spine status matches rewrite once. One-time,
+  mechanical. Naming: NOT WorkerMessage (its engine-transport meaning is
+  grep-sacred) — a fresh name for the result detail shape.
+- **THE GUARD REFRAME (pilot's correction, supersedes the wide-guard (b)
+  consequence AND the public-result vocabulary):**
+  - DENIED (the floor, admission-time, schema-data): model threads may not
+    REQUEST result-type events (*_result), worker_error, mcp_authorization_*,
+    or admission types — mimicry of system outputs is the one crime. A
+    forged result is consumed by other threads as truth.
+  - ALLOWED + MEDIATED: requests to request-type events (shell_request,
+    mcp_request, store_request…) — guard threads BLOCK (native idiom) or
+    transform-and-compensate per host/space policy. Policy is threads-as-
+    data, not hardcoded gates.
+  - ALLOWED: waitFor/listen on results — reading is not mimicry; the model
+    thread correlates by id and reads jsonData directly. **links_result /
+    catalog_result are DEAD** — no translation layer, none needed.
+  - Admission (unchanged): ok responses only, Thread[] payload shape,
+  frontier-verify ceiling; model output is data, not events, until the
+  admission monitor says otherwise.
+
 ### 2026-09-21 — confirmed: the uniform result envelope (ok two-branch) + admission intermediation
 
 - **THE RESULT ENVELOPE (pilot's in-flight mod, reviewed):** every family's
@@ -203,14 +233,9 @@ ingress + a plugin-shipped behavior surface.
   frontier-verify (deadlock/livelock of the candidate against the current
   program) is the safety ceiling at admission (frontier is always-on);
   frontier-replay usefulness stays in the autoresearch promotion flow.
-- **CONSEQUENCE (design follow-on): the wide guard requires a PUBLIC
-  request/result vocabulary** — links_request's result currently rides
-  shell_request_result (denied under b), and catalog reads ride
-  store_request (denied). The packs become the translation layer:
-  links_request → links_result, catalog_request → catalog_result —
-  pack threads translate family results into public results, one-event
-  interfaces per capability (the attrs-gate route-table law, applied to
-  the model surface).
+- **CONSEQUENCE SUPERSEDED (see the modified-B/mimicry entry above):** the
+  public result vocabulary (links_result / catalog_result) is DEAD —
+  reading results is allowed; only forging them is the floor.
 - **JSON-RPC/IPC rider logged:** the pasted client's shape = the ruled
   egress pipe carrier wearing JSON-RPC 2.0 line-framing as a candidate
   ENCODING (traces as notifications, trigger as requests); not a new
