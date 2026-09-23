@@ -169,14 +169,16 @@ ingress + a plugin-shipped behavior surface.
   anymore; the config-composition ruling's "addable workers" list
   COLLAPSES to the one true override below.
 - **shellWorker IS THE ONLY OVERRIDE — the one untrusted-code executor.**
-  CORRECTED (pilot): the param is NOT a Worker — it is the RETURN of
-  `useWorker` (the curried family-wiring product: worker + name + threads +
-  validators). A host building a sandboxed shell constructs
-  `useWorker({ worker: mySandboxedSpawn, name: 'shell', threads: …,
-  validateRequestEvent, validateEventCancel })` and passes the product;
-  useBehavioral invokes it with the engine's addThreads instead of its
-  default shell wiring. Every other family is a safe data plane (env-data
-  configured); the default products are identical, composition-built.
+  CORRECTED TWICE (pilot, final): the param is the INITIAL return of
+  `useWorker` — the pre-curried function WAITING for `(addThreads, space)`,
+  not an invoked product. The host's override is literally:
+  `useBehavioral({ traceListener, useTrigger, shellWorker: useWorker({ worker:
+  mySandboxedShell, name: 'shell', threads: [], …validators }) })` — the
+  host constructs its family (worker instance + name + threads + gates) and
+  hands over the not-yet-wired function; useBehavioral invokes it with ITS
+  OWN engine port's addThreads and root space. The host never touches the
+  engine port; every other family is a safe data plane (env-data
+  configured); the default is the same construction built in.
 - **THREADS ARE COMPOSITION-OWNED:** root thread packs mount with their
   families (the mcp spine, skill/plugin scans + links dispatchers,
   default.ts packs) — no host passes threads. Hosts wire ingress (useTrigger)
