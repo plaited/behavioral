@@ -76,14 +76,14 @@ describe('workers.types event vocabulary', () => {
     test('accepts a well-formed result', () => {
       const valid = validateResponseRequestResultEvent({
         type: WORKER_MESSAGE_KINDS.response_request_result,
-        detail: { id: 'call_1', result: { items: [], status: 'completed' } },
+        detail: { id: 'call_1', ok: true, result: { items: [], status: 'completed' } },
       })
       expect(valid).toBe(true)
     })
     test('rejects a non-object result payload', () => {
       const valid = validateResponseRequestResultEvent({
         type: WORKER_MESSAGE_KINDS.response_request_result,
-        detail: { id: 'call_1', result: 'not-an-object' },
+        detail: { id: 'call_1', ok: true, result: 'not-an-object' },
       })
       expect(valid).toBe(false)
     })
@@ -131,7 +131,7 @@ describe('workers.types event vocabulary', () => {
     test('accepts a well-formed result', () => {
       const valid = validateShellRequestResultEvent({
         type: WORKER_MESSAGE_KINDS.shell_request_result,
-        detail: { id: 'sh_1', result: { ok: true, value: {} } },
+        detail: { id: 'sh_1', ok: true, result: { value: {} } },
       })
       expect(valid).toBe(true)
     })
@@ -203,14 +203,14 @@ describe('workers.types event vocabulary', () => {
     test('accepts a well-formed result', () => {
       const valid = validateFrontierRequestResultEvent({
         type: WORKER_MESSAGE_KINDS.frontier_request_result,
-        detail: { id: 'fr_1', result: { status: 'verified' } },
+        detail: { id: 'fr_1', ok: true, result: { status: 'verified' } },
       })
       expect(valid).toBe(true)
     })
     test('rejects a non-object result payload', () => {
       const valid = validateFrontierRequestResultEvent({
         type: WORKER_MESSAGE_KINDS.frontier_request_result,
-        detail: { id: 'fr_1', result: 'not-an-object' },
+        detail: { id: 'fr_1', ok: true, result: 'not-an-object' },
       })
       expect(valid).toBe(false)
     })
@@ -244,14 +244,14 @@ describe('workers.types event vocabulary', () => {
     test('accepts a well-formed result', () => {
       const valid = validateStoreRequestResultEvent({
         type: WORKER_MESSAGE_KINDS.store_request_result,
-        detail: { id: 's1', result: { ok: true } },
+        detail: { id: 's1', ok: true, result: {} },
       })
       expect(valid).toBe(true)
     })
     test('rejects a non-object result payload', () => {
       const valid = validateStoreRequestResultEvent({
         type: WORKER_MESSAGE_KINDS.store_request_result,
-        detail: { id: 's1', result: 'not-an-object' },
+        detail: { id: 's1', ok: true, result: 'not-an-object' },
       })
       expect(valid).toBe(false)
     })
@@ -308,7 +308,7 @@ describe('workers.types event vocabulary', () => {
     test('accepts a well-formed result', () => {
       const valid = validateMcpRequestResultEvent({
         type: WORKER_MESSAGE_KINDS.mcp_request_result,
-        detail: { id: 'm1', result: { status: 'completed', durationMs: 12 } },
+        detail: { id: 'm1', ok: true, result: { status: 'completed', durationMs: 12 } },
       })
       expect(valid).toBe(true)
     })

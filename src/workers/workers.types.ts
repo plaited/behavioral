@@ -1,5 +1,5 @@
 import type { JSONSchemaType } from 'ajv'
-import { ajv, type BPEvent, type JsonObject, type Thread } from '../behavioral/behavioral.types.ts'
+import { ajv, type JsonObject, type Thread } from '../behavioral/behavioral.types.ts'
 import { WORKER_MESSAGE_KINDS } from './workers.constants.ts'
 
 /*
@@ -30,7 +30,7 @@ export type ResponseRequestEvent = {
 
 export type ResponseRequestResultEvent = {
   type: typeof WORKER_MESSAGE_KINDS.response_request_result
-  detail: { id: string; result: JsonObject }
+  detail: WorkerResultDetail
   space?: string
 }
 
@@ -49,7 +49,7 @@ export type ShellRequestEvent = {
 
 export type ShellRequestResultEvent = {
   type: typeof WORKER_MESSAGE_KINDS.shell_request_result
-  detail: { id: string; result: JsonObject }
+  detail: WorkerResultDetail
   space?: string
 }
 
@@ -58,6 +58,37 @@ export type ShellCancelEvent = {
   detail: { id: string }
   space?: string
 }
+
+/**
+ * The uniform result detail — every family's `*_result` event carries this
+ * two-branch shape (modified-B envelope, ruled 2026-09-21): the `ok`
+ * discriminant sits at detail level beside the correlation id; `result` and
+ * `error` are XOR branches (oneOf on the ok const). Family statuses ride as
+ * `error.code` (mcp's typed `authorization_required` included — first-class
+ * preserved, its request echo rides inside `error`); success payloads ride
+ * `result` verbatim. Uniform gate across every family: `select($d.ok)`.
+ */
+export type WorkerResultOk = {
+  id: string
+  ok: true
+  result: JsonObject
+}
+
+export type WorkerResultError = {
+  id: string
+  ok: false
+  /** The family failure payload — code (the family status enum), message, and any diagnostics. */
+  error: { code: string; message?: string } & JsonObject
+}
+
+/** The `detail` of every `*_result` event — one shape across all five families. */
+export type WorkerResultDetail = WorkerResultOk | WorkerResultError
+
+/**
+ * The generic wire message the wiring primitive's validators gate — request,
+ * cancel, and result events share it (detail carries the correlation id).
+ */
+export type WorkerMessage = { type: string; detail: JsonObject & { id: string }; space?: string }
 
 export type WorkerErrorEvent = {
   type: typeof WORKER_MESSAGE_KINDS.worker_error
@@ -77,7 +108,7 @@ export type FrontierRequestEvent = {
 
 export type FrontierRequestResultEvent = {
   type: typeof WORKER_MESSAGE_KINDS.frontier_request_result
-  detail: { id: string; result: JsonObject }
+  detail: WorkerResultDetail
   space?: string
 }
 
@@ -94,7 +125,7 @@ export type StoreRequestEvent = {
 // No store cancel: ops are short-lived (frontier rule).
 export type StoreRequestResultEvent = {
   type: typeof WORKER_MESSAGE_KINDS.store_request_result
-  detail: { id: string; result: JsonObject }
+  detail: WorkerResultDetail
   space?: string
 }
 
@@ -117,7 +148,7 @@ export type McpRequestEvent = {
 
 export type McpRequestResultEvent = {
   type: typeof WORKER_MESSAGE_KINDS.mcp_request_result
-  detail: { id: string; result: JsonObject }
+  detail: WorkerResultDetail
   space?: string
 }
 
@@ -149,6 +180,52 @@ export type WorkerEvent =
 
 const jsonObjectSchema = { type: 'object', required: [], additionalProperties: true } as const
 
+// ── The uniform result envelope — one home, five consumers ──────────────────
+
+const workerResultOkBranch = {
+  type: 'object',
+  properties: {
+    id: { type: 'string', minLength: 1 },
+    ok: { type: 'boolean', const: true },
+    result: jsonObjectSchema,
+  },
+  required: ['id', 'ok', 'result'],
+  additionalProperties: false,
+} as const
+
+const workerResultErrorBranch = {
+  type: 'object',
+  properties: {
+    id: { type: 'string', minLength: 1 },
+    ok: { type: 'boolean', const: false },
+    error: {
+      type: 'object',
+      properties: {
+        code: { type: 'string', minLength: 1 },
+        message: { type: 'string', nullable: true },
+      },
+      required: ['code'],
+      // Family diagnostics ride along (request echoes, exit codes, stderr…).
+      additionalProperties: true,
+    },
+  },
+  required: ['id', 'ok', 'error'],
+  additionalProperties: false,
+} as const
+
+/** Build one family's `*_result` event schema over the shared detail branches. */
+const resultEventSchema = (typeConst: string) =>
+  ({
+    type: 'object',
+    properties: {
+      type: { type: 'string', const: typeConst },
+      detail: { type: 'object', oneOf: [workerResultOkBranch, workerResultErrorBranch] },
+      space: { type: 'string', nullable: true },
+    },
+    required: ['type', 'detail'],
+    additionalProperties: false,
+  }) as unknown as import('ajv').JSONSchemaType<{ type: string; detail: WorkerResultDetail; space?: string }>
+
 export const ResponseRequestEventSchema: JSONSchemaType<ResponseRequestEvent> = {
   type: 'object',
   properties: {
@@ -165,21 +242,7 @@ export const ResponseRequestEventSchema: JSONSchemaType<ResponseRequestEvent> = 
   additionalProperties: false,
 }
 
-export const ResponseRequestResultEventSchema: JSONSchemaType<ResponseRequestResultEvent> = {
-  type: 'object',
-  properties: {
-    type: { type: 'string', const: WORKER_MESSAGE_KINDS.response_request_result },
-    detail: {
-      type: 'object',
-      properties: { id: { type: 'string', minLength: 1 }, result: jsonObjectSchema },
-      required: ['id', 'result'],
-      additionalProperties: false,
-    },
-    space: { type: 'string', nullable: true },
-  },
-  required: ['type', 'detail'],
-  additionalProperties: false,
-}
+export const ResponseRequestResultEventSchema = resultEventSchema(WORKER_MESSAGE_KINDS.response_request_result)
 
 export const ResponseCancelEventSchema: JSONSchemaType<ResponseCancelEvent> = {
   type: 'object',
@@ -217,21 +280,7 @@ export const ShellRequestEventSchema: JSONSchemaType<ShellRequestEvent> = {
   additionalProperties: false,
 }
 
-export const ShellRequestResultEventSchema: JSONSchemaType<ShellRequestResultEvent> = {
-  type: 'object',
-  properties: {
-    type: { type: 'string', const: WORKER_MESSAGE_KINDS.shell_request_result },
-    detail: {
-      type: 'object',
-      properties: { id: { type: 'string', minLength: 1 }, result: jsonObjectSchema },
-      required: ['id', 'result'],
-      additionalProperties: false,
-    },
-    space: { type: 'string', nullable: true },
-  },
-  required: ['type', 'detail'],
-  additionalProperties: false,
-}
+export const ShellRequestResultEventSchema = resultEventSchema(WORKER_MESSAGE_KINDS.shell_request_result)
 
 export const ShellCancelEventSchema: JSONSchemaType<ShellCancelEvent> = {
   type: 'object',
@@ -280,21 +329,7 @@ export const McpRequestEventSchema: JSONSchemaType<McpRequestEvent> = {
   additionalProperties: false,
 }
 
-export const McpRequestResultEventSchema: JSONSchemaType<McpRequestResultEvent> = {
-  type: 'object',
-  properties: {
-    type: { type: 'string', const: WORKER_MESSAGE_KINDS.mcp_request_result },
-    detail: {
-      type: 'object',
-      properties: { id: { type: 'string', minLength: 1 }, result: jsonObjectSchema },
-      required: ['id', 'result'],
-      additionalProperties: false,
-    },
-    space: { type: 'string', nullable: true },
-  },
-  required: ['type', 'detail'],
-  additionalProperties: false,
-}
+export const McpRequestResultEventSchema = resultEventSchema(WORKER_MESSAGE_KINDS.mcp_request_result)
 
 export const McpCancelEventSchema: JSONSchemaType<McpCancelEvent> = {
   type: 'object',
@@ -359,21 +394,7 @@ export const FrontierRequestEventSchema: JSONSchemaType<FrontierRequestEvent> = 
   additionalProperties: false,
 }
 
-export const FrontierRequestResultEventSchema: JSONSchemaType<FrontierRequestResultEvent> = {
-  type: 'object',
-  properties: {
-    type: { type: 'string', const: WORKER_MESSAGE_KINDS.frontier_request_result },
-    detail: {
-      type: 'object',
-      properties: { id: { type: 'string', minLength: 1 }, result: jsonObjectSchema },
-      required: ['id', 'result'],
-      additionalProperties: false,
-    },
-    space: { type: 'string', nullable: true },
-  },
-  required: ['type', 'detail'],
-  additionalProperties: false,
-}
+export const FrontierRequestResultEventSchema = resultEventSchema(WORKER_MESSAGE_KINDS.frontier_request_result)
 
 // No store cancel: ops are short-lived (same rule as frontier).
 export const StoreRequestEventSchema: JSONSchemaType<StoreRequestEvent> = {
@@ -396,42 +417,12 @@ export const StoreRequestEventSchema: JSONSchemaType<StoreRequestEvent> = {
   additionalProperties: false,
 }
 
-export const StoreRequestResultEventSchema: JSONSchemaType<StoreRequestResultEvent> = {
-  type: 'object',
-  properties: {
-    type: { type: 'string', const: WORKER_MESSAGE_KINDS.store_request_result },
-    detail: {
-      type: 'object',
-      properties: { id: { type: 'string', minLength: 1 }, result: jsonObjectSchema },
-      required: ['id', 'result'],
-      additionalProperties: false,
-    },
-    space: { type: 'string', nullable: true },
-  },
-  required: ['type', 'detail'],
-  additionalProperties: false,
-}
+export const StoreRequestResultEventSchema = resultEventSchema(WORKER_MESSAGE_KINDS.store_request_result)
 
 export const validateWorkerErrorEvent = ajv.compile(WorkerErrorEventSchema)
 export const validateFrontierRequestEvent = ajv.compile(FrontierRequestEventSchema)
 export const validateFrontierRequestResultEvent = ajv.compile(FrontierRequestResultEventSchema)
 export const validateStoreRequestEvent = ajv.compile(StoreRequestEventSchema)
 export const validateStoreRequestResultEvent = ajv.compile(StoreRequestResultEventSchema)
-
-/**
- * The engine transport — what the router posts INTO the engine worker.
- * Two kinds, both of which evaluate.
- */
-export type AddThreadsMessage = {
-  kind: typeof WORKER_MESSAGE_KINDS.add_threads
-  threads: Thread[]
-}
-
-export type TriggerMessage = {
-  kind: typeof WORKER_MESSAGE_KINDS.trigger
-  event: BPEvent
-}
-
-export type WorkerMessage = AddThreadsMessage | TriggerMessage
 
 export type AddThreads = (newThreads: Thread[]) => void

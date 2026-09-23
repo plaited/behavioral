@@ -20,7 +20,13 @@ import type { StoreOp } from '../workers.types.ts'
  * @packageDocumentation
  */
 
-type WireResult = { id: string; result: unknown; space?: string }
+type WireResult = {
+  id: string
+  ok: boolean
+  result?: unknown
+  error?: Record<string, unknown>
+  space?: string
+}
 
 /** Spawn the store worker and expose an event-wire harness over it. */
 const spawnStoreWorker = (dbPath = ':memory:') => {
@@ -30,7 +36,7 @@ const spawnStoreWorker = (dbPath = ':memory:') => {
   worker.onmessage = ({ data }: MessageEvent): void => {
     const message = data as { type?: string; detail?: { id: string; result: unknown }; space?: string }
     if (message?.type === WORKER_MESSAGE_KINDS.store_request_result && message.detail !== undefined) {
-      results.push({ id: message.detail.id, result: message.detail.result, space: message.space })
+      results.push({ ...message.detail, id: message.detail.id, space: message.space } as WireResult)
     }
   }
   const call = (id: string, op: StoreOp, input: unknown, space?: string): void => {
@@ -57,9 +63,9 @@ describe('store worker — event wire', () => {
     const store = spawnStoreWorker()
     try {
       store.call('s1', 'put', { collection: 'runs', key: 'r1', value: { hello: true } })
-      const { id, result } = await store.resultFor('s1')
+      const { id, ok } = await store.resultFor('s1')
       expect(id).toBe('s1')
-      expect((result as { ok?: boolean }).ok).toBe(true)
+      expect(ok).toBe(true)
     } finally {
       store.terminate()
     }
@@ -81,9 +87,9 @@ describe('store worker — event wire', () => {
     try {
       // put without a key
       store.call('s1', 'put', { collection: 'c', value: {} })
-      const { result } = await store.resultFor('s1')
-      expect((result as { isError?: boolean }).isError).toBe(true)
-      expect((result as { message?: string }).message).toContain('invalid input')
+      const { ok, error } = await store.resultFor('s1')
+      expect(ok).toBe(false)
+      expect(String(error?.message)).toContain('invalid input')
     } finally {
       store.terminate()
     }
@@ -106,9 +112,9 @@ describe('store worker — event wire', () => {
     try {
       // additionalProperties: false — the isolation floor at the boundary.
       store.call('s1', 'put', { collection: 'c', key: 'k', value: {}, space: 'other-space' })
-      const { result } = await store.resultFor('s1')
-      expect((result as { isError?: boolean }).isError).toBe(true)
-      expect((result as { message?: string }).message).toContain('invalid input')
+      const { ok, error } = await store.resultFor('s1')
+      expect(ok).toBe(false)
+      expect(String(error?.message)).toContain('invalid input')
     } finally {
       store.terminate()
     }

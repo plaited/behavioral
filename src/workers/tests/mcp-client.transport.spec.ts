@@ -51,9 +51,9 @@ const authRequiredResult = (id: string): BPEvent => ({
   type: 'mcp_request_result',
   detail: {
     id,
-    result: {
-      id,
-      status: 'authorization_required',
+    ok: false,
+    error: {
+      code: 'authorization_required',
       durationMs: 12,
       message: 'unauthorized',
       request: { op: 'list-tools', input: { url: 'https://mcp.example.com/mcp' } },

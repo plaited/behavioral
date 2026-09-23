@@ -29,6 +29,7 @@ import type {
   CandidateBid,
   Frontier,
   FrontierTrace,
+  JsonObject,
   PendingBid,
   RegisteredBPListener,
   RegisteredIdioms,
@@ -1187,7 +1188,15 @@ export const FrontierVerifyInputSchema = {
 const postResult = ({ id, result, space }: { id: string; result: unknown; space?: string }): void => {
   self.postMessage({
     type: WORKER_MESSAGE_KINDS.frontier_request_result,
-    detail: { id, result },
+    // The uniform envelope: { isError: true, … } → error branch; anything
+    // else is the analysis payload → ok branch.
+    detail: ((): JsonObject & { id: string } => {
+      if (typeof result === 'object' && result !== null && 'isError' in result) {
+        const { isError, ...rest } = result as { isError: boolean } & JsonObject
+        return { id, ok: false, error: { code: 'error', ...(isError ? rest : {}) } }
+      }
+      return { id, ok: true, result: (result ?? {}) as JsonObject }
+    })(),
     ...(space === undefined ? {} : { space }),
   })
 }

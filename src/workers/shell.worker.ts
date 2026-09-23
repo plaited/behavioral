@@ -48,9 +48,10 @@ import { ajv } from '../behavioral/behavioral.types.ts'
 import {
   type ShellCallInput,
   ShellCallInputSchema,
+  type ShellError,
   type ShellOptions,
-  type ShellResult,
   type ShellStatus,
+  type ShellSuccess,
 } from './shell.types.ts'
 import { WORKER_MESSAGE_KINDS } from './workers.constants.ts'
 import { type ShellRequestEvent, validateShellCancelEvent, validateShellRequestEvent } from './workers.types.ts'
@@ -307,7 +308,7 @@ const runOp = async ({
   id: string
   input: ShellCallInput
   options: ShellOptions
-}): Promise<ShellResult> => {
+}): Promise<ShellSuccess | ShellError> => {
   const started = performance.now()
   const format = options.format ?? 'paged'
   const offset = options.offset ?? DEFAULT_OFFSET
@@ -436,7 +437,6 @@ const runOp = async ({
           ? 'error'
           : execution.stopReason
     const base = {
-      id,
       exitCode: proc.exitCode,
       signal: proc.signalCode,
       totalLines: stdoutSeen,
@@ -447,22 +447,22 @@ const runOp = async ({
     if (format === 'json') {
       if (execution.stopReason === 'byte_quota') {
         return {
+          code: 'error',
           ...base,
-          status: 'error',
           hasMore: false,
           message: `output_exceeds_max_characters: ${maxCharacters}`,
         }
       }
       // Any other stop (cancel, timeout, line cap) leaves a partial document —
       // report the stop, do not parse half a JSON blob.
-      if (execution.stopReason !== null) return { ...base, status: stopped, hasMore: false }
+      if (execution.stopReason !== null) return { code: stopped, ...base, hasMore: false }
       const text = jsonLines.join('\n')
       try {
-        return { ...base, status: stopped, hasMore: false, jsonData: JSON.parse(text) }
+        return { ...base, hasMore: false, jsonData: JSON.parse(text) }
       } catch {
         return {
+          code: 'error',
           ...base,
-          status: 'error',
           hasMore: false,
           message: `json_parse_failed: ${text.slice(0, JSON_SNIPPET_CHARS)}`,
         }
@@ -473,15 +473,18 @@ const runOp = async ({
       const notice = rawTruncated
         ? `\n[...truncated: ${rawDropped} chars dropped — use format 'paged' with offset/limit to page]`
         : ''
-      return { ...base, status: stopped, hasMore: rawTruncated, stdout: `${rawTail}${notice}` }
+      const rawPayload = { ...base, hasMore: rawTruncated, stdout: `${rawTail}${notice}` }
+      if (stopped === 'completed') return rawPayload
+      return { code: stopped, ...rawPayload }
     }
 
-    return {
+    const pagedPayload = {
       ...base,
-      status: stopped,
       lines: pagedLines,
       hasMore: stdoutSeen > offset + limit,
     }
+    if (stopped === 'completed') return pagedPayload
+    return { code: stopped, ...pagedPayload }
   } finally {
     clearTimeout(deadline)
     active.delete(id)
@@ -499,18 +502,34 @@ const runOp = async ({
 // ---------------------------------------------------------------------------
 
 /** Post the single terminal result event for an execution, echoing any request space. */
-const postResult = ({ id, result, space }: { id: string; result: ShellResult; space?: string }): void => {
+/**
+ * Post the uniform result envelope (modified-B): `ok` beside the correlation
+ * id; the success payload rides `result`, the failure payload rides `error`
+ * with the terminal status as `code`.
+ */
+const postResult = ({
+  id,
+  payload,
+  error,
+  space,
+}: {
+  id: string
+  payload?: ShellSuccess
+  error?: ShellError
+  space?: string
+}): void => {
   self.postMessage({
     type: WORKER_MESSAGE_KINDS.shell_request_result,
-    detail: { id, result: result as unknown as JsonObject },
+    detail: (error === undefined
+      ? { id, ok: true, result: (payload ?? {}) as unknown as JsonObject }
+      : { id, ok: false, error: error as unknown as JsonObject }) as JsonObject & { id: string },
     ...(space === undefined ? {} : { space }),
   })
 }
 
-/** An error result carrying no capture — the run never produced a process. */
-const errorResult = ({ id, message }: { id: string; message: string }): ShellResult => ({
-  id,
-  status: 'error',
+/** An error interior carrying no capture — the run never produced a process. */
+const errorInterior = ({ message }: { message: string }): ShellError => ({
+  code: 'error',
   exitCode: null,
   signal: null,
   totalLines: 0,
@@ -546,7 +565,7 @@ const handleInbound = async (message: unknown): Promise<void> => {
     postResult({
       id,
       space: event.space,
-      result: errorResult({ id, message: `invalid input: ${ajv.errorsText(validate.errors)}` }),
+      error: errorInterior({ message: `invalid input: ${ajv.errorsText(validate.errors)}` }),
     })
     return
   }
@@ -556,17 +575,19 @@ const handleInbound = async (message: unknown): Promise<void> => {
   // `runOp` never rejects on the host side: any worker-side throw (bad cwd,
   // a kill race) becomes `status: 'error'` data instead.
   try {
-    const result = await runOp({ id, input: opInput, options })
-    postResult({
-      id,
-      space: event.space,
-      result: clamped.length === 0 ? result : { ...result, clamped },
-    })
+    const interior = await runOp({ id, input: opInput, options })
+    // The clamp report rides whichever branch ran.
+    const withClamp = clamped.length === 0 ? interior : { ...interior, clamped }
+    if ('code' in interior) {
+      postResult({ id, space: event.space, error: withClamp as ShellError })
+    } else {
+      postResult({ id, space: event.space, payload: withClamp as ShellSuccess })
+    }
   } catch (err) {
     postResult({
       id,
       space: event.space,
-      result: errorResult({ id, message: err instanceof Error ? err.message : String(err) }),
+      error: errorInterior({ message: err instanceof Error ? err.message : String(err) }),
     })
   }
 }

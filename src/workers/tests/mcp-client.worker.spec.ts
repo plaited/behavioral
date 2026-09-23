@@ -22,16 +22,26 @@ import { startMcpServer } from './mcp-server-fixture.ts'
  * @packageDocumentation
  */
 
-type WireResult = { id: string; result: Record<string, unknown>; space?: string }
+type WireResult = {
+  id: string
+  ok: boolean
+  result?: Record<string, unknown>
+  error?: Record<string, unknown>
+  space?: string
+}
 
 /** Spawn the mcp worker and expose an event-wire harness over it. */
 const spawnMcpWorker = () => {
   const worker = new Worker(new URL('../mcp-client.worker.ts', import.meta.url))
   const results: WireResult[] = []
   worker.onmessage = ({ data }: MessageEvent): void => {
-    const message = data as { type?: string; detail?: { id: string; result: Record<string, unknown> }; space?: string }
+    const message = data as {
+      type?: string
+      detail?: { id: string; ok: boolean; result?: Record<string, unknown>; error?: Record<string, unknown> }
+      space?: string
+    }
     if (message?.type === WORKER_MESSAGE_KINDS.mcp_request_result && message.detail !== undefined) {
-      results.push({ id: message.detail.id, result: message.detail.result, space: message.space })
+      results.push({ ...message.detail, id: message.detail.id, space: message.space } as WireResult)
     }
   }
   const call = (id: string, op: string, input: unknown, space?: string): void => {
@@ -75,10 +85,10 @@ describe('mcp client worker — event wire', () => {
     const server = await startLoopbackServer()
     try {
       mcp.call('c1', 'call-tool', { url: server.url, tool: 'echo', args: { message: 'hi' } })
-      const { id, result } = await mcp.resultFor('c1')
+      const { id, ok, result } = await mcp.resultFor('c1')
       expect(id).toBe('c1')
-      expect(result.status).toBe('completed')
-      const output = result.output as { content: Array<{ text: string }> }
+      expect(ok).toBe(true)
+      const output = result?.output as { content: Array<{ text: string }> }
       expect(output.content[0]?.text).toBe('echo:hi')
     } finally {
       await server.close()
@@ -91,10 +101,10 @@ describe('mcp client worker — event wire', () => {
     try {
       // call-tool requires `tool` + `args` — this input has neither
       mcp.call('c2', 'call-tool', { url: 'http://127.0.0.1:1/mcp' })
-      const { result } = await mcp.resultFor('c2')
-      expect(result.status).toBe('error')
-      expect(String(result.message).includes('invalid input')).toBe(true)
-      expect('output' in result).toBe(false)
+      const { ok, error } = await mcp.resultFor('c2')
+      expect(ok).toBe(false)
+      expect(String(error?.message).includes('invalid input')).toBe(true)
+      expect(error && 'output' in (error as Record<string, unknown>)).toBe(false)
     } finally {
       mcp.terminate()
     }
@@ -108,11 +118,11 @@ describe('mcp client worker — event wire', () => {
     })
     try {
       mcp.call('c3', 'list-tools', { url: `http://127.0.0.1:${denied.port}/mcp` })
-      const { result } = await mcp.resultFor('c3')
-      expect(result.status).toBe('authorization_required')
-      expect('output' in result).toBe(false)
+      const { ok, error } = await mcp.resultFor('c3')
+      expect(ok).toBe(false)
+      expect(error?.code).toBe('authorization_required')
       // the request echo is the replay spine's capture payload
-      const request = result.request as { op: string; input: Record<string, unknown> }
+      const request = error?.request as { op: string; input: Record<string, unknown> }
       expect(request.op).toBe('list-tools')
       expect(String(request.input.url)).toBe(`http://127.0.0.1:${denied.port}/mcp`)
     } finally {
@@ -133,8 +143,9 @@ describe('mcp client worker — event wire', () => {
     try {
       mcp.call('c4', 'list-tools', { url: `http://127.0.0.1:${hanging.port}/mcp` })
       Bun.sleep(150).then(() => mcp.cancel('c4'))
-      const { result } = await mcp.resultFor('c4')
-      expect(result.status).toBe('canceled')
+      const { ok, error } = await mcp.resultFor('c4')
+      expect(ok).toBe(false)
+      expect(error?.code).toBe('canceled')
     } finally {
       hanging.stop(true)
       mcp.terminate()
@@ -152,8 +163,9 @@ describe('mcp client worker — event wire', () => {
     })
     try {
       mcp.call('c5', 'list-tools', { url: `http://127.0.0.1:${hanging.port}/mcp`, timeoutMs: 150 })
-      const { result } = await mcp.resultFor('c5')
-      expect(result.status).toBe('timeout')
+      const { ok, error } = await mcp.resultFor('c5')
+      expect(ok).toBe(false)
+      expect(error?.code).toBe('timeout')
     } finally {
       hanging.stop(true)
       mcp.terminate()
@@ -165,7 +177,8 @@ describe('mcp client worker — event wire', () => {
     const server = await startLoopbackServer()
     try {
       mcp.call('c6', 'list-tools', { url: server.url }, 'demo')
-      const { space } = await mcp.resultFor('c6')
+      const { space, ok } = await mcp.resultFor('c6')
+      expect(ok).toBe(true)
       expect(space).toBe('demo')
     } finally {
       await server.close()

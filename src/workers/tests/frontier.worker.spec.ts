@@ -16,7 +16,13 @@ import { WORKER_MESSAGE_KINDS } from '../workers.constants.ts'
  * @packageDocumentation
  */
 
-type WireResult = { id: string; result: unknown; space?: string }
+type WireResult = {
+  id: string
+  ok: boolean
+  result?: unknown
+  error?: Record<string, unknown>
+  space?: string
+}
 
 /** Spawn the frontier worker and expose an event-wire harness over it. */
 const spawnFrontierWorker = () => {
@@ -25,7 +31,7 @@ const spawnFrontierWorker = () => {
   worker.onmessage = ({ data }: MessageEvent): void => {
     const message = data as { type?: string; detail?: { id: string; result: unknown }; space?: string }
     if (message?.type === WORKER_MESSAGE_KINDS.frontier_request_result && message.detail !== undefined) {
-      results.push({ id: message.detail.id, result: message.detail.result, space: message.space })
+      results.push({ ...message.detail, id: message.detail.id, space: message.space } as WireResult)
     }
   }
   const call = (id: string, op: string, input: unknown, space?: string): void => {
@@ -105,9 +111,9 @@ describe('frontier worker — event wire', () => {
     const frontier = spawnFrontierWorker()
     try {
       frontier.call('r0', 'replay', { messages: [] }) // threads required
-      const { result } = await frontier.resultFor('r0')
-      expect((result as { isError?: boolean }).isError).toBe(true)
-      expect((result as { message?: string }).message).toContain('invalid input')
+      const { ok, error } = await frontier.resultFor('r0')
+      expect(ok).toBe(false)
+      expect(String(error?.message)).toContain('invalid input')
     } finally {
       frontier.terminate()
     }
@@ -222,13 +228,9 @@ describe('replay', () => {
         },
       ]
       frontier.call('r1', 'replay', { threads, messages })
-      const { result } = await frontier.resultFor('r1')
-      const replay = result as ReplayResult
-      expect(replay.isError).toBe(true)
-      expect(typeof replay.message).toBe('string')
-      expect(replay.frontier).toBeNull()
-      expect(replay.stateKey).toBeNull()
-      expect(replay.pendingCount).toBeNull()
+      const { ok, error } = await frontier.resultFor('r1')
+      expect(ok).toBe(false)
+      expect(typeof error?.message).toBe('string')
     } finally {
       frontier.terminate()
     }

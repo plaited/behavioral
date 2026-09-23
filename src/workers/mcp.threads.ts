@@ -26,8 +26,13 @@ export const MCP_CALLS_COLLECTION = 'mcp-calls'
 
 const MCP_RESULT_DETAIL = {
   type: 'object',
-  properties: { id: { type: 'string', minLength: 1 }, result: { type: 'object' } },
-  required: ['id', 'result'],
+  properties: {
+    id: { type: 'string', minLength: 1 },
+    ok: { type: 'boolean' },
+    result: { type: 'object' },
+    error: { type: 'object' },
+  },
+  required: ['id', 'ok'],
 } as const
 
 // ── Threads ───────────────────────────────────────────────────────────────────
@@ -40,7 +45,7 @@ const authCapture: Thread = {
       transform: [
         {
           type: WORKER_MESSAGE_KINDS.mcp_request_result,
-          query: `. as $d | select($d.result.status == "authorization_required") | {id: $d.id, op: "put", input: {collection: "${MCP_CALLS_COLLECTION}", key: $d.id, value: $d.result.request}}`,
+          query: `. as $d | select($d.ok == false and $d.error.code? == "authorization_required") | {id: $d.id, op: "put", input: {collection: "${MCP_CALLS_COLLECTION}", key: $d.id, value: $d.error.request}}`,
           target: WORKER_MESSAGE_KINDS.store_request,
           detailSchema: MCP_RESULT_DETAIL,
         },
@@ -58,7 +63,7 @@ const authSurfacer: Thread = {
         {
           type: WORKER_MESSAGE_KINDS.mcp_request_result,
           query:
-            '. as $d | select($d.result.status == "authorization_required") | {id: $d.id, reason: "mcp call requires authorization"}',
+            '. as $d | select($d.ok == false and $d.error.code? == "authorization_required") | {id: $d.id, reason: "mcp call requires authorization"}',
           target: MCP_EVENT_TYPES.authorizationRequired,
           detailSchema: MCP_RESULT_DETAIL,
         },

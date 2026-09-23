@@ -50,12 +50,7 @@ import type { ValidateFunction } from 'ajv'
 import { ajv, type JsonObject } from '../behavioral/behavioral.types.ts'
 import { BunKeychain } from '../oauth/keychain.ts'
 import { tokensKey } from '../oauth/keychain-oauth-provider.ts'
-import {
-  MCP_BROKER_BOOT_SECRET_KEY,
-  MCP_BROKER_URL_KEY,
-  MCP_OP_INPUT_VALIDATORS,
-  type McpCallResult,
-} from './mcp-client.types.ts'
+import { MCP_BROKER_BOOT_SECRET_KEY, MCP_BROKER_URL_KEY, MCP_OP_INPUT_VALIDATORS } from './mcp-client.types.ts'
 import { WORKER_MESSAGE_KINDS } from './workers.constants.ts'
 import {
   type McpCancelEvent,
@@ -259,25 +254,35 @@ const runRequest = async ({
 // Result envelope
 // ---------------------------------------------------------------------------
 
-const postResult = ({ id, result, space }: { id: string; result: McpCallResult; space?: string }): void => {
+const postResult = ({
+  id,
+  payload,
+  error,
+  space,
+}: {
+  id: string
+  payload?: JsonObject
+  error?: { code: string; message?: string } & JsonObject
+  space?: string
+}): void => {
   self.postMessage({
     type: WORKER_MESSAGE_KINDS.mcp_request_result,
-    detail: { id, result: result as unknown as JsonObject },
+    detail: (error === undefined
+      ? { id, ok: true, result: payload ?? {} }
+      : { id, ok: false, error: error as JsonObject }) as JsonObject & { id: string },
     ...(space === undefined ? {} : { space }),
   })
 }
 
-const baseResult = ({
-  id,
-  status,
-  started,
-}: {
-  id: string
-  status: McpCallResult['status']
-  started: number
-}): McpCallResult => ({
-  id,
-  status,
+/** The success interior — status rides along as plain diagnostics. */
+const successInterior = ({ started }: { started: number }): JsonObject => ({
+  status: 'completed',
+  durationMs: Math.round(performance.now() - started),
+})
+
+/** The error interior — the terminal status rides as `code`. */
+const errorInterior = ({ code, started }: { code: string; started: number }): { code: string; durationMs: number } => ({
+  code,
   durationMs: Math.round(performance.now() - started),
 })
 
@@ -310,8 +315,8 @@ const handleInbound = async (message: unknown): Promise<void> => {
     postResult({
       id,
       space: event.space,
-      result: {
-        ...baseResult({ id, status: 'error', started }),
+      error: {
+        ...errorInterior({ code: 'error', started }),
         message: `invalid input: ${ajv.errorsText(validateOpInput.errors)}`,
       },
     })
@@ -328,20 +333,24 @@ const handleInbound = async (message: unknown): Promise<void> => {
       postResult({
         id,
         space: event.space,
-        result: { ...baseResult({ id, status: 'completed', started }), output: outcome.output },
+        payload: { ...successInterior({ started }), output: outcome.output },
       })
       return
     }
     if ('stop' in outcome) {
-      postResult({ id, space: event.space, result: { ...baseResult({ id, status: outcome.stop, started }) } })
+      postResult({
+        id,
+        space: event.space,
+        error: { ...errorInterior({ code: outcome.stop, started }) },
+      })
       return
     }
     if (UnauthorizedError.isInstance(outcome.fail)) {
       postResult({
         id,
         space: event.space,
-        result: {
-          ...baseResult({ id, status: 'authorization_required', started }),
+        error: {
+          ...errorInterior({ code: 'authorization_required', started }),
           message: failMessage(outcome.fail),
           // The replay spine's capture payload — the store never saw the
           // request; this echo is the only carrier.
@@ -353,7 +362,7 @@ const handleInbound = async (message: unknown): Promise<void> => {
     postResult({
       id,
       space: event.space,
-      result: { ...baseResult({ id, status: 'error', started }), message: failMessage(outcome.fail) },
+      error: { ...errorInterior({ code: 'error', started }), message: failMessage(outcome.fail) },
     })
   } finally {
     active.delete(id)

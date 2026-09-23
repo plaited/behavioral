@@ -38,7 +38,7 @@ export type ShellStatus = 'completed' | 'timeout' | 'line_quota' | 'canceled' | 
  * `format`/`offset`/`limit` are the model-facing subset; `cwd`/`env`/`stdin`
  * and the bound knobs (`timeoutMs`/`maxLines`/`maxCharacters`) are host-only.
  * Host over-ceiling values are clamped, not rejected, and the clamp is
- * reported in {@link ShellResult.clamped}.
+ * reported in {@link ShellSuccess.clamped}.
  */
 export type ShellOptions = {
   /** Working directory for the execution. Defaults to the worker's `cwd`. */
@@ -151,12 +151,8 @@ export const ShellCallInputSchema = {
 // The result envelope
 // ---------------------------------------------------------------------------
 
-/** Result of one execution — the single terminal payload the worker returns. */
-export type ShellResult = {
-  /** Correlation id, echoed from the request. */
-  id: string
-  /** Outcome discriminator. */
-  status: ShellStatus
+/** The success payload — rides `result` on the ok branch. */
+export type ShellSuccess = {
   /** Exit code, or `null` when the process was killed by a signal. */
   exitCode: number | null
   /** Terminating signal (e.g. `SIGTERM`), or `null` on a normal exit. */
@@ -177,6 +173,24 @@ export type ShellResult = {
   durationMs: number
   /** Over-ceiling options that were clamped, as `'<knob> <given> -> <applied>'`. */
   clamped?: string[]
-  /** Failure detail when `status` is `error`. */
+}
+
+/**
+ * The failure payload — rides `error` on the not-ok branch. `code` carries
+ * the terminal status verbatim (`timeout` | `line_quota` | `canceled` | `error`);
+ * the diagnostics ride alongside.
+ */
+export type ShellError = {
+  code: ShellStatus
+  /** Failure detail (json_parse_failed snippets, invalid-input AJV text…). */
   message?: string
+  exitCode: number | null
+  signal: string | null
+  /** Partial captured lines when `format` is `paged` (what the stop produced). */
+  lines?: string[]
+  totalLines: number
+  hasMore: boolean
+  stderr: string
+  durationMs: number
+  clamped?: string[]
 }

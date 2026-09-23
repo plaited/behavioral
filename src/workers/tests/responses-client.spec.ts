@@ -31,7 +31,13 @@ import { ASSISTANT_TEXT, startOpenResponsesServer } from './fixtures/model-serve
 // responses worker — the event-wire surface
 // ================================================================
 
-type WireResult = { id: string; result: ModelRespondOutput; space?: string }
+type WireResult = {
+  id: string
+  ok: boolean
+  result?: ModelRespondOutput
+  error?: Record<string, unknown>
+  space?: string
+}
 
 /** Spawn the model worker and expose an event-wire harness over it. */
 const spawnModelWorker = (endpoints: ModelEndpoints) => {
@@ -46,7 +52,7 @@ const spawnModelWorker = (endpoints: ModelEndpoints) => {
     const message = data as { type?: string; detail?: { id: string; result: ModelRespondOutput }; space?: string }
     messages.push(message)
     if (message?.type === WORKER_MESSAGE_KINDS.response_request_result && message.detail !== undefined) {
-      results.push({ id: message.detail.id, result: message.detail.result, space: message.space })
+      results.push({ ...message.detail, id: message.detail.id, space: message.space } as WireResult)
     }
   }
   const respond = (id: string, input: unknown, space?: string): void => {
@@ -170,9 +176,9 @@ describe('model worker — endpoint config via environment data', () => {
         modelId: 'm',
         input: [{ type: 'message', role: 'user', content: 'hi' }],
       })
-      const { result } = await model.resultFor('call_1')
-      expect((result as { isError?: boolean }).isError).toBe(true)
-      expect((result as { message?: string }).message).toContain('unknown provider')
+      const { ok, error } = await model.resultFor('call_1')
+      expect(ok).toBe(false)
+      expect(String(error?.message)).toContain('unknown provider')
     } finally {
       model.terminate()
     }
@@ -185,9 +191,9 @@ describe('model worker — failures are data', () => {
     const model = spawnModelWorker({ mock: { url: server.url } })
     try {
       model.respond('call_1', { provider: 'mock', modelId: 'mock-model', input: [] })
-      const { result } = await model.resultFor('call_1')
-      expect((result as { isError?: boolean }).isError).toBe(true)
-      expect((result as { message?: string }).message).toContain('HTTP 400')
+      const { ok, error } = await model.resultFor('call_1')
+      expect(ok).toBe(false)
+      expect(String(error?.message)).toContain('HTTP 400')
     } finally {
       model.terminate()
       await server.close()
@@ -227,9 +233,9 @@ describe('model worker — cancellation', () => {
       })
       await Bun.sleep(150)
       model.cancel('call_1')
-      const { result } = await model.resultFor('call_1')
-      expect((result as { isError?: boolean }).isError).toBe(true)
-      expect((result as { message?: string }).message).toContain('canceled')
+      const { ok, error } = await model.resultFor('call_1')
+      expect(ok).toBe(false)
+      expect(String(error?.message)).toContain('canceled')
     } finally {
       model.terminate()
       server.stop(true)
@@ -264,9 +270,9 @@ describe('model worker — event wire', () => {
     const model = spawnModelWorker({})
     try {
       model.respond('call_1', { modelId: 'm', input: [] })
-      const { result } = await model.resultFor('call_1')
-      expect((result as { isError?: boolean }).isError).toBe(true)
-      expect((result as { message?: string }).message).toContain('invalid input')
+      const { ok, error } = await model.resultFor('call_1')
+      expect(ok).toBe(false)
+      expect(String(error?.message)).toContain('invalid input')
     } finally {
       model.terminate()
     }

@@ -29,6 +29,7 @@
  */
 
 import { getEnvironmentData } from 'node:worker_threads'
+import type { JsonObject } from '../behavioral/behavioral.types.ts'
 import {
   ErrorSchema,
   type KnownStreamEvent,
@@ -272,19 +273,23 @@ type ActiveRequest = {
 /** In-flight requests, keyed by correlation id. */
 const active = new Map<string, ActiveRequest>()
 
-const postResult = (id: string, result: ModelRespondOutput, space?: string): void => {
+const postResult = (id: string, result: unknown, space?: string): void => {
   self.postMessage({
     type: WORKER_MESSAGE_KINDS.response_request_result,
-    detail: { id, result },
+    // The uniform envelope: { isError: true, … } → error branch; the model
+    // respond output → ok branch.
+    detail: ((): JsonObject & { id: string } => {
+      if (typeof result === 'object' && result !== null && 'isError' in result) {
+        const { isError, ...rest } = result as { isError: boolean } & JsonObject
+        return { id, ok: false, error: { code: 'error', ...(isError ? rest : {}) } }
+      }
+      return { id, ok: true, result: (result ?? {}) as JsonObject }
+    })(),
     ...(space === undefined ? {} : { space }),
   })
 }
 
-const runRespond = async (
-  id: string,
-  input: ModelRespondInput,
-  request: ActiveRequest,
-): Promise<ModelRespondOutput> => {
+const runRespond = async (input: ModelRespondInput, request: ActiveRequest): Promise<ModelRespondOutput> => {
   const endpoint = endpoints[input.provider]
   if (!endpoint) return { isError: true, message: `[Error: unknown provider "${input.provider}"]` }
   try {
@@ -357,7 +362,7 @@ const handleInbound = async (message: unknown): Promise<void> => {
 
   // `respond` never rejects: any worker-side throw becomes result data.
   try {
-    const result = await runRespond(id, input, request)
+    const result = await runRespond(input, request)
     postResult(id, result, event.space)
   } catch (err) {
     postResult(id, { isError: true, message: err instanceof Error ? err.message : String(err) }, event.space)

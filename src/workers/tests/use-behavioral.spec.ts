@@ -111,9 +111,9 @@ describe('useBehavioral — the runtime composition', () => {
           (t.selected.detail as { id?: string } | undefined)?.id === 'l1',
       )
       const detail = result?.selected.detail as
-        | { result?: { status?: string; jsonData?: { links?: Array<{ value: string; text: string }> } } }
+        | { ok?: boolean; result?: { jsonData?: { links?: Array<{ value: string; text: string }> } } }
         | undefined
-      expect(detail?.result?.status).toBe('completed')
+      expect(detail?.ok).toBe(true)
       expect(detail?.result?.jsonData).toEqual({ links: [{ value: 'a.ts', text: 'a' }] })
     } finally {
       engineWorker.terminate()
@@ -236,7 +236,7 @@ describe('useBehavioral — the runtime composition', () => {
         s.some(
           (t) =>
             t.selected.type === WORKER_MESSAGE_KINDS.shell_request_result &&
-            (t.selected.detail as { result?: { ok?: boolean } } | undefined)?.result?.ok === true,
+            (t.selected.detail as { ok?: boolean } | undefined)?.ok === true,
         ),
       )
     } finally {

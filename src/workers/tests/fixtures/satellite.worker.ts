@@ -19,30 +19,31 @@ self.onmessage = ({ data }: MessageEvent<InboundEvent>): void => {
   if (data.type === WORKER_MESSAGE_KINDS.shell_request) {
     self.postMessage({
       type: WORKER_MESSAGE_KINDS.shell_request_result,
-      detail: { id: data.detail.id, result: { ok: true, value: { op: data.detail.input?.op } } },
+      // The uniform result envelope — the ok branch with a marker payload.
+      detail: { id: data.detail.id, ok: true, result: { value: { op: data.detail.input?.op } } },
       ...space,
     })
   } else if (data.type === WORKER_MESSAGE_KINDS.response_request) {
     self.postMessage({
       type: WORKER_MESSAGE_KINDS.response_request_result,
-      detail: { id: data.detail.id, result: { items: [], status: 'completed' } },
+      detail: { id: data.detail.id, ok: true, result: { items: [], status: 'completed' } },
       ...space,
     })
   } else if (data.type === WORKER_MESSAGE_KINDS.frontier_request) {
     self.postMessage({
       type: WORKER_MESSAGE_KINDS.frontier_request_result,
-      detail: { id: data.detail.id, result: { analysis: data.detail.op } },
+      detail: { id: data.detail.id, ok: true, result: { analysis: data.detail.op } },
       ...space,
     })
   } else if (data.type === WORKER_MESSAGE_KINDS.shell_cancel) {
     self.postMessage({
       type: WORKER_MESSAGE_KINDS.shell_request_result,
-      detail: { id: `cancel-${data.detail.id}`, result: { canceled: true } },
+      detail: { id: `cancel-${data.detail.id}`, ok: true, result: { canceled: true } },
     })
   } else if (data.type === WORKER_MESSAGE_KINDS.response_cancel) {
     self.postMessage({
       type: WORKER_MESSAGE_KINDS.response_request_result,
-      detail: { id: `cancel-${data.detail.id}`, result: { canceled: true } },
+      detail: { id: `cancel-${data.detail.id}`, ok: true, result: { canceled: true } },
     })
   }
 }

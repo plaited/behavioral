@@ -145,7 +145,19 @@ const validateQuery = ajv.compile(QueryInputSchema)
 const postResult = ({ id, result, space }: { id: string; result: unknown; space?: string }): void => {
   self.postMessage({
     type: WORKER_MESSAGE_KINDS.store_request_result,
-    detail: { id, result },
+    // The uniform envelope: op-runner { ok: true, … } → ok branch (payload =
+    // the rest); { isError: true, … } or a throw → error branch.
+    detail: ((): JsonObject & { id: string } => {
+      if (typeof result === 'object' && result !== null && 'isError' in result) {
+        const { isError, ...rest } = result as { isError: boolean } & JsonObject
+        return { id, ok: false, error: { code: 'error', ...(isError ? rest : {}) } }
+      }
+      if (typeof result === 'object' && result !== null && 'ok' in result) {
+        const { ok, ...rest } = result as { ok: boolean } & JsonObject
+        return ok ? { id, ok: true, result: rest } : { id, ok: false, error: { code: 'error', ...rest } }
+      }
+      return { id, ok: true, result: (result ?? {}) as JsonObject }
+    })(),
     ...(space === undefined ? {} : { space }),
   })
 }

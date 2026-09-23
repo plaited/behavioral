@@ -23,13 +23,27 @@
  */
 
 import { behavioral } from '../behavioral/behavioral.ts'
+import type { BPEvent, Thread } from '../behavioral/behavioral.types.ts'
 import { WORKER_MESSAGE_KINDS } from './workers.constants.ts'
-import type { WorkerMessage } from './workers.types.ts'
+
+/**
+ * The engine transport — what the router posts INTO the engine worker.
+ * Two kinds, both of which evaluate.
+ */
+type AddThreadsMessage = {
+  kind: typeof WORKER_MESSAGE_KINDS.add_threads
+  threads: Thread[]
+}
+
+type TriggerMessage = {
+  kind: typeof WORKER_MESSAGE_KINDS.trigger
+  event: BPEvent
+}
 
 const { addThread, trigger, step, useTrace } = behavioral()
 useTrace((message) => postMessage(message))
 
-self.onmessage = ({ data }: MessageEvent<WorkerMessage>) => {
+self.onmessage = ({ data }: MessageEvent<AddThreadsMessage | TriggerMessage>) => {
   const { kind } = data
   if (kind === WORKER_MESSAGE_KINDS.add_threads) {
     for (const thread of data.threads) addThread(thread)

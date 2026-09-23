@@ -1,11 +1,7 @@
 import type { ValidateFunction } from 'ajv'
-import type { BPEvent, JsonObject, Thread } from '../behavioral/behavioral.types.ts'
+import type { BPEvent, Thread } from '../behavioral/behavioral.types.ts'
 import { WORKER_MESSAGE_KINDS } from './workers.constants.ts'
-import type { AddThreads } from './workers.types.ts'
-
-type ReenterMessage = { type: string; detail: JsonObject & { id: string }; space?: string }
-
-type ResultMessage = { type: string; detail: JsonObject & { id: string }; space?: string }
+import type { AddThreads, WorkerMessage } from './workers.types.ts'
 
 /**
  * The per-family wiring primitive — the one function every family (and every
@@ -48,13 +44,24 @@ export const useWorker =
     worker: Worker
     name: string
     threads: Thread[]
-    validateRequestEvent: ValidateFunction<ReenterMessage>
-    validateEventCancel: ValidateFunction<ReenterMessage>
-    validateResultEvent: ValidateFunction<ResultMessage>
+    validateRequestEvent: ValidateFunction<WorkerMessage>
+    validateEventCancel: ValidateFunction<WorkerMessage>
+    validateResultEvent: ValidateFunction<WorkerMessage>
   }) =>
   (addThreads: AddThreads, space?: string) => {
-    const reenter = (message: ReenterMessage): void => {
-      addThreads([
+    // Teardown race conversion: a straggler result (or a crash event) racing
+    // the host's engine.terminate() posts to a dead port — a known end-of-life
+    // failure, converted to a silent drop so satellite teardown never crashes
+    // the host process. Any other error still throws.
+    const addThreadsSafe = (threads: Thread[]): void => {
+      try {
+        addThreads(threads)
+      } catch (err) {
+        if (!(err instanceof Error && err.name === 'InvalidStateError')) throw err
+      }
+    }
+    const reenter = (message: WorkerMessage): void => {
+      addThreadsSafe([
         {
           ...(message.space === undefined ? {} : { space: message.space }),
           label: `on_${message.type}_${message.detail.id}`,
@@ -72,7 +79,7 @@ export const useWorker =
     // Only the router can see a satellite crash — no thread ever could — so the
     // crash is synthesized as one worker_error event (errors-as-data).
     worker.onerror = (error: ErrorEvent): void => {
-      addThreads([
+      addThreadsSafe([
         {
           label: `on_worker_error_${name}`,
           once: true,
@@ -90,7 +97,7 @@ export const useWorker =
 
     // Stamp only when set: an explicit `space: undefined` riding the thread
     // breaks the strict Thread schema (the reenter rule, applied to packs).
-    addThreads(threads.map((thread) => (space === undefined ? thread : { ...thread, space })))
+    addThreadsSafe(threads.map((thread) => (space === undefined ? thread : { ...thread, space })))
 
     // True for INVALID events — the family's own boundary check (the two
     // schemas are type-const-discriminated: an event can only satisfy its

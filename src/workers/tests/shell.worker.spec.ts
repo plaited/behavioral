@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { readdirSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import type { ShellResult } from '../shell.types.ts'
+import type { ShellError, ShellSuccess } from '../shell.types.ts'
 import { WORKER_MESSAGE_KINDS } from '../workers.constants.ts'
 
 /**
@@ -23,7 +23,10 @@ import { WORKER_MESSAGE_KINDS } from '../workers.constants.ts'
  * @packageDocumentation
  */
 
-type WireResult = { id: string; result: ShellResult; space?: string }
+/** The envelope as posted: { id, ok: true, result } | { id, ok: false, error }. */
+type WireResult =
+  | { id: string; ok: true; result: ShellSuccess; space?: string }
+  | { id: string; ok: false; error: ShellError; space?: string }
 
 /** Spawn the shell worker and expose an event-wire harness over it. */
 const spawnShellWorker = () => {
@@ -31,7 +34,12 @@ const spawnShellWorker = () => {
   const results: WireResult[] = []
   worker.onmessage = ({ data }: MessageEvent): void => {
     if (data?.type === WORKER_MESSAGE_KINDS.shell_request_result) {
-      results.push({ id: data.detail.id, result: data.detail.result, space: data.space })
+      results.push({
+        id: data.detail.id,
+        ok: data.detail.ok,
+        ...(data.detail.ok ? { result: data.detail.result } : { error: data.detail.error }),
+        space: data.space,
+      } as WireResult)
     }
   }
   const run = (id: string, script: string, extra?: Record<string, unknown>, space?: string): void => {
@@ -51,6 +59,18 @@ const spawnShellWorker = () => {
   const cancel = (id: string): void => {
     worker.postMessage({ type: WORKER_MESSAGE_KINDS.shell_cancel, detail: { id } })
   }
+  /** ok-branch payload or throws — error paths use errorFor. */
+  const payloadFor = async (id: string): Promise<ShellSuccess> => {
+    const r = await resultFor(id)
+    if (!r.ok) throw new Error(`expected ok result for ${id}, got error: ${JSON.stringify(r.error)}`)
+    return r.result
+  }
+  /** error-branch interior or throws — ok paths use payloadFor. */
+  const errorFor = async (id: string): Promise<ShellError> => {
+    const r = await resultFor(id)
+    if (r.ok) throw new Error(`expected error result for ${id}, got ok: ${JSON.stringify(r.result)}`)
+    return r.error
+  }
   const resultFor = async (id: string): Promise<WireResult> => {
     const deadline = Date.now() + 8_000
     for (;;) {
@@ -60,7 +80,7 @@ const spawnShellWorker = () => {
       await Bun.sleep(10)
     }
   }
-  return { run, sh, cancel, resultFor, terminate: () => worker.terminate() }
+  return { run, sh, cancel, resultFor, payloadFor, errorFor, terminate: () => worker.terminate() }
 }
 
 /** Leftover payload temp files in the OS tmpdir (the cleanup observable). */
@@ -71,10 +91,10 @@ describe('shell worker — event wire', () => {
     const shell = spawnShellWorker()
     try {
       shell.run('w1', 'console.log("wire-ok")')
-      const { id, result } = await shell.resultFor('w1')
+      const { id, ok } = await shell.resultFor('w1')
       expect(id).toBe('w1')
-      expect(result.status).toBe('completed')
-      expect(result.lines).toEqual(['wire-ok'])
+      expect(ok).toBe(true)
+      expect((await shell.payloadFor('w1')).lines).toEqual(['wire-ok'])
     } finally {
       shell.terminate()
     }
@@ -97,9 +117,9 @@ describe('shell worker — event wire', () => {
       shell.run('w3', 'console.log("never")') // then overwrite via sh with a bad shape:
       // 'run' without script, 'shell' without command, and an unknown op:
       shell.run('w4', '')
-      const { result } = await shell.resultFor('w4')
-      expect(result.status).toBe('error')
-      expect(String(result.message).includes('invalid input')).toBe(true)
+      const err = await shell.errorFor('w4')
+      expect(err.code).toBe('error')
+      expect(String(err.message).includes('invalid input')).toBe(true)
     } finally {
       shell.terminate()
     }
@@ -109,9 +129,9 @@ describe('shell worker — event wire', () => {
     const shell = spawnShellWorker()
     try {
       shell.run('w5', 'console.log(1)', { unknownKnob: true })
-      const { result } = await shell.resultFor('w5')
-      expect(result.status).toBe('error')
-      expect(String(result.message).includes('invalid input')).toBe(true)
+      const err = await shell.errorFor('w5')
+      expect(err.code).toBe('error')
+      expect(String(err.message).includes('invalid input')).toBe(true)
     } finally {
       shell.terminate()
     }
@@ -126,9 +146,8 @@ describe('shell worker — run op (bun-direct TS scripts)', () => {
         env: { RUN_OP_VAR: 'merged' },
         format: 'json',
       })
-      const { result } = await shell.resultFor('r1')
-      expect(result.status).toBe('completed')
-      expect(result.jsonData).toEqual({ via: 'bun', env: 'merged' })
+      const payload = await shell.payloadFor('r1')
+      expect(payload.jsonData).toEqual({ via: 'bun', env: 'merged' })
     } finally {
       shell.terminate()
     }
@@ -138,9 +157,9 @@ describe('shell worker — run op (bun-direct TS scripts)', () => {
     const shell = spawnShellWorker()
     try {
       shell.run('r2', 'console.log(process.cwd())', { cwd: tmpdir() })
-      const { result } = await shell.resultFor('r2')
+      const payload = await shell.payloadFor('r2')
       // macOS resolves /var → /private/var in the child — compare real paths
-      expect(result.lines?.[0]).toBe(realpathSync(tmpdir()))
+      expect(payload.lines?.[0]).toBe(realpathSync(tmpdir()))
     } finally {
       shell.terminate()
     }
@@ -150,12 +169,12 @@ describe('shell worker — run op (bun-direct TS scripts)', () => {
     const shell = spawnShellWorker()
     try {
       shell.run('r3', 'console.log(JSON.stringify({a: 1}))', { format: 'json' })
-      const good = await shell.resultFor('r3')
-      expect(good.result.jsonData).toEqual({ a: 1 })
+      const good = await shell.payloadFor('r3')
+      expect(good.jsonData).toEqual({ a: 1 })
       shell.run('r4', 'console.log("not json {")', { format: 'json' })
-      const bad = await shell.resultFor('r4')
-      expect(bad.result.status).toBe('error')
-      expect(String(bad.result.message).includes('json_parse_failed')).toBe(true)
+      const bad = await shell.errorFor('r4')
+      expect(bad.code).toBe('error')
+      expect(String(bad.message).includes('json_parse_failed')).toBe(true)
     } finally {
       shell.terminate()
     }
@@ -167,10 +186,9 @@ describe('shell worker — shell op (Bun Shell commands via the wrapper)', () =>
     const shell = spawnShellWorker()
     try {
       shell.sh('s1', 'echo shell-op-works')
-      const { result } = await shell.resultFor('s1')
-      expect(result.status).toBe('completed')
-      expect(result.lines).toEqual(['shell-op-works'])
-      expect(result.exitCode).toBe(0)
+      const payload = await shell.payloadFor('s1')
+      expect(payload.lines).toEqual(['shell-op-works'])
+      expect(payload.exitCode).toBe(0)
     } finally {
       shell.terminate()
     }
@@ -180,9 +198,8 @@ describe('shell worker — shell op (Bun Shell commands via the wrapper)', () =>
     const shell = spawnShellWorker()
     try {
       shell.sh('s2', 'echo failing; exit 3')
-      const { result } = await shell.resultFor('s2')
-      expect(result.status).toBe('completed')
-      expect(result.exitCode).toBe(3)
+      const payload = await shell.payloadFor('s2')
+      expect(payload.exitCode).toBe(3)
     } finally {
       shell.terminate()
     }
@@ -192,11 +209,11 @@ describe('shell worker — shell op (Bun Shell commands via the wrapper)', () =>
     const shell = spawnShellWorker()
     try {
       shell.sh('s3', 'echo hello bun shell | wc -w')
-      const { result } = await shell.resultFor('s3')
-      expect(result.lines?.[0]?.trim()).toBe('3')
+      const payload = await shell.payloadFor('s3')
+      expect(payload.lines?.[0]?.trim()).toBe('3')
       shell.sh('s4', 'echo done-$(echo now)')
-      const sub = await shell.resultFor('s4')
-      expect(sub.result.lines).toEqual(['done-now'])
+      const sub = await shell.payloadFor('s4')
+      expect(sub.lines).toEqual(['done-now'])
     } finally {
       shell.terminate()
     }
@@ -206,8 +223,8 @@ describe('shell worker — shell op (Bun Shell commands via the wrapper)', () =>
     const shell = spawnShellWorker()
     try {
       shell.sh('s5', 'cat', { stdin: 'payload-line-1\npayload-line-2' })
-      const { result } = await shell.resultFor('s5')
-      expect(result.lines).toEqual(['payload-line-1', 'payload-line-2'])
+      const payload = await shell.payloadFor('s5')
+      expect(payload.lines).toEqual(['payload-line-1', 'payload-line-2'])
     } finally {
       shell.terminate()
     }
@@ -217,9 +234,8 @@ describe('shell worker — shell op (Bun Shell commands via the wrapper)', () =>
     const shell = spawnShellWorker()
     try {
       shell.sh('s6', `cat < ${import.meta.path}`, { maxLines: 5_000 })
-      const { result } = await shell.resultFor('s6')
-      expect(result.status).toBe('completed')
-      expect((result.lines ?? []).length).toBeGreaterThan(10)
+      const payload = await shell.payloadFor('s6')
+      expect((payload.lines ?? []).length).toBeGreaterThan(10)
     } finally {
       shell.terminate()
     }
@@ -232,9 +248,8 @@ describe('shell worker — shell op (Bun Shell commands via the wrapper)', () =>
       // > the 100KB env threshold — the command text itself is the payload
       const big = `echo ${'x'.repeat(150_000)}`
       shell.sh('s7', big, { maxCharacters: 200_000 })
-      const { result } = await shell.resultFor('s7')
-      expect(result.status).toBe('completed')
-      expect(result.lines?.[0]?.length).toBe(150_000)
+      const payload = await shell.payloadFor('s7')
+      expect(payload.lines?.[0]?.length).toBe(150_000)
       // sensible deletion: no payload temp files survive completion
       expect(leftoverPayloadFiles().filter((f) => !before.includes(f))).toEqual([])
     } finally {
@@ -247,9 +262,8 @@ describe('shell worker — shell op (Bun Shell commands via the wrapper)', () =>
     const before = leftoverPayloadFiles()
     try {
       shell.sh('s8', 'wc -c', { stdin: 'y'.repeat(150_000), maxCharacters: 200_000 })
-      const { result } = await shell.resultFor('s8')
-      expect(result.status).toBe('completed')
-      expect(result.lines?.[0]?.trim()).toBe('150000')
+      const payload = await shell.payloadFor('s8')
+      expect(payload.lines?.[0]?.trim()).toBe('150000')
       expect(leftoverPayloadFiles().filter((f) => !before.includes(f))).toEqual([])
     } finally {
       shell.terminate()
@@ -262,8 +276,8 @@ describe('shell worker — shell op (Bun Shell commands via the wrapper)', () =>
     try {
       const big = `echo ${'z'.repeat(150_000)}; sleep 30`
       shell.sh('s9', big, { timeoutMs: 200 })
-      const { result } = await shell.resultFor('s9')
-      expect(result.status).toBe('timeout')
+      const err = await shell.errorFor('s9')
+      expect(err.code).toBe('timeout')
       await Bun.sleep(100) // the finally-path delete is async
       expect(leftoverPayloadFiles().filter((f) => !before.includes(f))).toEqual([])
     } finally {
@@ -277,8 +291,8 @@ describe('shell worker — containment', () => {
     const shell = spawnShellWorker()
     try {
       shell.sh('k1', 'sleep 30', { timeoutMs: 200 })
-      const { result } = await shell.resultFor('k1')
-      expect(result.status).toBe('timeout')
+      const err = await shell.errorFor('k1')
+      expect(err.code).toBe('timeout')
     } finally {
       shell.terminate()
     }
@@ -290,12 +304,12 @@ describe('shell worker — containment', () => {
       shell.sh('k2', 'sleep 30')
       await Bun.sleep(250) // let the wrapper start and the sleeper spawn
       shell.cancel('k2')
-      const killed = await shell.resultFor('k2')
-      expect(killed.result.status).toBe('canceled')
+      const killed = await shell.errorFor('k2')
+      expect(killed.code).toBe('canceled')
       // usable after: a fresh call completes
       shell.sh('k3', 'echo still-alive')
-      const after = await shell.resultFor('k3')
-      expect(after.result.status).toBe('completed')
+      const after = await shell.payloadFor('k3')
+      expect(after.exitCode).toBe(0)
     } finally {
       shell.terminate()
     }
@@ -305,8 +319,8 @@ describe('shell worker — containment', () => {
     const shell = spawnShellWorker()
     try {
       shell.sh('k4', 'yes flooding', { maxLines: 20 })
-      const { result } = await shell.resultFor('k4')
-      expect(result.status).toBe('line_quota')
+      const err = await shell.errorFor('k4')
+      expect(err.code).toBe('line_quota')
     } finally {
       shell.terminate()
     }
@@ -316,9 +330,8 @@ describe('shell worker — containment', () => {
     const shell = spawnShellWorker()
     try {
       shell.sh('k5', 'echo clamp-check', { limit: 5_000, maxCharacters: 300_000 })
-      const { result } = await shell.resultFor('k5')
-      expect(result.status).toBe('completed')
-      expect(result.clamped).toEqual(['maxCharacters 300000 -> 200000', 'limit 5000 -> 1000'])
+      const payload = await shell.payloadFor('k5')
+      expect(payload.clamped).toEqual(['maxCharacters 300000 -> 200000', 'limit 5000 -> 1000'])
     } finally {
       shell.terminate()
     }
@@ -330,11 +343,10 @@ describe('shell worker — paging', () => {
     const shell = spawnShellWorker()
     try {
       shell.sh('p1', 'seq 1 5')
-      const { result } = await shell.resultFor('p1')
-      expect(result.status).toBe('completed')
-      expect(result.lines).toEqual(['1', '2', '3', '4', '5'])
-      expect(result.totalLines).toBe(5)
-      expect(result.hasMore).toBe(false)
+      const payload = await shell.payloadFor('p1')
+      expect(payload.lines).toEqual(['1', '2', '3', '4', '5'])
+      expect(payload.totalLines).toBe(5)
+      expect(payload.hasMore).toBe(false)
     } finally {
       shell.terminate()
     }
@@ -344,10 +356,10 @@ describe('shell worker — paging', () => {
     const shell = spawnShellWorker()
     try {
       shell.sh('p2', 'seq 1 10', { offset: 2, limit: 3 })
-      const { result } = await shell.resultFor('p2')
-      expect(result.lines).toEqual(['3', '4', '5'])
-      expect(result.totalLines).toBe(10)
-      expect(result.hasMore).toBe(true)
+      const payload = await shell.payloadFor('p2')
+      expect(payload.lines).toEqual(['3', '4', '5'])
+      expect(payload.totalLines).toBe(10)
+      expect(payload.hasMore).toBe(true)
     } finally {
       shell.terminate()
     }
@@ -359,10 +371,9 @@ describe('shell worker — raw format + stderr', () => {
     const shell = spawnShellWorker()
     try {
       shell.sh('q1', 'seq 1 4000', { format: 'raw', maxCharacters: 2_000, maxLines: 5_000 })
-      const { result } = await shell.resultFor('q1')
-      expect(result.status).toBe('completed')
-      expect(String(result.stdout).includes('[...truncated')).toBe(true)
-      expect(result.hasMore).toBe(true)
+      const payload = await shell.payloadFor('q1')
+      expect(String(payload.stdout).includes('[...truncated')).toBe(true)
+      expect(payload.hasMore).toBe(true)
     } finally {
       shell.terminate()
     }
@@ -372,9 +383,9 @@ describe('shell worker — raw format + stderr', () => {
     const shell = spawnShellWorker()
     try {
       shell.sh('q2', 'echo to-out; echo to-err 1>&2')
-      const { result } = await shell.resultFor('q2')
-      expect(result.lines).toEqual(['to-out'])
-      expect(result.stderr).toBe('to-err')
+      const payload = await shell.payloadFor('q2')
+      expect(payload.lines).toEqual(['to-out'])
+      expect(payload.stderr).toBe('to-err')
     } finally {
       shell.terminate()
     }
