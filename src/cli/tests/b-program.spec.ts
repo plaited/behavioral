@@ -3,9 +3,9 @@ import { TRACE_MESSAGE_KINDS } from '../../behavioral/behavioral.constants.ts'
 import type { SelectionTrace, Trace } from '../../behavioral/behavioral.types.ts'
 import { BEHAVIOR_MESSAGE_KINDS } from '../../behaviors/behaviors.constants.ts'
 import {
-  validateShellCancelEvent,
-  validateShellRequestEvent,
-  validateShellRequestResultEvent,
+  ShellCancelEventSchema,
+  ShellRequestEventSchema,
+  ShellRequestResultEventSchema,
 } from '../../behaviors/behaviors.types.ts'
 import { startMcpServer } from '../../behaviors/tests/mcp-server-fixture.ts'
 import { useBehavior } from '../../behaviors/use-behavior.ts'
@@ -182,9 +182,9 @@ describe('bProgram — the runtime composition', () => {
       command: ['bun', 'run', 'tests/fixtures/probe.proc.ts'],
       name: 'shell',
       threads: [],
-      validateRequestEvent: validateShellRequestEvent,
-      validateEventCancel: validateShellCancelEvent,
-      validateResultEvent: validateShellRequestResultEvent,
+      requestSchema: ShellRequestEventSchema,
+      cancelSchema: ShellCancelEventSchema,
+      resultSchema: ShellRequestResultEventSchema,
     })
     const { runtime, traces } = startRuntime({ shell: hostShell })
     try {
@@ -213,9 +213,9 @@ describe('bProgram — the runtime composition', () => {
       command: ['bun', 'run', 'tests/fixtures/probe.proc.ts'],
       name: 'shell',
       threads: [],
-      validateRequestEvent: validateShellRequestEvent,
-      validateEventCancel: validateShellCancelEvent,
-      validateResultEvent: validateShellRequestResultEvent,
+      requestSchema: ShellRequestEventSchema,
+      cancelSchema: ShellCancelEventSchema,
+      resultSchema: ShellRequestResultEventSchema,
     })
     const { runtime, traces } = startRuntime({ shell: hostShell })
     try {
@@ -268,9 +268,9 @@ describe('bProgram — the runtime composition', () => {
       command: ['bun', 'run', 'tests/fixtures/probe.proc.ts'],
       name: 'shell',
       threads: [],
-      validateRequestEvent: validateShellRequestEvent,
-      validateEventCancel: validateShellCancelEvent,
-      validateResultEvent: validateShellRequestResultEvent,
+      requestSchema: ShellRequestEventSchema,
+      cancelSchema: ShellCancelEventSchema,
+      resultSchema: ShellRequestResultEventSchema,
     })
     // Capture the real handle the composition invokes: the host passes the
     // curried factory, so the composition holds the only terminate handle.

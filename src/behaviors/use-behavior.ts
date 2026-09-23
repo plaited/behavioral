@@ -1,12 +1,24 @@
-import type { ValidateFunction } from 'ajv'
-import type { BPEvent, Thread } from '../behavioral/behavioral.types.ts'
+import type { JSONSchemaType } from 'ajv'
+import { ajv, type BPEvent, type JsonObject, type Thread } from '../behavioral/behavioral.types.ts'
 import { BEHAVIOR_MESSAGE_KINDS } from './behaviors.constants.ts'
 import type { AddThreads } from './behaviors.types.ts'
 
 type WireMessage = {
   type: string
-  detail: import('../behavioral/behavioral.types.ts').JsonObject & { id: string }
+  detail: JsonObject & { id: string }
   space?: string
+}
+
+/**
+ * The event-wire schemas a family wiring declares: the request and cancel
+ * schemas own the outbound gate; the result schema owns the inbound lane.
+ * `useBehavior` compiles them internally and returns them so the composition
+ * can derive guard threads from the same one home.
+ */
+export type BehaviorEventSchemas = {
+  request: JSONSchemaType<WireMessage>
+  cancel: JSONSchemaType<WireMessage>
+  result: JSONSchemaType<WireMessage>
 }
 
 /**
@@ -51,20 +63,24 @@ export const useBehavior =
     name,
     threads,
     env,
-    validateRequestEvent,
-    validateEventCancel,
-    validateResultEvent,
+    requestSchema,
+    cancelSchema,
+    resultSchema,
   }: {
     command: string[]
     name: string
     threads: Thread[]
     /** Extra environment for the spawned process, merged over `process.env`. */
     env?: Record<string, string>
-    validateRequestEvent: ValidateFunction<WireMessage>
-    validateEventCancel: ValidateFunction<WireMessage>
-    validateResultEvent: ValidateFunction<WireMessage>
+    /** The outbound request/result/cancel schemas — the family's trust boundary, compiled here. */
+    requestSchema: JSONSchemaType<WireMessage>
+    cancelSchema: JSONSchemaType<WireMessage>
+    resultSchema: JSONSchemaType<WireMessage>
   }) =>
   (addThreads: AddThreads, space?: string) => {
+    const validateRequestEvent = ajv.compile(requestSchema)
+    const validateEventCancel = ajv.compile(cancelSchema)
+    const validateResultEvent = ajv.compile(resultSchema)
     let proc: Bun.Subprocess<'pipe', 'pipe', 'inherit'> | undefined
     let terminated = false
     let crashed = false
@@ -167,6 +183,8 @@ export const useBehavior =
       name,
       send,
       invalidEventGate,
+      /** The compiled-source schemas, returned so the composition derives guards from the one home. */
+      schemas: { request: requestSchema, cancel: cancelSchema, result: resultSchema },
       /** Teardown: the composition (or host) kills the process it spawned. */
       terminate: (): void => {
         terminated = true

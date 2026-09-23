@@ -4,18 +4,18 @@ import type { BPEvent, JsonObject, SelectionTrace, Thread, Trace } from '../beha
 import { BEHAVIOR_MESSAGE_KINDS } from '../behaviors/behaviors.constants.ts'
 import { behaviorsThreads } from '../behaviors/behaviors.threads.ts'
 import {
+  McpCancelEventSchema,
+  McpRequestEventSchema,
+  McpRequestResultEventSchema,
+  ResponseCancelEventSchema,
+  ResponseRequestEventSchema,
+  ResponseRequestResultEventSchema,
+  ShellCancelEventSchema,
+  ShellRequestEventSchema,
+  ShellRequestResultEventSchema,
+  StoreRequestEventSchema,
+  StoreRequestResultEventSchema,
   validateFrontierRequestEvent,
-  validateMcpCancelEvent,
-  validateMcpRequestEvent,
-  validateMcpRequestResultEvent,
-  validateResponseCancelEvent,
-  validateResponseRequestEvent,
-  validateResponseRequestResultEvent,
-  validateShellCancelEvent,
-  validateShellRequestEvent,
-  validateShellRequestResultEvent,
-  validateStoreRequestEvent,
-  validateStoreRequestResultEvent,
 } from '../behaviors/behaviors.types.ts'
 import { handleFrontierMessage } from '../behaviors/frontier.behavior.ts'
 import { mcpThreads } from '../behaviors/mcp-client.threads.ts'
@@ -134,9 +134,9 @@ export const bProgram = ({
           command: ['bun', 'run', 'shell.behavior.ts'],
           name: 'shell',
           threads: has('shell') && has('store') ? shellThreads : [],
-          validateRequestEvent: validateShellRequestEvent,
-          validateEventCancel: validateShellCancelEvent,
-          validateResultEvent: validateShellRequestResultEvent,
+          requestSchema: ShellRequestEventSchema,
+          cancelSchema: ShellCancelEventSchema,
+          resultSchema: ShellRequestResultEventSchema,
         })(familyAddThreads)
       : shellOverride(familyAddThreads)
 
@@ -144,9 +144,9 @@ export const bProgram = ({
     command: ['bun', 'run', 'responses-client.behavior.ts'],
     name: 'responses',
     threads: [],
-    validateRequestEvent: validateResponseRequestEvent,
-    validateEventCancel: validateResponseCancelEvent,
-    validateResultEvent: validateResponseRequestResultEvent,
+    requestSchema: ResponseRequestEventSchema,
+    cancelSchema: ResponseCancelEventSchema,
+    resultSchema: ResponseRequestResultEventSchema,
   })(familyAddThreads)
 
   // The store family: a host override is invoked with OUR addThreads (the
@@ -158,9 +158,9 @@ export const bProgram = ({
           command: ['bun', 'run', 'store.behavior.ts'],
           name: 'store',
           threads: [],
-          validateRequestEvent: validateStoreRequestEvent,
-          validateEventCancel: validateStoreRequestEvent, // no cancel; the request schema is the gate
-          validateResultEvent: validateStoreRequestResultEvent,
+          requestSchema: StoreRequestEventSchema,
+          cancelSchema: StoreRequestEventSchema, // no cancel; the request schema is the gate
+          resultSchema: StoreRequestResultEventSchema,
         })(familyAddThreads)
       : storeOverride(familyAddThreads)
 
@@ -169,9 +169,9 @@ export const bProgram = ({
     name: 'mcp',
     // The spine requires mcp + store.
     threads: has('mcp') && has('store') ? mcpThreads : [],
-    validateRequestEvent: validateMcpRequestEvent,
-    validateEventCancel: validateMcpCancelEvent,
-    validateResultEvent: validateMcpRequestResultEvent,
+    requestSchema: McpRequestEventSchema,
+    cancelSchema: McpCancelEventSchema,
+    resultSchema: McpRequestResultEventSchema,
   })(familyAddThreads)
 
   // ── Routing: event type → family lane (the only family knowledge) ────────

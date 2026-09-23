@@ -4,9 +4,10 @@ import { behavioral } from '../../behavioral/behavioral.ts'
 import type { BPEvent, SelectionTrace, Thread, Trace } from '../../behavioral/behavioral.types.ts'
 import { BEHAVIOR_MESSAGE_KINDS } from '../behaviors.constants.ts'
 import {
-  validateShellCancelEvent,
+  ShellCancelEventSchema,
+  ShellRequestEventSchema,
+  ShellRequestResultEventSchema,
   validateShellRequestEvent,
-  validateShellRequestResultEvent,
 } from '../behaviors.types.ts'
 import { useBehavior } from '../use-behavior.ts'
 
@@ -49,9 +50,9 @@ const spawnProbe = (env?: Record<string, string>) => {
     name: 'probe',
     threads: [],
     ...(env === undefined ? {} : { env }),
-    validateRequestEvent: validateShellRequestEvent,
-    validateEventCancel: validateShellCancelEvent,
-    validateResultEvent: validateShellRequestResultEvent,
+    requestSchema: ShellRequestEventSchema,
+    cancelSchema: ShellCancelEventSchema,
+    resultSchema: ShellRequestResultEventSchema,
   })(addThreadsWithStep(program))
   // The composition's pump role: forward selected family requests outbound
   // (the wire-projected event — the selected candidate carries non-wire
@@ -89,6 +90,17 @@ const request = (id: string, op: string): BPEvent => ({
 })
 
 describe('useBehavior — the spawn-based family primitive', () => {
+  test('compiles the wiring schemas and returns them (bProgram derives guards from these)', () => {
+    const { family } = spawnProbe()
+    try {
+      expect(family.schemas.request).toBe(ShellRequestEventSchema)
+      expect(family.schemas.cancel).toBe(ShellCancelEventSchema)
+      expect(family.schemas.result).toBe(ShellRequestResultEventSchema)
+    } finally {
+      family.terminate()
+    }
+  })
+
   test('a request round-trips through the process and its result re-enters', async () => {
     const { program, traces, family } = spawnProbe()
     try {
