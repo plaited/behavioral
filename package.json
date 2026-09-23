@@ -46,6 +46,7 @@
     "access": "public"
   },
   "scripts": {
+    "betterleaks:generate": "bun run scripts/betterleaks/run.ts",
     "betterleaks:install": "bun run scripts/betterleaks/install.ts",
     "check": "bun run check:biome && bun run check:types",
     "check:biome": "biome check",
