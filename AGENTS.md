@@ -85,9 +85,9 @@ them so the composition derives guard threads; exit-code crash synthesis as
 emit/inbound, the envData bridge, bindEmit for the frontier embed),
 `behavioral-home.ts` (the `BEHAVIORAL_HOME` root), `resolve-faculty-entry.ts`
 (bundled/absolute/home-relative provider-entry paths), and `faculties.threads.ts`
-(the composition's root guard pack).
+(the composition's root guard threads).
 Each faculty lives in its own subfolder — `faculty.ts` (the process entry),
-`threads.ts` (its default pack), `types.ts`/`schemas.ts`, `config.ts` (the system
+`threads.ts` (its default threads), `types.ts`/`schemas.ts`, `config.ts` (the system
 faculties), plus its `tests/`:
 - `system-two/` — Open Responses model calls; a provider entry —
   `configSystemTwo(respond)` wires it, `useSystemTwo({ endpoints })` seeds the
@@ -107,15 +107,15 @@ Each faculty owns its event types + input boundary; results echo the request
 `space`; op runners errors-as-data.
 **`src/tools/`** — deleted (fleet 0): the ICL conversion retired the CLI tool
 fleet. mcp-client is the mcp faculty (`src/faculties/mcp/faculty.ts`);
-skill/plugin operations are the shell faculty's thread pack
+skill/plugin operations are the shell faculty's threads
 (`src/faculties/shell/threads.ts`) + recipes + store, taught by
 `skills/skill-conventions/`.
 **`src/faculties.ts`** — the faculties public surface (package export `./faculties`): the
 `Faculty` union, the wire types + JSON schemas/validators (`faculties.types.ts`), the override thread
-packs (`shellThreads`, `mcpThreads`), their schemas/types, `useFaculty`, and the
+threads (`shellThreads`, `mcpThreads`), their schemas/types, `useFaculty`, and the
 System One/Two config surface (`configSystemOne`/`useSystemOne`,
 `configSystemTwo`/`useSystemTwo`) — what a
-`config.ts` imports to compose. (`facultiesThreads`, the default root pack, is internal.) The runtime composition itself is `src/cli/b-program.ts`.
+`config.ts` imports to compose. (`facultiesThreads`, the default root threads, is internal.) The runtime composition itself is `src/cli/b-program.ts`.
 **`src/behavioral/`** — the pure language layer: types, constants, utils, the interpreter core
 (`behavioral.ts`), and its internal jq subprocess (`jq.worker.ts` — engine-internal, wire-external;
 nothing outside behavioral/ speaks its wire). Zero process entries that speak the faculty wire —
@@ -139,12 +139,12 @@ JSON-RPC IPC host lives here too: `b-program.ts` (the runtime composition, `bPro
 entry — ingress messages → triggers, `ui_*` selections → client notifications, redacted
 traces out), `load-config.ts` (`<BEHAVIORAL_HOME>/config.ts`), and `trace-consumer.ts`.
 **`src/utils/`** — shared pure utilities.
-**`src/faculties/<faculty>/threads.ts`** — faculty thread packs: `shell/threads.ts`
-(the ICL pack — skill/plugin scans, catalog/manifest schema gates, links dispatchers
-+ stored recipes) and `mcp/threads.ts` (the auth replay spine). Packs ship with
-their faculty; `bProgram` mounts a pack when the faculty and its required
-faculties are on — except `faculties.threads.ts`, the composition's **root
-pack** (the guard threads), always mounted regardless of the allow-list. The
+**`src/faculties/<faculty>/threads.ts`** — faculty threads: `shell/threads.ts`
+(the ICL threads — skill/plugin scans, catalog/manifest schema gates, links dispatchers
++ stored recipes) and `mcp/threads.ts` (the auth replay spine). Threads ship with
+their faculty; `bProgram` mounts the faculty's threads when the faculty and its required
+faculties are on — except `faculties.threads.ts`, the composition's **root guard
+threads**, always mounted regardless of the allow-list. The
 former `src/threads/` is dissolved; its engine-layer specs live with their
 faculties (`src/faculties/<faculty>/tests/`), while specs for the shared modules
 stay in `src/faculties/tests/`.

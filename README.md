@@ -23,12 +23,12 @@ flowchart TD
   subgraph COMPOSE["COMPOSITION — bProgram (src/cli/b-program.ts)"]
     direction TB
     GUARDS["guard threads"]
-    PACKS["thread packs"]
+    THREADS["faculty threads"]
     ENGINE["BEHAVIORAL ENGINE — in-process, super-step scheduler"]
     ROUTER["the pump"]
     FRONTIER["frontier — the in-process embed"]
     GUARDS --> ENGINE
-    PACKS --> ENGINE
+    THREADS --> ENGINE
     ENGINE --> ROUTER
   end
 
@@ -72,7 +72,7 @@ sequenceDiagram
   participant G as Guard thread (in-engine)
   P->>F: request — one JSON line on stdin
   F-->>P: result — re-enters the engine, space preserved
-  Note over P,G: a valid result selects; the caller's waitFor fires
+  Note over P,G: a valid result selects, and the caller's waitFor fires
   F-->>G: a malformed result re-enters instead of being discarded
   G--xP: blocked — visible in the frontier/deadlock traces, never selected
   P->>F: cancel — abort the in-flight call, the first stop reason wins
@@ -120,7 +120,7 @@ import { defineConfig } from '@behavioral/sh'
 
 // The faculties surface — what a config.ts composes with:
 // useFaculty, the Faculty union, wire types + schemas/validators,
-// the override thread packs (shellThreads, mcpThreads),
+// the override threads (shellThreads, mcpThreads),
 // and the System One/Two config surface
 import { useSystemOne, useSystemTwo } from '@behavioral/sh/faculties'
 

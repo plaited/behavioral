@@ -2,7 +2,7 @@ import type { Thread } from '../behavioral/behavioral.types.ts'
 import { CONTROLLER_DETAIL_SCHEMAS } from '../controller/controller.schemas.ts'
 
 /**
- * The composition's root thread pack — the default threads, always mounted
+ * The composition's root threads — the default threads, always mounted
  * (independent of the faculty allow-list) — plus the guard generator every
  * mounted faculty reuses.
  *
@@ -75,5 +75,5 @@ const invalidControllerMessages: GuardEntry[] = Object.entries(CONTROLLER_DETAIL
   ([type, detailSchema]) => ({ type, detailSchema: detailSchema as Record<string, unknown> }),
 )
 
-/** The root pack: default threads mounted by every composition. */
+/** The root threads: default threads mounted by every composition. */
 export const facultiesThreads: Thread[] = guardThreads('guard:controller-schema', invalidControllerMessages)

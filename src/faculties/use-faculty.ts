@@ -36,7 +36,7 @@ export type FacultyEventSchemas = {
  * without dead-port stragglers — killing a process closes its pipes.
  *
  * Curried like its Worker ancestor: the initial call captures the faculty's
- * command, wire name, thread pack, validators, and an optional `env` override
+ * command, wire name, threads, validators, and an optional `env` override
  * (merged over the inherited environment); the returned function
  * — awaiting `(addThreads, space?)` — wires:
  *
@@ -51,7 +51,7 @@ export type FacultyEventSchemas = {
  *   cause) re-enters exactly ONE `faculty_error { faculty: name }` event;
  * - **respawn on demand** — the next outbound event spawns a fresh process
  *   after a death; one live process per faculty wiring at all times;
- * - **thread-pack mounting** — stamped with the wiring space only when set.
+ * - **thread mounting** — stamped with the wiring space only when set.
  *
  * `send(event)` is the faculty's outbound port: JSON line to the process's
  * stdin (spawning if dead). `invalidEventGate` is the routing-side boundary
@@ -198,8 +198,8 @@ export const useFaculty = ({
 
     const invalidEventGate = (event: BPEvent): boolean => !validateRequestEvent(event) && !validateEventCancel(event)
 
-    // Pack mount — stamped only when set (an explicit `space: undefined`
-    // breaks the strict Thread schema; the reenter rule, applied to packs).
+    // Thread mount — stamped only when set (an explicit `space: undefined`
+    // breaks the strict Thread schema; the reenter rule, applied to the mounted threads).
     addThreads(threads.map((thread) => (space === undefined ? thread : { ...thread, space })))
 
     return {

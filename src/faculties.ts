@@ -2,10 +2,10 @@
  * The faculties public surface — what a `config.ts` override composes with.
  *
  * @remarks
- * Exposes the override thread packs (`shellThreads`, `mcpThreads`), their
+ * Exposes the override threads (`shellThreads`, `mcpThreads`), their
  * schemas and types, the `Faculty` union, `useFaculty`, and the System Two
  * config surface (`configSystemTwo` for a provider entry; `useSystemTwo` for
- * the host). The default root pack (`facultiesThreads`) is internal — the
+ * the host). The default root threads (`facultiesThreads`) is internal — the
  * composition always mounts it — and is intentionally NOT exported. The runtime
  * composition itself (`bProgram`) lives in `src/cli/b-program.ts`.
  *

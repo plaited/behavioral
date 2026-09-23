@@ -24,14 +24,14 @@ import { bProgram } from '../b-program.ts'
  * `shell` is the one instance-level override: the pre-curried useFaculty
  * return substituting the default shell faculty.
  *
- * Lifecycle note: the composition does NOT flush its deferred pack mounts at
+ * Lifecycle note: the composition does NOT flush its deferred thread mounts at
  * construction. The host subscribes (`runtime.useTrace`), then calls
  * `runtime.start()` — the flush runs after subscribers attach, so boot-cascade
  * selection traces (e.g. the skill-scan `shell_request`) are observable.
  * `runtime.trigger` auto-starts (idempotent), so a host that never calls
  * `start()` still boots on its first event.
  *
- * The default thread packs are faculty-shipped: the shell pack
+ * The default threads are faculty-shipped: the shell threads
  * (shell/threads.ts — skill/plugin scans + links) mounts with shell+store
  * on; the mcp spine (mcp.threads.ts) mounts with store+mcp on.
  */
@@ -69,10 +69,10 @@ const startRuntime = (options: Parameters<typeof bProgram>[0] = {}) => {
 }
 
 describe('bProgram — the runtime composition', () => {
-  test('the shell pack ships with the shell faculty: the skill scan self-starts through the composition', async () => {
+  test('the shell threads ship with the shell faculty: the skill scan self-starts through the composition', async () => {
     const { runtime, traces } = startRuntime()
     try {
-      // The skill scan boot is part of the shell pack — starting the
+      // The skill scan boot is part of the shell threads — starting the
       // composition is enough to start it (no host trigger). Because the
       // subscriber attaches BEFORE `start()`, the boot selection trace is
       // observable…
@@ -96,7 +96,7 @@ describe('bProgram — the runtime composition', () => {
     }
   })
 
-  test('a full round-trip via the default packs: links_request → run op → result re-entry', async () => {
+  test('a full round-trip via the default threads: links_request → run op → result re-entry', async () => {
     const { runtime, traces } = startRuntime()
     try {
       runtime.trigger({
@@ -146,7 +146,7 @@ describe('bProgram — the runtime composition', () => {
     const { runtime, traces } = startRuntime({ faculties: ['store'] })
     try {
       // No shell → no scan boot, no shell_request ever. Settle past any
-      // boot cascade the packs could have run.
+      // boot cascade the threads could have run.
       await Bun.sleep(500)
       expect(selectionsOf(traces).some((t) => t.selected.type === FACULTY_MESSAGE_KINDS.shell_request)).toBe(false)
       expect(storeRequest(selectionsOf(traces), 'put', 'skills')).toBeUndefined()
@@ -207,10 +207,10 @@ describe('bProgram — the runtime composition', () => {
     })
     const { runtime, traces } = startRuntime({ shell: hostShell })
     try {
-      // A raw shell_request (root ingress — no pack involvement): the
+      // A raw shell_request (root ingress — no thread involvement): the
       // satellite fixture answers with {ok:true, value:{op}} — a shape the
       // REAL shell never produces. Its arrival proves the override took the
-      // shell route. (The pack rides the host's threads — [] here by choice.)
+      // shell route. (The faculty's threads ride the host's wiring — [] here by choice.)
       runtime.trigger({
         type: FACULTY_MESSAGE_KINDS.shell_request,
         detail: { id: 'ov1', label: 'probe', input: { op: 'echo' } },
@@ -251,14 +251,14 @@ describe('bProgram — the runtime composition', () => {
     }
   })
 
-  test('trigger does not flush deferred pack mounts — start() owns the boot', async () => {
+  test('trigger does not flush deferred thread mounts — start() owns the boot', async () => {
     const traces: Trace[] = []
     const runtime = bProgram({})
     runtime.useTrace((trace) => {
       traces.push(trace)
     })
     try {
-      // Without start(), the deferred pack mounts are not flushed: a trigger is
+      // Without start(), the deferred thread mounts are not flushed: a trigger is
       // admitted (the engine is live) but the shell/mcp boot cascades never run.
       runtime.trigger({ type: 'noop', detail: {} })
       await Bun.sleep(200)
@@ -268,7 +268,7 @@ describe('bProgram — the runtime composition', () => {
     }
   })
 
-  test('the root guard pack is mounted: a malformed ui_* message is blocked', async () => {
+  test('the root guard threads is mounted: a malformed ui_* message is blocked', async () => {
     const { runtime, traces } = startRuntime({ faculties: [] })
     try {
       // Invalid ui_render (no html): the guard blocks it, so it never selects and

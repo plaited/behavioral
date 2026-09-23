@@ -34,7 +34,7 @@ import type { Faculty } from '../faculties.ts'
  * primitive.
  *
  * The in-process re-entry law: addThread alone is inert — every re-entry
- * (satellite results, crash synthesis, pack mounts) pumps one super-step.
+ * (satellite results, crash synthesis, thread mounts) pumps one super-step.
  * This was the engine transport's trailing step; it is the composition's
  * now.
  *
@@ -47,7 +47,7 @@ import type { Faculty } from '../faculties.ts'
  * handle).
  *
  * The lifecycle is explicit: construction wires the engine, faculties, and
- * routes but does NOT flush the deferred pack mounts. The host subscribes
+ * routes but does NOT flush the deferred thread mounts. The host subscribes
  * (`runtime.useTrace`) first, then calls `runtime.start()` — the boot
  * cascade runs after subscribers attach, so boot traces are observable.
  * `runtime.trigger` admits events only; start/terminate are the host's
@@ -119,7 +119,7 @@ export const bProgram = ({
     step()
   }
 
-  // Boot-order law: pack mounts (and any faculty construction's thread
+  // Boot-order law: thread mounts (and any faculty construction's thread
   // additions) are DEFERRED until the pump is subscribed and the routes are
   // registered — the Worker world got this for free (the engine subscribed at
   // spawn, before any add_threads); in-process, the first step's selections
@@ -138,9 +138,9 @@ export const bProgram = ({
 
   // The shell faculty: a host override (pre-curried useFaculty return) is
   // invoked with OUR addThreads — the host never touches the program port;
-  // a default construction runs otherwise. The pack requires shell + store —
-  // the selector gates the mount; a pruned shell has no route and mounts no
-  // pack, like every other allow-listed faculty.
+  // a default construction runs otherwise. The threads require shell + store —
+  // the selector gates the mount; a pruned shell has no route and mounts
+  // none, like every other allow-listed faculty.
   const shell =
     shellOverride === undefined
       ? useFaculty({
@@ -186,7 +186,7 @@ export const bProgram = ({
 
   // ── Routing: event type → faculty lane (the only faculty knowledge) ────────
 
-  // The root guard pack is always mounted, independent of the allow-list.
+  // The root guard threads are always mounted, independent of the allow-list.
   facultyAddThreads(facultiesThreads)
 
   type FacultyPort = { send: (event: BPEvent) => void; gate: (event: BPEvent) => boolean }
@@ -249,7 +249,7 @@ export const bProgram = ({
     faculty.send(event)
   })
 
-  // ── The explicit start: flush the deferred pack mounts ────────────────
+  // ── The explicit start: flush the deferred thread mounts ────────────────
 
   // Construction wires the pump and routes but does not flush. The host
   // subscribes (useTrace) FIRST, then calls start() — the boot cascade

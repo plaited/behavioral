@@ -18,7 +18,7 @@ const run = (detail: JsonObject) => {
   return { selections, frontiers }
 }
 
-describe('facultiesThreads — the root guard pack', () => {
+describe('facultiesThreads — the root guard threads', () => {
   test('blocks a malformed ui_render: candidate present, none enabled, no selection', () => {
     const { selections, frontiers } = run({ id: 'r1', target: 'main', swap: 'innerHTML' })
     expect(selections.some((s) => s.selected.type === 'ui_render')).toBe(false)

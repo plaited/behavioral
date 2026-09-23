@@ -1,11 +1,11 @@
 /**
- * The mcp faculty's default thread pack — the cross-turn auth replay spine:
+ * The mcp faculty's default threads — the cross-turn auth replay spine:
  * capture-on-auth-required, host surfacing, grant-triggered store get, and
  * the replayer. Ships with the faculty ("threads arrive with the worker they
  * drive"); requires store + mcp — bProgram mounts it only when both
  * are on.
  *
- * Moved from src/threads/mcp-client.ts when the packs became faculty-shipped.
+ * Moved from src/threads/mcp-client.ts when the threads became faculty-shipped.
  *
  * @packageDocumentation
  */

@@ -1,5 +1,5 @@
 /**
- * The shell faculty's default thread pack — the ICL thread libraries that
+ * The shell faculty's default threads — the ICL thread libraries that
  * ship with the faculty ("threads arrive with the worker they drive"):
  *
  * - `skill-scan` boot + catalog transform (schema-gated) — the skills
@@ -11,8 +11,8 @@
  *   links_request → shell_request wiring.
  *
  * Composed contents of the former src/threads/{skill-client,
- * plugin-client, skill-links}.ts, moved wholesale when the packs became
- * faculty-shipped. The pack requires the shell faculty (its executor) and
+ * plugin-client, skill-links}.ts, moved wholesale when the threads became
+ * faculty-shipped. The threads require the shell faculty (its executor) and
  * the store faculty (its tenants) — bProgram mounts it only when both
  * are on.
  *
@@ -938,7 +938,7 @@ const dispatcherValidate: Thread = {
 /** The skill-links thread library — add to the program alongside the satellites. */
 export const skillLinksThreads: Thread[] = [linksSeeder, dispatcherExtract, dispatcherValidate]
 
-// ── The faculty pack ───────────────────────────────────────────────────────────
+// ── The faculty threads ───────────────────────────────────────────────────────────
 
-/** The shell faculty's default thread pack — scans, catalog/manifest gates, links. */
+/** The shell faculty's default threads — scans, catalog/manifest gates, links. */
 export const shellThreads: Thread[] = [...skillThreads, ...pluginThreads, ...skillLinksThreads]
