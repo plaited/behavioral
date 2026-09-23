@@ -154,6 +154,17 @@ ingress + a plugin-shipped behavior surface.
      the conventions skill, docs sweep. Remaining: the deletion sweep (fleet 6 → 0)
      and the governor thread (plugin admission). -->
 
+### 2026-09-21 — ruled: the composition hook renames — useWorkers → useBehavioral, use-workers.ts → use-behavioral.ts
+
+- **Pilot's ruling (typo-collision + functional correctness):** the root
+  composition is one character from the new `use-worker.ts` primitive — a
+  typo trap — and the name should say what it composes: the BEHAVIORAL
+  runtime (engine + satellites; returns the engine worker). Renamed
+  everywhere: the file, the export, its spec, transport-spec comments,
+  AGENTS.md, and the skills docs. `useWorker` (the primitive) keeps its
+  singular name — the two-file shape now reads correctly: useWorker wires
+  one family; useBehavioral composes the runtime.
+
 ### 2026-09-21 — ruled (Q1/A): the per-space composition — useWorker primitive, useWorkers as root, frontier router-owned
 
 - **The pilot's `useWorker` (src/workers/use-worker.ts, authored pilot-side):

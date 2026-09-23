@@ -1,6 +1,6 @@
 /**
  * The mcp spine through the ENGINE WORKER TRANSPORT (`behavioral.worker.ts`)
- * — not the pure in-process engine, and not the full useWorkers composition.
+ * — not the pure in-process engine, and not the full useBehavioral composition.
  *
  * The transport carries semantics the engine-level spec never exercises:
  * `add_threads` provisions and runs its own trailing step (requesters
@@ -8,7 +8,7 @@
  * and every trace crosses a real postMessage boundary. This harness is a
  * mock worker client: it collects the posted traces and feeds ingress
  * events back — the router's re-entry role played by the test. The
- * satellite routing layer stays covered by the useWorkers spec.
+ * satellite routing layer stays covered by the useBehavioral spec.
  */
 import { describe, expect, test } from 'bun:test'
 import { TRACE_MESSAGE_KINDS } from '../../behavioral/behavioral.constants.ts'

@@ -77,7 +77,7 @@ and the impact is broad or unclear, expand coverage until the affected surface i
 **`src/workers/`** — the process layer: the worker event wire (`workers.types.ts` +
 `workers.constants.ts` — every request/result event family, validators, and the kind
 registry), the engine entry (`behavioral.worker.ts` — a dumb transport over one behavioral
-program), the router (`use-workers.ts`, `useWorkers` — supersedes the deleted kernel; forwards
+program), the router (`use-behavioral.ts`, `useBehavioral` — supersedes the deleted kernel; forwards
 selections verbatim and re-enters worker results as once-threads), and the satellite families:
 `responses-client` (Open Responses model calls), `shell` (bun-direct script
 execution — `run` op = TS scripts via `bun run -`, `shell` op = Bun Shell

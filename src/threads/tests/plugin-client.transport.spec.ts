@@ -5,7 +5,7 @@
  * scan boot is a REQUESTER, so it must self-start with no trigger), and a
  * triggered result cascades the manifests put (the router's re-entry role
  * played by this mock worker client). Satellite routing stays covered by the
- * useWorkers spec.
+ * useBehavioral spec.
  */
 import { describe, expect, test } from 'bun:test'
 import { TRACE_MESSAGE_KINDS } from '../../behavioral/behavioral.constants.ts'

@@ -1,14 +1,14 @@
 /**
  * The skill threads through the ENGINE WORKER TRANSPORT
  * (`behavioral.worker.ts`) — not the pure in-process engine, and not the
- * full useWorkers composition.
+ * full useBehavioral composition.
  *
  * The load-bearing assertion here is the inverse of the mcp spine's
  * quiet-boot test: the scan boot thread is a REQUESTER, and the transport's
  * `add_threads` provisions it AND runs the trailing step — so the scan
  * `shell_request` must self-start with NO trigger at all. The catalog transform
  * cascade rides a triggered result (the router's re-entry role played by
- * the mock client). Satellite routing stays covered by the useWorkers spec.
+ * the mock client). Satellite routing stays covered by the useBehavioral spec.
  */
 import { describe, expect, test } from 'bun:test'
 import { TRACE_MESSAGE_KINDS } from '../../behavioral/behavioral.constants.ts'

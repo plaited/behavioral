@@ -3,7 +3,7 @@ import { setEnvironmentData } from 'node:worker_threads'
 import { TRACE_MESSAGE_KINDS } from '../../behavioral/behavioral.constants.ts'
 import type { SelectionTrace, Thread, Trace, Trigger } from '../../behavioral/behavioral.types.ts'
 import { STORE_DB_PATH_KEY } from '../store.types.ts'
-import { useWorkers } from '../use-workers.ts'
+import { useBehavioral } from '../use-behavioral.ts'
 import { WORKER_MESSAGE_KINDS } from '../workers.constants.ts'
 import { startMcpServer } from './mcp-server-fixture.ts'
 
@@ -29,12 +29,12 @@ const idSchema = (id: string) => ({
   required: ['id'],
 })
 
-describe('useWorkers router', () => {
+describe('useBehavioral router', () => {
   test('routes a selected shell_request to the shell worker and re-enters its result', async () => {
     const traces: Trace[] = []
     const shellWorker = spawnSatellite()
     const responsesClientWorker = spawnSatellite()
-    const engineWorker = useWorkers({
+    const engineWorker = useBehavioral({
       threads: [
         {
           once: true,
@@ -72,7 +72,7 @@ describe('useWorkers router', () => {
     const traces: Trace[] = []
     const shellWorker = spawnSatellite()
     const responsesClientWorker = spawnSatellite()
-    const engineWorker = useWorkers({
+    const engineWorker = useBehavioral({
       threads: [
         {
           once: true,
@@ -108,7 +108,7 @@ describe('useWorkers router', () => {
     const shellWorker = spawnSatellite()
     const responsesClientWorker = spawnSatellite()
     let trigger: Trigger | undefined
-    const engineWorker = useWorkers({
+    const engineWorker = useBehavioral({
       threads: [{ once: true, label: 'booted', rules: [{ waitFor: [{ type: 'boot' }] }] }],
       traceListener: (trace) => {
         traces.push(trace)
@@ -131,7 +131,7 @@ describe('useWorkers router', () => {
     const traces: Trace[] = []
     const shellWorker = spawnSatellite()
     const responsesClientWorker = spawnSatellite()
-    const engineWorker = useWorkers({
+    const engineWorker = useBehavioral({
       threads: [
         {
           space: 's1',
@@ -169,7 +169,7 @@ describe('useWorkers router', () => {
     const traces: Trace[] = []
     const shellWorker = spawnSatellite()
     const responsesClientWorker = spawnSatellite()
-    const engineWorker = useWorkers({
+    const engineWorker = useBehavioral({
       threads: [
         {
           once: true,
@@ -217,7 +217,7 @@ describe('useWorkers router', () => {
     const shellWorker = spawnCrashing()
     const responsesClientWorker = spawnSatellite()
     const frontierWorker = spawnSatellite()
-    const engineWorker = useWorkers({
+    const engineWorker = useBehavioral({
       threads: [
         {
           once: true,
@@ -252,7 +252,7 @@ describe('useWorkers router', () => {
     const traces: Trace[] = []
     setEnvironmentData(STORE_DB_PATH_KEY, ':memory:')
     const storeWorker = new Worker(new URL('../store.worker.ts', import.meta.url))
-    const engineWorker = useWorkers({
+    const engineWorker = useBehavioral({
       threads: [
         {
           once: true,
@@ -288,7 +288,7 @@ describe('useWorkers router', () => {
     const server = await startMcpServer()
     const loopback = Bun.serve({ port: 0, fetch: (req) => server.fetch(req.url, req) })
     const mcpWorker = new Worker(new URL('../mcp-client.worker.ts', import.meta.url))
-    const engineWorker = useWorkers({
+    const engineWorker = useBehavioral({
       threads: [
         {
           once: true,
@@ -334,7 +334,7 @@ describe('useWorkers router', () => {
     const traces: Trace[] = []
     const shellWorker = spawnCrashing()
     const responsesClientWorker = spawnSatellite()
-    const engineWorker = useWorkers({
+    const engineWorker = useBehavioral({
       threads: [
         {
           once: true,

@@ -42,7 +42,7 @@ import {
  * exist.
  */
 
-export const useWorkers = ({
+export const useBehavioral = ({
   threads,
   traceListener,
   workers,

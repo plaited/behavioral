@@ -58,6 +58,6 @@ never touch the store.
 
 Threads request `mcp_request` events like any other worker family; hosts
 mount the family by adding `mcp: new Worker(new URL('./mcp-client.worker.ts', import.meta.url))`
-to the `useWorkers` workers map. Schema-reflect the op inputs via
+to the `useBehavioral` workers map. Schema-reflect the op inputs via
 `src/workers/mcp-client.types.ts` (`MCP_*_OP_INPUT_SCHEMA`) when model-facing
 context is needed.
