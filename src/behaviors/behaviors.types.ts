@@ -22,20 +22,20 @@ import { BEHAVIOR_MESSAGE_KINDS } from './behaviors.constants.ts'
  * @public
  */
 
-export type ResponseRequestEvent = {
-  type: typeof BEHAVIOR_MESSAGE_KINDS.response_request
+export type SystemTwoRequestEvent = {
+  type: typeof BEHAVIOR_MESSAGE_KINDS.system_two_request
   detail: { id: string; input: JsonObject }
   space?: string
 }
 
-export type ResponseRequestResultEvent = {
-  type: typeof BEHAVIOR_MESSAGE_KINDS.response_request_result
+export type SystemTwoRequestResultEvent = {
+  type: typeof BEHAVIOR_MESSAGE_KINDS.system_two_request_result
   detail: WorkerResultDetail
   space?: string
 }
 
-export type ResponseCancelEvent = {
-  type: typeof BEHAVIOR_MESSAGE_KINDS.response_cancel
+export type SystemTwoCancelEvent = {
+  type: typeof BEHAVIOR_MESSAGE_KINDS.system_two_cancel
   detail: { id: string }
   space?: string
 }
@@ -157,9 +157,9 @@ export type McpCancelEvent = {
 
 /** Union of every event the router can move between ports. @public */
 export type WorkerEvent =
-  | ResponseRequestEvent
-  | ResponseRequestResultEvent
-  | ResponseCancelEvent
+  | SystemTwoRequestEvent
+  | SystemTwoRequestResultEvent
+  | SystemTwoCancelEvent
   | ShellRequestEvent
   | ShellRequestResultEvent
   | ShellCancelEvent
@@ -220,10 +220,10 @@ const resultEventSchema = (typeConst: string) =>
     additionalProperties: false,
   }) as unknown as import('ajv').JSONSchemaType<{ type: string; detail: WorkerResultDetail; space?: string }>
 
-export const ResponseRequestEventSchema: JSONSchemaType<ResponseRequestEvent> = {
+export const SystemTwoRequestEventSchema: JSONSchemaType<SystemTwoRequestEvent> = {
   type: 'object',
   properties: {
-    type: { type: 'string', const: BEHAVIOR_MESSAGE_KINDS.response_request },
+    type: { type: 'string', const: BEHAVIOR_MESSAGE_KINDS.system_two_request },
     detail: {
       type: 'object',
       properties: { id: { type: 'string', minLength: 1 }, input: jsonObjectSchema },
@@ -236,12 +236,12 @@ export const ResponseRequestEventSchema: JSONSchemaType<ResponseRequestEvent> = 
   additionalProperties: false,
 }
 
-export const ResponseRequestResultEventSchema = resultEventSchema(BEHAVIOR_MESSAGE_KINDS.response_request_result)
+export const SystemTwoRequestResultEventSchema = resultEventSchema(BEHAVIOR_MESSAGE_KINDS.system_two_request_result)
 
-export const ResponseCancelEventSchema: JSONSchemaType<ResponseCancelEvent> = {
+export const SystemTwoCancelEventSchema: JSONSchemaType<SystemTwoCancelEvent> = {
   type: 'object',
   properties: {
-    type: { type: 'string', const: BEHAVIOR_MESSAGE_KINDS.response_cancel },
+    type: { type: 'string', const: BEHAVIOR_MESSAGE_KINDS.system_two_cancel },
     detail: {
       type: 'object',
       properties: { id: { type: 'string', minLength: 1 } },
@@ -357,9 +357,9 @@ export const BehaviorErrorEventSchema: JSONSchemaType<BehaviorErrorEvent> = {
   additionalProperties: false,
 }
 
-export const validateResponseRequestEvent = ajv.compile(ResponseRequestEventSchema)
-export const validateResponseRequestResultEvent = ajv.compile(ResponseRequestResultEventSchema)
-export const validateResponseCancelEvent = ajv.compile(ResponseCancelEventSchema)
+export const validateSystemTwoRequestEvent = ajv.compile(SystemTwoRequestEventSchema)
+export const validateSystemTwoRequestResultEvent = ajv.compile(SystemTwoRequestResultEventSchema)
+export const validateSystemTwoCancelEvent = ajv.compile(SystemTwoCancelEventSchema)
 export const validateShellRequestEvent = ajv.compile(ShellRequestEventSchema)
 export const validateShellRequestResultEvent = ajv.compile(ShellRequestResultEventSchema)
 export const validateShellCancelEvent = ajv.compile(ShellCancelEventSchema)

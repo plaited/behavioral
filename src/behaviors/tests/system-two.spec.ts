@@ -21,10 +21,10 @@ import {
   StreamEventLaxSchema,
   UsageSchema,
   VideoContentSchema,
-  validateModelRespondInput,
-  validateModelRespondOutput,
-} from '../responses-client.schemas.ts'
-import { MODEL_ENDPOINTS_KEY, type ModelEndpoints, type ModelRespondOutput } from '../responses-client.types.ts'
+  validateSystemTwoInput,
+  validateSystemTwoOutput,
+} from '../system-two.schemas.ts'
+import { SYSTEM_TWO_ENDPOINTS_KEY, type SystemTwoEndpoints, type SystemTwoOutput } from '../system-two.types.ts'
 import { spawnFamily } from './family-harness.ts'
 import { ASSISTANT_TEXT, startOpenResponsesServer } from './fixtures/model-server.ts'
 
@@ -35,32 +35,32 @@ import { ASSISTANT_TEXT, startOpenResponsesServer } from './fixtures/model-serve
 type WireResult = {
   id: string
   ok: boolean
-  result?: ModelRespondOutput
+  result?: SystemTwoOutput
   error?: Record<string, unknown>
   space?: string
 }
 
 /** Spawn the responses family PROCESS and expose the same wire harness API. */
-const spawnModelBehavior = (endpoints: ModelEndpoints) => {
+const spawnModelBehavior = (endpoints: SystemTwoEndpoints) => {
   // Endpoint config seeds the spawn ENV (the provisioning contract): the
   // process reads it once at startup and no secret ever crosses the message
   // boundary. Env vars cross Bun.spawn; worker-thread env-data does not.
   const behavior = spawnFamily({
-    file: 'responses-client.behavior.ts',
-    requestType: BEHAVIOR_MESSAGE_KINDS.response_request,
-    resultType: BEHAVIOR_MESSAGE_KINDS.response_request_result,
-    env: { [MODEL_ENDPOINTS_KEY]: JSON.stringify(endpoints) },
+    file: 'system-two.behavior.ts',
+    requestType: BEHAVIOR_MESSAGE_KINDS.system_two_request,
+    resultType: BEHAVIOR_MESSAGE_KINDS.system_two_request_result,
+    env: { [SYSTEM_TWO_ENDPOINTS_KEY]: JSON.stringify(endpoints) },
   })
   const messages: { type?: string; detail?: unknown; space?: string }[] = []
   const respond = (id: string, input: unknown, space?: string): void => {
     behavior.call({ id, input } as JsonObject, space)
   }
   const cancel = (id: string): void => {
-    behavior.post({ type: BEHAVIOR_MESSAGE_KINDS.response_cancel, detail: { id } } as never)
+    behavior.post({ type: BEHAVIOR_MESSAGE_KINDS.system_two_cancel, detail: { id } } as never)
   }
   const resultFor = async (id: string): Promise<WireResult> => {
     const raw = await behavior.resultFor(id)
-    messages.push({ type: BEHAVIOR_MESSAGE_KINDS.response_request_result, detail: raw.detail, space: raw.space })
+    messages.push({ type: BEHAVIOR_MESSAGE_KINDS.system_two_request_result, detail: raw.detail, space: raw.space })
     return { ...raw.detail, id: raw.id, space: raw.space } as WireResult
   }
   return { respond, cancel, resultFor, messages, terminate: (): void => behavior.terminate() }
@@ -130,7 +130,7 @@ describe('model behavior — streaming respond', () => {
       expect(text).toBe(ASSISTANT_TEXT)
       // The DELTA wire kind is dead: nothing but the result event is posted.
       expect(model.messages).toHaveLength(1)
-      expect(model.messages[0]?.type).toBe(BEHAVIOR_MESSAGE_KINDS.response_request_result)
+      expect(model.messages[0]?.type).toBe(BEHAVIOR_MESSAGE_KINDS.system_two_request_result)
     } finally {
       model.terminate()
       await server.close()
@@ -191,7 +191,7 @@ describe('model behavior — failures are data', () => {
 })
 
 describe('model behavior — cancellation', () => {
-  test('a response_cancel event aborts an in-flight streamed call as error data', async () => {
+  test('a system_two_cancel event aborts an in-flight streamed call as error data', async () => {
     const encoder = new TextEncoder()
     // A real server that emits one event and then never closes the stream.
     const server = Bun.serve({
@@ -283,7 +283,7 @@ describe('model behavior — event wire', () => {
 })
 
 // ================================================================
-// responses-client.schemas — request, item, usage, error schemas + stream events
+// system-two.schemas — request, item, usage, error schemas + stream events
 // ================================================================
 
 // --- Scenario 1: happy text turn ---
@@ -741,7 +741,7 @@ describe('stream event scenarios', () => {
 })
 
 // ================================================================
-// responses-client.schemas — input content part schemas
+// system-two.schemas — input content part schemas
 // ================================================================
 
 // ================================================================
@@ -979,20 +979,20 @@ describe('MessageItemParamSchema with InputContentPart[]', () => {
 
 describe('respond input schema — contract', () => {
   test('respond requires provider, modelId, and input', () => {
-    expect(validateModelRespondInput({})).toBe(false)
-    expect(validateModelRespondInput({ provider: 'p', modelId: 'm' })).toBe(false)
-    expect(validateModelRespondInput({ provider: 'p', modelId: 'm', input: [] })).toBe(true)
+    expect(validateSystemTwoInput({})).toBe(false)
+    expect(validateSystemTwoInput({ provider: 'p', modelId: 'm' })).toBe(false)
+    expect(validateSystemTwoInput({ provider: 'p', modelId: 'm', input: [] })).toBe(true)
   })
 
   test('reasoningEffort declares the spec enum and passes non-spec values through', () => {
     // Spec values accepted.
-    expect(validateModelRespondInput({ provider: 'p', modelId: 'm', input: [], reasoningEffort: 'high' })).toBe(true)
-    expect(validateModelRespondInput({ provider: 'p', modelId: 'm', input: [], reasoningEffort: 'xhigh' })).toBe(true)
+    expect(validateSystemTwoInput({ provider: 'p', modelId: 'm', input: [], reasoningEffort: 'high' })).toBe(true)
+    expect(validateSystemTwoInput({ provider: 'p', modelId: 'm', input: [], reasoningEffort: 'xhigh' })).toBe(true)
     // Non-spec values (OpenAI-only minimal, endpoint extensions) pass through.
-    expect(validateModelRespondInput({ provider: 'p', modelId: 'm', input: [], reasoningEffort: 'minimal' })).toBe(true)
+    expect(validateSystemTwoInput({ provider: 'p', modelId: 'm', input: [], reasoningEffort: 'minimal' })).toBe(true)
     // Structure is still guarded: empty and non-string values rejected.
-    expect(validateModelRespondInput({ provider: 'p', modelId: 'm', input: [], reasoningEffort: '' })).toBe(false)
-    expect(validateModelRespondInput({ provider: 'p', modelId: 'm', input: [], reasoningEffort: 3 })).toBe(false)
+    expect(validateSystemTwoInput({ provider: 'p', modelId: 'm', input: [], reasoningEffort: '' })).toBe(false)
+    expect(validateSystemTwoInput({ provider: 'p', modelId: 'm', input: [], reasoningEffort: 3 })).toBe(false)
   })
 })
 
@@ -1057,7 +1057,7 @@ describe('model behavior — output conformance', () => {
     try {
       model.respond('call_1', { provider: 'mock', modelId: 'mock-model', input: [userMessage] })
       const { result } = await model.resultFor('call_1')
-      expect(validateModelRespondOutput(result)).toBe(true)
+      expect(validateSystemTwoOutput(result)).toBe(true)
       expect((result as { isError?: boolean }).isError).toBeUndefined()
       expect((result as { items: Array<{ content?: Array<{ text?: string }> }> }).items[0]?.content?.[0]?.text).toBe(
         ASSISTANT_TEXT,

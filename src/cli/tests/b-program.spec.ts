@@ -7,6 +7,8 @@ import {
   ShellRequestEventSchema,
   ShellRequestResultEventSchema,
 } from '../../behaviors/behaviors.types.ts'
+import { useSystemTwo } from '../../behaviors/config-system-two.ts'
+import { ASSISTANT_TEXT, startOpenResponsesServer } from '../../behaviors/tests/fixtures/model-server.ts'
 import { startMcpServer } from '../../behaviors/tests/mcp-server-fixture.ts'
 import { useBehavior } from '../../behaviors/use-behavior.ts'
 import { bProgram } from '../b-program.ts'
@@ -139,7 +141,7 @@ describe('bProgram — the runtime composition', () => {
   })
 
   test('the behaviors allow-list prunes families: without shell, the shell pack does not mount', async () => {
-    const { runtime, traces } = startRuntime({ behaviors: ['responses'] })
+    const { runtime, traces } = startRuntime({ behaviors: ['store'] })
     try {
       // No shell → no scan boot, no shell_request ever. Settle past any
       // boot cascade the packs could have run.
@@ -307,6 +309,62 @@ describe('bProgram — the runtime composition', () => {
     } finally {
       runtime.terminate()
       invoked?.terminate()
+    }
+  })
+
+  test('a systemTwo override takes the route: the endpoint seeds the process and the result re-enters', async () => {
+    const server = await startOpenResponsesServer()
+    const { runtime, traces } = startRuntime({ systemTwo: useSystemTwo({ endpoints: { mock: { url: server.url } } }) })
+    try {
+      runtime.trigger({
+        type: BEHAVIOR_MESSAGE_KINDS.system_two_request,
+        detail: {
+          id: 's2-1',
+          input: {
+            provider: 'mock',
+            modelId: 'mock-model',
+            input: [{ type: 'message', role: 'user', content: 'Say hello' }],
+          },
+        },
+      })
+      await waitForTraces(traces, (s) =>
+        s.some(
+          (t) =>
+            t.selected.type === BEHAVIOR_MESSAGE_KINDS.system_two_request_result &&
+            (t.selected.detail as { id?: string } | undefined)?.id === 's2-1',
+        ),
+      )
+      const result = selectionsOf(traces).find(
+        (t) =>
+          t.selected.type === BEHAVIOR_MESSAGE_KINDS.system_two_request_result &&
+          (t.selected.detail as { id?: string } | undefined)?.id === 's2-1',
+      )
+      const detail = result?.selected.detail as
+        | { ok?: boolean; result?: { items?: Array<{ content?: Array<{ text?: string }> }> } }
+        | undefined
+      expect(detail?.ok).toBe(true)
+      expect(detail?.result?.items?.[0]?.content?.[0]?.text).toBe(ASSISTANT_TEXT)
+    } finally {
+      runtime.terminate()
+      await server.close()
+    }
+  })
+
+  test('a malformed system_two_request is blocked by the family guard — never selected', async () => {
+    const server = await startOpenResponsesServer()
+    const { runtime, traces } = startRuntime({ systemTwo: useSystemTwo({ endpoints: { mock: { url: server.url } } }) })
+    try {
+      // No `input` — the request detail fails its schema, so the derived guard
+      // blocks it and the reject is visible (deadlock), not silently dropped.
+      runtime.trigger({ type: BEHAVIOR_MESSAGE_KINDS.system_two_request, detail: { id: 'bad' } })
+      await Bun.sleep(100)
+      expect(selectionsOf(traces).some((t) => t.selected.type === BEHAVIOR_MESSAGE_KINDS.system_two_request)).toBe(
+        false,
+      )
+      expect(traces.some((t) => t.kind === TRACE_MESSAGE_KINDS.deadlock)).toBe(true)
+    } finally {
+      runtime.terminate()
+      await server.close()
     }
   })
 })

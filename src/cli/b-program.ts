@@ -2,14 +2,11 @@ import { TRACE_MESSAGE_KINDS } from '../behavioral/behavioral.constants.ts'
 import { behavioral } from '../behavioral/behavioral.ts'
 import type { BPEvent, JsonObject, SelectionTrace, Thread, Trace } from '../behavioral/behavioral.types.ts'
 import { BEHAVIOR_MESSAGE_KINDS } from '../behaviors/behaviors.constants.ts'
-import { behaviorsThreads } from '../behaviors/behaviors.threads.ts'
+import { behaviorsThreads, eventGuardEntries, guardThreads } from '../behaviors/behaviors.threads.ts'
 import {
   McpCancelEventSchema,
   McpRequestEventSchema,
   McpRequestResultEventSchema,
-  ResponseCancelEventSchema,
-  ResponseRequestEventSchema,
-  ResponseRequestResultEventSchema,
   ShellCancelEventSchema,
   ShellRequestEventSchema,
   ShellRequestResultEventSchema,
@@ -30,18 +27,21 @@ import type { Behavior } from '../behaviors.ts'
  * useTrace with zero postMessage hops (the engine-never-awaits invariant is
  * what makes this safe on the main thread). Frontier is the in-process embed:
  * its analysis dispatch is imported and driven directly, its emit lane bound
- * to the composition's reenter. The four capability families (shell, store,
- * responses, mcp) are Bun.spawn PROCESSES speaking the unchanged wire over
- * stdio lines — per-space isolatable, abort-able, head-of-line-free — wired
- * by the useBehavior primitive.
+ * to the composition's reenter. The capability families — shell, store, and
+ * mcp as default processes; system One/Two as endpoint-carrying overrides —
+ * are Bun.spawn PROCESSES speaking the unchanged wire over stdio lines —
+ * per-space isolatable, abort-able, head-of-line-free — wired by the useBehavior
+ * primitive.
  *
  * The in-process re-entry law: addThread alone is inert — every re-entry
  * (satellite results, crash synthesis, pack mounts) pumps one super-step.
  * This was the engine transport's trailing step; it is the composition's
  * now.
  *
- * `behaviors` is the allow-list (unset = all four behaviors on); `shell` and
- * `store` are the two instance overrides — pre-curried useBehavior returns
+ * `behaviors` is the allow-list (unset = shell/store/mcp on); `shell` and
+ * `store` are the two default-family instance overrides, and `systemTwo` (and
+ * later `systemOne`) is an endpoint-carrying override with no default — all
+ * pre-curried useBehavior returns for host-constructed families.
  * for host-constructed families (sandboxed shell, durable store). The
  * composition invokes every factory and owns the resulting process
  * lifecycles, overrides included (the host hands over a factory, not a
@@ -85,6 +85,7 @@ export const bProgram = ({
   behaviors,
   shell: shellOverride,
   store: storeOverride,
+  systemTwo: systemTwoOverride,
 }: {
   /** Allow-list: unset = all default behaviors on; set = only the named behaviors spawn. */
   behaviors?: Behavior[]
@@ -92,8 +93,14 @@ export const bProgram = ({
   shell?: ReturnType<typeof useBehavior>
   /** The store family override: a pre-curried useBehavior return (durable store). */
   store?: ReturnType<typeof useBehavior>
+  /**
+   * The System Two family override (e.g. `useSystemTwo({ url, apiKey })`). No
+   * default: with no override the family carries no endpoint, so it is simply
+   * absent — no process, no route.
+   */
+  systemTwo?: ReturnType<typeof useBehavior>
 }) => {
-  const enabled = new Set<Behavior>(behaviors === undefined ? ['shell', 'responses', 'store', 'mcp'] : behaviors)
+  const enabled = new Set<Behavior>(behaviors === undefined ? ['shell', 'store', 'mcp'] : behaviors)
   const has = (family: Behavior): boolean => enabled.has(family)
 
   // ── The engine, in-process ────────────────────────────────────────────────
@@ -140,14 +147,10 @@ export const bProgram = ({
         })(familyAddThreads)
       : shellOverride(familyAddThreads)
 
-  const responses = useBehavior({
-    command: ['bun', 'run', 'responses-client.behavior.ts'],
-    name: 'responses',
-    threads: [],
-    requestSchema: ResponseRequestEventSchema,
-    cancelSchema: ResponseCancelEventSchema,
-    resultSchema: ResponseRequestResultEventSchema,
-  })(familyAddThreads)
+  // The system families: no default. A host override (a config helper
+  // return — `useSystemTwo({ url, apiKey })`) carries the endpoint it needs;
+  // without one the family is simply absent.
+  const systemTwo = systemTwoOverride?.(familyAddThreads)
 
   // The store family: a host override is invoked with OUR addThreads (the
   // durable-db seam — the default is :memory: via env-data); the default
@@ -189,10 +192,14 @@ export const bProgram = ({
     send: (event: BPEvent): void => shell.send(event),
     gate: (event: BPEvent): boolean => shell.invalidEventGate(event),
   })
-  if (has('responses')) {
-    route([BEHAVIOR_MESSAGE_KINDS.response_request, BEHAVIOR_MESSAGE_KINDS.response_cancel], {
-      send: (event: BPEvent): void => responses.send(event),
-      gate: (event: BPEvent): boolean => responses.invalidEventGate(event),
+  if (systemTwo !== undefined) {
+    // The family's request/cancel/result guard derives from the same schemas
+    // useBehavior compiled — a malformed system_two event is blocked (visible
+    // in the frontier traces), not silently dropped.
+    familyAddThreads(guardThreads(`guard:${systemTwo.name}-schema`, eventGuardEntries(systemTwo.schemas)))
+    route([BEHAVIOR_MESSAGE_KINDS.system_two_request, BEHAVIOR_MESSAGE_KINDS.system_two_cancel], {
+      send: (event: BPEvent): void => systemTwo.send(event),
+      gate: (event: BPEvent): boolean => systemTwo.invalidEventGate(event),
     })
   }
   route([BEHAVIOR_MESSAGE_KINDS.frontier_request], { send: frontier.send, gate: frontier.gate })
@@ -251,9 +258,9 @@ export const bProgram = ({
     terminate: (): void => {
       bindEmit(null)
       shell.terminate()
-      responses.terminate()
       store.terminate()
       mcp.terminate()
+      systemTwo?.terminate()
     },
   }
 }

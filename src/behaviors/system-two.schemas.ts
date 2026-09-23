@@ -1,6 +1,6 @@
 import type { ErrorObject, JSONSchemaType, ValidateFunction } from 'ajv'
 import Ajv2020 from 'ajv/dist/2020'
-import type { ModelRespondInput, ModelRespondOutput } from './responses-client.types.ts'
+import type { SystemTwoInput, SystemTwoOutput } from './system-two.types.ts'
 
 // ================================================================
 // Open Responses — Phase 0 subset schemas (AJV / JSON Schema)
@@ -512,7 +512,7 @@ export const OpenResponsesRequestSchema = makeSchema<OpenResponsesRequest>({
   properties: {
     // Spec: `model` is a plain string (CreateResponseBody.model), e.g.
     // 'claude-sonnet-4'. Provider selection is client-side provisioning in
-    // this repo (see ModelRespondInput.provider) and never crosses the wire.
+    // this repo (see SystemTwoInput.provider) and never crosses the wire.
     model: { type: 'string' },
     input: { type: 'array', items: inputItemSchema },
     tools: { type: 'array', items: FunctionToolSchema.schema },
@@ -851,7 +851,7 @@ export type OpenResponsesStreamEvent = KnownStreamEvent | UnknownStreamEvent
 
 // ----------------------------------------------------------------
 // Event-input boundary — the single validation point for
-// `response_request` detail.input (moved here from the deleted
+// `system_two_request` detail.input (moved here from the deleted
 // host client; the worker compiles nothing, it consumes these)
 // ----------------------------------------------------------------
 
@@ -863,7 +863,7 @@ const errorJsonSchema = ErrorSchema.schema
 const truncationJsonSchema = TruncationSchema.schema
 
 /** @public */
-export const ModelRespondInputSchema = {
+export const SystemTwoInputSchema = {
   type: 'object',
   properties: {
     provider: {
@@ -903,13 +903,13 @@ export const ModelRespondInputSchema = {
     'function_call items are returned as data — dispatch them yourself. ' +
     'Named fields are spec-only; any other key-value in args passes through to the ' +
     'request body verbatim (spec params we do not name + endpoint extensions).',
-} as unknown as JSONSchemaType<ModelRespondInput>
+} as unknown as JSONSchemaType<SystemTwoInput>
 
 /** @public */
-export const validateModelRespondInput = ajv.compile(ModelRespondInputSchema)
+export const validateSystemTwoInput = ajv.compile(SystemTwoInputSchema)
 
 /** @public */
-export const ModelRespondOutputSchema = {
+export const SystemTwoOutputSchema = {
   type: 'object',
   oneOf: [
     {
@@ -935,7 +935,7 @@ export const ModelRespondOutputSchema = {
     },
   ],
   description: 'Output items + status on success; { isError, message } on failure.',
-} as unknown as JSONSchemaType<ModelRespondOutput>
+} as unknown as JSONSchemaType<SystemTwoOutput>
 
 /** @public */
-export const validateModelRespondOutput = ajv.compile(ModelRespondOutputSchema)
+export const validateSystemTwoOutput = ajv.compile(SystemTwoOutputSchema)

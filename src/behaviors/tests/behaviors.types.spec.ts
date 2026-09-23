@@ -7,21 +7,21 @@ import {
   validateMcpCancelEvent,
   validateMcpRequestEvent,
   validateMcpRequestResultEvent,
-  validateResponseCancelEvent,
-  validateResponseRequestEvent,
-  validateResponseRequestResultEvent,
   validateShellCancelEvent,
   validateShellRequestEvent,
   validateShellRequestResultEvent,
   validateStoreRequestEvent,
   validateStoreRequestResultEvent,
+  validateSystemTwoCancelEvent,
+  validateSystemTwoRequestEvent,
+  validateSystemTwoRequestResultEvent,
 } from '../behaviors.types.ts'
 
 describe('workers.types event vocabulary', () => {
-  describe('response_request', () => {
+  describe('system_two_request', () => {
     test('accepts a well-formed request', () => {
-      const valid = validateResponseRequestEvent({
-        type: BEHAVIOR_MESSAGE_KINDS.response_request,
+      const valid = validateSystemTwoRequestEvent({
+        type: BEHAVIOR_MESSAGE_KINDS.system_two_request,
         detail: {
           id: 'call_1',
           input: { provider: 'ollama', modelId: 'llama3.1', input: [] },
@@ -30,41 +30,41 @@ describe('workers.types event vocabulary', () => {
       expect(valid).toBe(true)
     })
     test('accepts optional space', () => {
-      const valid = validateResponseRequestEvent({
-        type: BEHAVIOR_MESSAGE_KINDS.response_request,
+      const valid = validateSystemTwoRequestEvent({
+        type: BEHAVIOR_MESSAGE_KINDS.system_two_request,
         detail: { id: 'call_1', input: {} },
         space: 'main',
       })
       expect(valid).toBe(true)
     })
     test('rejects a detail without id', () => {
-      const valid = validateResponseRequestEvent({
-        type: BEHAVIOR_MESSAGE_KINDS.response_request,
+      const valid = validateSystemTwoRequestEvent({
+        type: BEHAVIOR_MESSAGE_KINDS.system_two_request,
         detail: { input: {} },
       })
       expect(valid).toBe(false)
     })
     test('rejects a detail without input', () => {
-      const valid = validateResponseRequestEvent({
-        type: BEHAVIOR_MESSAGE_KINDS.response_request,
+      const valid = validateSystemTwoRequestEvent({
+        type: BEHAVIOR_MESSAGE_KINDS.system_two_request,
         detail: { id: 'call_1' },
       })
       expect(valid).toBe(false)
     })
     test('rejects a missing detail', () => {
-      const valid = validateResponseRequestEvent({ type: BEHAVIOR_MESSAGE_KINDS.response_request })
+      const valid = validateSystemTwoRequestEvent({ type: BEHAVIOR_MESSAGE_KINDS.system_two_request })
       expect(valid).toBe(false)
     })
     test('rejects a different event type', () => {
-      const valid = validateResponseRequestEvent({
+      const valid = validateSystemTwoRequestEvent({
         type: BEHAVIOR_MESSAGE_KINDS.shell_request,
         detail: { id: 'call_1', input: { op: 'run', script: 'x' } },
       })
       expect(valid).toBe(false)
     })
     test('rejects ingress — routed events are synthesized, never ingress', () => {
-      const valid = validateResponseRequestEvent({
-        type: BEHAVIOR_MESSAGE_KINDS.response_request,
+      const valid = validateSystemTwoRequestEvent({
+        type: BEHAVIOR_MESSAGE_KINDS.system_two_request,
         detail: { id: 'call_1', input: {} },
         ingress: 'boot',
       })
@@ -72,24 +72,24 @@ describe('workers.types event vocabulary', () => {
     })
   })
 
-  describe('response_request_result', () => {
+  describe('system_two_request_result', () => {
     test('accepts a well-formed result', () => {
-      const valid = validateResponseRequestResultEvent({
-        type: BEHAVIOR_MESSAGE_KINDS.response_request_result,
+      const valid = validateSystemTwoRequestResultEvent({
+        type: BEHAVIOR_MESSAGE_KINDS.system_two_request_result,
         detail: { id: 'call_1', ok: true, result: { items: [], status: 'completed' } },
       })
       expect(valid).toBe(true)
     })
     test('rejects a non-object result payload', () => {
-      const valid = validateResponseRequestResultEvent({
-        type: BEHAVIOR_MESSAGE_KINDS.response_request_result,
+      const valid = validateSystemTwoRequestResultEvent({
+        type: BEHAVIOR_MESSAGE_KINDS.system_two_request_result,
         detail: { id: 'call_1', ok: true, result: 'not-an-object' },
       })
       expect(valid).toBe(false)
     })
     test('rejects a missing id', () => {
-      const valid = validateResponseRequestResultEvent({
-        type: BEHAVIOR_MESSAGE_KINDS.response_request_result,
+      const valid = validateSystemTwoRequestResultEvent({
+        type: BEHAVIOR_MESSAGE_KINDS.system_two_request_result,
         detail: { result: {} },
       })
       expect(valid).toBe(false)
@@ -145,9 +145,9 @@ describe('workers.types event vocabulary', () => {
   })
 
   describe('cancels', () => {
-    test('accepts a well-formed response_cancel', () => {
-      const valid = validateResponseCancelEvent({
-        type: BEHAVIOR_MESSAGE_KINDS.response_cancel,
+    test('accepts a well-formed system_two_cancel', () => {
+      const valid = validateSystemTwoCancelEvent({
+        type: BEHAVIOR_MESSAGE_KINDS.system_two_cancel,
         detail: { id: 'call_1' },
       })
       expect(valid).toBe(true)
@@ -160,15 +160,15 @@ describe('workers.types event vocabulary', () => {
       expect(valid).toBe(true)
     })
     test('rejects a cancel without id', () => {
-      const valid = validateResponseCancelEvent({
-        type: BEHAVIOR_MESSAGE_KINDS.response_cancel,
+      const valid = validateSystemTwoCancelEvent({
+        type: BEHAVIOR_MESSAGE_KINDS.system_two_cancel,
         detail: {},
       })
       expect(valid).toBe(false)
     })
     test('rejects an empty correlation id — nothing to correlate', () => {
-      const valid = validateResponseCancelEvent({
-        type: BEHAVIOR_MESSAGE_KINDS.response_cancel,
+      const valid = validateSystemTwoCancelEvent({
+        type: BEHAVIOR_MESSAGE_KINDS.system_two_cancel,
         detail: { id: '' },
       })
       expect(valid).toBe(false)

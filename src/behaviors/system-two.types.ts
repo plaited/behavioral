@@ -1,9 +1,9 @@
 /**
- * Wire and option types shared by the model worker (`responses-client.worker.ts`)
- * and its host consumer (`responses-client.ts`).
+ * Wire and option types shared by the model worker (`system-two.worker.ts`)
+ * and its host consumer (`system-two.ts`).
  *
  * @remarks
- * `responses-client.worker.ts` mounts `self.onmessage` at top level, so the host
+ * `system-two.worker.ts` mounts `self.onmessage` at top level, so the host
  * must never import it; both sides import here instead. Types plus one
  * side-effect-free key constant — the key is the only runtime value, so both
  * sides agree on the `setEnvironmentData` / `getEnvironmentData` key without
@@ -19,7 +19,7 @@ import type {
   ReasoningEffort,
   Truncation,
   Usage,
-} from './responses-client.schemas.ts'
+} from './system-two.schemas.ts'
 
 export type { ReasoningEffort }
 
@@ -28,7 +28,7 @@ export type { ReasoningEffort }
  * at provisioning time — it is never model-facing and never crosses the wire
  * in a request message (the host delivers the whole map via environment data).
  */
-export type ModelEndpointConfig = {
+export type SystemTwoEndpointConfig = {
   /**
    * The full base URL the operation path appends to (`/responses`) — no
    * `/v1/` prefix is added.
@@ -39,16 +39,16 @@ export type ModelEndpointConfig = {
 }
 
 /** Provider label → endpoint config. Delivered to the behavior via environment data. */
-export type ModelEndpoints = Record<string, ModelEndpointConfig>
+export type SystemTwoEndpoints = Record<string, SystemTwoEndpointConfig>
 
 /** Environment-data key for the provisioned endpoint map (host seeds, worker reads). */
-export const MODEL_ENDPOINTS_KEY = 'behavioral:model-endpoints'
+export const SYSTEM_TWO_ENDPOINTS_KEY = 'behavioral:model-endpoints'
 
 // ---------------------------------------------------------------------------
 // model-respond — input / output
 // ---------------------------------------------------------------------------
 
-export type ModelRespondInput = {
+export type SystemTwoInput = {
   provider: string
   modelId: string
   input: InputItem[]
@@ -70,7 +70,7 @@ export type ModelRespondInput = {
  * streamed event list when `stream` is set). Errors are data, never throws:
  * `{ isError: true, message }` for unknown provider / transport / HTTP failure.
  */
-export type ModelRespondOutput =
+export type SystemTwoOutput =
   | {
       items: OutputItem[]
       status: string

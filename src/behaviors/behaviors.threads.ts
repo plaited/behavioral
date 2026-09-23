@@ -3,33 +3,63 @@ import { CONTROLLER_DETAIL_SCHEMAS } from '../controller/controller.schemas.ts'
 
 /**
  * The composition's root thread pack — the default threads, always mounted
- * (independent of the family allow-list).
+ * (independent of the family allow-list) — plus the guard generator every
+ * mounted family reuses.
  *
  * @remarks
- * The guard thread forbids malformed `ui_*` messages at the schema boundary: it
- * `block`s every controller message whose detail does not conform to its
- * {@link CONTROLLER_DETAIL_SCHEMAS} entry (`detailMatch: false` matches
- * non-conforming details). Both directions are covered by the one registry —
- * `ui_render`/`ui_attrs`/… (egress) and `ui_event`/`ui_form_submit`/… (ingress).
- * A blocked message is never selected, so the rejection is visible in the
- * `frontier`/`pending_bids` traces; valid messages pass untouched.
+ * A guard thread `block`s every message whose `detail` does not conform to its
+ * schema (`detailMatch: false` matches non-conforming details). A blocked
+ * message is never selected, so the rejection is visible in the
+ * `frontier`/`pending_bids` traces; valid messages pass untouched. A block-only
+ * thread stays pending forever (nothing resumes it), so its block declaration
+ * is active every super-step.
  *
- * A block-only thread stays pending forever (nothing resumes it), so its block
- * declaration is active every super-step.
+ * `guardThreads` is the one generator: the controller vocabulary
+ * (`ui_render`/`ui_event`/…) and every mounted family's request/cancel/result
+ * events derive their guard rules from the same schema homes that `useBehavior`
+ * compiles — validation lives in threads, and no hand-maintained guard list
+ * can drift from the wire contract.
  *
  * @packageDocumentation
  */
 
-const invalidControllerMessages = Object.entries(CONTROLLER_DETAIL_SCHEMAS).map(([type, schema]) => ({
-  type,
-  detailSchema: schema as Record<string, unknown>,
-  detailMatch: false,
-}))
+/** One guard rule's schema home: the event `type` and the JSON schema for its `detail`. */
+export type GuardEntry = {
+  type: string
+  detailSchema: Record<string, unknown>
+}
 
-/** The root pack: default threads mounted by every composition. */
-export const behaviorsThreads: Thread[] = [
+/** Build one guard thread that blocks every message whose detail fails its entry's schema. */
+export const guardThreads = (label: string, entries: GuardEntry[]): Thread[] => [
   {
-    label: 'guard:controller-schema',
-    rules: [{ block: invalidControllerMessages }],
+    label,
+    rules: [
+      {
+        block: entries.map((entry) => ({
+          type: entry.type,
+          detailSchema: entry.detailSchema,
+          detailMatch: false,
+        })),
+      },
+    ],
   },
 ]
+
+/**
+ * Extract guard entries from a family's three event schemas (the same object
+ * `useBehavior` compiles): the `type` constant and the `detail` sub-schema.
+ */
+export const eventGuardEntries = (schemas: { request: unknown; cancel: unknown; result: unknown }): GuardEntry[] =>
+  [schemas.request, schemas.cancel, schemas.result].map((schema) => {
+    const properties = (schema as { properties?: Record<string, unknown> }).properties ?? {}
+    const type = (properties.type as { const?: string } | undefined)?.const
+    if (type === undefined) throw new Error('event schema is missing properties.type.const')
+    return { type, detailSchema: (properties.detail as Record<string, unknown> | undefined) ?? {} }
+  })
+
+const invalidControllerMessages: GuardEntry[] = Object.entries(CONTROLLER_DETAIL_SCHEMAS).map(
+  ([type, detailSchema]) => ({ type, detailSchema: detailSchema as Record<string, unknown> }),
+)
+
+/** The root pack: default threads mounted by every composition. */
+export const behaviorsThreads: Thread[] = guardThreads('guard:controller-schema', invalidControllerMessages)

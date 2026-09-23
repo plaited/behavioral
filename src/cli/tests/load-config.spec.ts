@@ -23,8 +23,8 @@ describe('loadConfig', () => {
   })
 
   test('a present config file yields its default export', async () => {
-    await withConfig(`export default { behaviors: ['responses'] }`, async (file) => {
-      expect(await loadConfig(file)).toEqual({ behaviors: ['responses'] })
+    await withConfig(`export default { behaviors: ['shell'] }`, async (file) => {
+      expect(await loadConfig(file)).toEqual({ behaviors: ['shell'] })
     })
   })
 
@@ -43,9 +43,7 @@ describe('loadConfig', () => {
 
   test('rejects an unknown behavior name with the allowed set', async () => {
     await withConfig(`export default { behaviors: ['nope'] }`, async (file) => {
-      await expect(loadConfig(file)).rejects.toThrow(
-        /unknown behavior "nope".*expected one of: shell, responses, store, mcp/,
-      )
+      await expect(loadConfig(file)).rejects.toThrow(/unknown behavior "nope".*expected one of: shell, store, mcp/)
     })
   })
 

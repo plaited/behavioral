@@ -6,9 +6,9 @@ import { keyMirror } from '../utils.ts'
  * wire layer's registry.
  */
 export const BEHAVIOR_MESSAGE_KINDS = keyMirror(
-  'response_request',
-  'response_request_result',
-  'response_cancel',
+  'system_two_request',
+  'system_two_request_result',
+  'system_two_cancel',
   'shell_request',
   'shell_request_result',
   'shell_cancel',

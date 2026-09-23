@@ -12,7 +12,7 @@ import type { bProgram } from './b-program.ts'
 export type BehavioralConfig = Parameters<typeof bProgram>[0]
 
 /** The selectable behaviors a config may enable (mirrors the `Behavior` union). */
-const KNOWN_BEHAVIORS: readonly string[] = ['shell', 'responses', 'store', 'mcp']
+const KNOWN_BEHAVIORS: readonly string[] = ['shell', 'store', 'mcp']
 
 const invalid = (configPath: string, detail: string): never => {
   throw new Error(`invalid config at ${configPath}: ${detail}`)
@@ -37,7 +37,7 @@ const validate = (value: unknown, configPath: string): BehavioralConfig => {
       )
     }
   }
-  for (const key of ['shell', 'store'] as const) {
+  for (const key of ['shell', 'store', 'systemTwo'] as const) {
     const override = config[key]
     if (override !== undefined && typeof override !== 'function') {
       const got = override === null ? 'null' : typeof override

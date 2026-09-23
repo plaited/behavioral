@@ -1,25 +1,21 @@
 /**
- * Model worker — executes one Open Responses call (`/responses`) per
- * `response_request` event and returns a single terminal
- * `response_request_result` event.
+ * The bundled System Two provider — the DEFAULT Open Responses implementation.
  *
  * @remarks
- * Spawned by URL (never imported) and speaks the behavioral event wire:
- * `response_request` / `response_cancel` in, `response_request_result` out,
- * with any request `space` echoed on the result. `detail.input` is validated
- * against `validateModelRespondInput` (the one home, in
- * `responses-client.schemas.ts`); stream events are assembled internally and
- * never posted — no consumer exists (MINIMAL: router-published delta trace
- * when one does).
+ * This file is a provider ENTRY: it defines `openResponsesRespond` (one
+ * `/responses` call per input) and hands it to `configSystemTwo`, which wires
+ * the process (inbound lane, result envelope, cancel/timeout). A third party
+ * writes their own entry the same way with a different `respond`; the wire
+ * contract does not change.
  *
- * Endpoint config (URL + resolved API key + extra headers) is delivered via
- * `setEnvironmentData` before the worker is spawned and read once at startup
- * with `getEnvironmentData` — secrets never enter a request message or the
+ * `detail.input` is validated against `validateSystemTwoInput` inside
+ * `configSystemTwo`; stream events are assembled internally and never posted —
+ * no consumer exists (MINIMAL: router-published delta trace when one does).
+ *
+ * Endpoint config (URLs + resolved API keys + extra headers) is delivered via
+ * environment data before the process is spawned and read once by
+ * `configSystemTwo` — secrets never enter a request message or the
  * model-facing schema.
- *
- * The worker holds no orchestration: it is a dumb per-request executor.
- * Recursive/parallel model calls (RLM) are decisions the behavioral threads
- * make by issuing more requests; the worker just answers each one.
  *
  * MINIMAL: no request-level concurrency cap — the host/threads decide how many
  * calls to have in flight. Upgrade path: an executor-side queue if a runaway
@@ -28,14 +24,7 @@
  * @packageDocumentation
  */
 
-import type { JsonObject } from '../behavioral/behavioral.types.ts'
-import { BEHAVIOR_MESSAGE_KINDS } from './behaviors.constants.ts'
-import {
-  type ResponseRequestEvent,
-  validateResponseCancelEvent,
-  validateResponseRequestEvent,
-} from './behaviors.types.ts'
-import { emit, envData, wireInbound } from './process-lane.ts'
+import { configSystemTwo, type SystemTwoRespond } from './config-system-two.ts'
 import {
   ErrorSchema,
   type KnownStreamEvent,
@@ -48,21 +37,8 @@ import {
   StreamEventLaxSchema,
   type Usage,
   UsageSchema,
-  validateModelRespondInput,
-} from './responses-client.schemas.ts'
-import {
-  MODEL_ENDPOINTS_KEY,
-  type ModelEndpointConfig,
-  type ModelEndpoints,
-  type ModelRespondInput,
-  type ModelRespondOutput,
-} from './responses-client.types.ts'
-
-// ---------------------------------------------------------------------------
-// Endpoint config (environment data — seeded by the host before spawn)
-// ---------------------------------------------------------------------------
-
-const endpoints = (envData(MODEL_ENDPOINTS_KEY) ?? {}) as ModelEndpoints
+} from './system-two.schemas.ts'
+import type { SystemTwoEndpointConfig, SystemTwoInput, SystemTwoOutput } from './system-two.types.ts'
 
 // ---------------------------------------------------------------------------
 // Wire helpers
@@ -70,18 +46,13 @@ const endpoints = (envData(MODEL_ENDPOINTS_KEY) ?? {}) as ModelEndpoints
 
 const joinUrl = (base: string, path: string): string => `${base.replace(/\/$/, '')}${path}`
 
-const buildHeaders = (endpoint: ModelEndpointConfig): Record<string, string> => ({
+const buildHeaders = (endpoint: SystemTwoEndpointConfig): Record<string, string> => ({
   'content-type': 'application/json',
   ...(endpoint.apiKey !== undefined && { authorization: `Bearer ${endpoint.apiKey}` }),
   ...endpoint.headers,
 })
 
-const FETCH_TIMEOUT_MS = 60_000
-
-/**
- * Structured error body ({ error: { code, message } }) on a non-2xx response,
- * per the spec. Falls back to the raw body text when the shape doesn't match.
- */
+/** Structured error body ({ error: { code, message } }) on a non-2xx response. */
 const describeHttpError = async (res: Response): Promise<string> => {
   let detail = ''
   try {
@@ -111,7 +82,7 @@ const NAMED_INPUT_KEYS = new Set([
   'reasoningEffort',
 ])
 
-const buildRespondBody = (input: ModelRespondInput): Record<string, unknown> => {
+const buildRespondBody = (input: SystemTwoInput): Record<string, unknown> => {
   const body: Record<string, unknown> = { model: input.modelId, input: input.input }
   // Passthrough: spec params we do not name + endpoint extensions cross the
   // wire verbatim. Named mappings are assigned after, so they win collisions.
@@ -160,7 +131,7 @@ const responseResourceSchema = makeSchema<ResponseResource>({
 })
 
 // ---------------------------------------------------------------------------
-// SSE streaming — parse frames incrementally and post a DELTA per event
+// SSE streaming — parse frames incrementally and assemble the terminal result
 // ---------------------------------------------------------------------------
 
 type StreamOutcome =
@@ -230,7 +201,7 @@ const streamEvents = async (
 }
 
 /** Assemble items/status/usage/error from the terminal stream events. */
-const assembleResponse = (events: OpenResponsesStreamEvent[], knownEvents: KnownStreamEvent[]): ModelRespondOutput => {
+const assembleResponse = (events: OpenResponsesStreamEvent[], knownEvents: KnownStreamEvent[]): SystemTwoOutput => {
   const items: OutputItem[] = []
   let status = 'completed'
   let usage: Usage | undefined
@@ -260,36 +231,10 @@ const assembleResponse = (events: OpenResponsesStreamEvent[], knownEvents: Known
 }
 
 // ---------------------------------------------------------------------------
-// Execution
+// The provider: one Open Responses call per input
 // ---------------------------------------------------------------------------
 
-type ActiveRequest = {
-  controller: AbortController
-  /** First stop reason wins. */
-  reason: 'canceled' | 'timeout' | null
-  timer: ReturnType<typeof setTimeout>
-}
-
-/** In-flight requests, keyed by correlation id. */
-const active = new Map<string, ActiveRequest>()
-
-const postResult = (id: string, result: unknown, space?: string): void => {
-  emit({
-    type: BEHAVIOR_MESSAGE_KINDS.response_request_result,
-    // The uniform envelope: { isError: true, … } → error branch; the model
-    // respond output → ok branch.
-    detail: ((): JsonObject & { id: string } => {
-      if (typeof result === 'object' && result !== null && 'isError' in result) {
-        const { isError, ...rest } = result as { isError: boolean } & JsonObject
-        return { id, ok: false, error: { code: 'error', ...(isError ? rest : {}) } }
-      }
-      return { id, ok: true, result: (result ?? {}) as JsonObject }
-    })(),
-    ...(space === undefined ? {} : { space }),
-  })
-}
-
-const runRespond = async (input: ModelRespondInput, request: ActiveRequest): Promise<ModelRespondOutput> => {
+const openResponsesRespond: SystemTwoRespond = async (input, { endpoints, signal }) => {
   const endpoint = endpoints[input.provider]
   if (!endpoint) return { isError: true, message: `[Error: unknown provider "${input.provider}"]` }
   try {
@@ -297,7 +242,7 @@ const runRespond = async (input: ModelRespondInput, request: ActiveRequest): Pro
       method: 'POST',
       headers: buildHeaders(endpoint),
       body: JSON.stringify(buildRespondBody(input)),
-      signal: request.controller.signal,
+      signal,
     })
     if (!res.ok) return { isError: true, message: await describeHttpError(res) }
     if (input.stream === true && (res.headers.get('content-type') ?? '').includes('text/event-stream')) {
@@ -316,67 +261,14 @@ const runRespond = async (input: ModelRespondInput, request: ActiveRequest): Pro
       ...(parsed.data.error != null && { error: parsed.data.error }),
     }
   } catch (error) {
-    if (request.reason === 'timeout')
-      return { isError: true, message: `model request timed out after ${FETCH_TIMEOUT_MS}ms` }
-    if (request.reason === 'canceled') return { isError: true, message: 'model request canceled' }
+    // An abort (timeout/cancel) propagates so configSystemTwo maps the stop
+    // reason to its message; any other throw is transport/parse error data.
+    if (signal.aborted) throw error
     return { isError: true, message: error instanceof Error ? error.message : String(error) }
   }
 }
 
-/** Route one inbound event. */
-const handleInbound = async (message: unknown): Promise<void> => {
-  if (validateResponseCancelEvent(message)) {
-    const request = active.get(message.detail.id)
-    if (request !== undefined && request.reason === null) {
-      request.reason = 'canceled'
-      request.controller.abort()
-    }
-    return
-  }
-  // Events failing the shared schema have no correlation id to report to and
-  // are dropped — the router only forwards schema-valid events, so this is
-  // defense in depth at the process boundary.
-  if (!validateResponseRequestEvent(message)) return
-  const event = message as ResponseRequestEvent
-  const { id, input } = event.detail
-  // Input that fails the boundary is error data, not a throw: the id is valid,
-  // so the caller learns why nothing ran.
-  if (!validateModelRespondInput(input)) {
-    const detail = validateModelRespondInput.errors?.map((e) => `${e.instancePath} ${e.message}`).join('; ')
-    postResult(id, { isError: true, message: `invalid input: ${detail}` }, event.space)
-    return
-  }
-
-  const controller = new AbortController()
-  const request: ActiveRequest = {
-    controller,
-    reason: null,
-    timer: setTimeout(() => {
-      if (request.reason === null) {
-        request.reason = 'timeout'
-        controller.abort()
-      }
-    }, FETCH_TIMEOUT_MS),
-  }
-  active.set(id, request)
-
-  // `respond` never rejects: any worker-side throw becomes result data.
-  try {
-    const result = await runRespond(input, request)
-    postResult(id, result, event.space)
-  } catch (err) {
-    postResult(id, { isError: true, message: err instanceof Error ? err.message : String(err) }, event.space)
-  } finally {
-    clearTimeout(request.timer)
-    active.delete(id)
-  }
-}
-
-// The wire is the behavioral event vocabulary, validated with the shared
-// schemas — the trust boundary for anything crossing into this process.
+// The process entry: wire only when spawned (an in-process import wires nothing).
 if (import.meta.main) {
-  // Standalone (spawned process) — wire the stdio line lane. An in-process
-  // import (the composition's frontier embed) wires nothing: the host's
-  // stdin is never touched.
-  wireInbound((message) => handleInbound(message))
+  configSystemTwo(openResponsesRespond)
 }
