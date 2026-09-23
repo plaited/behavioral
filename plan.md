@@ -92,6 +92,21 @@ guard and the serve egress path are inert. Sketch before building:
   entries. The interface pack keeps its `Next` slot; init's ordering vs it is
   the pilot's call.
 
+### 2026-09-23 — result-lane visibility: the pump re-enters, the guard rejects
+- **Division/A** — the `useBehavior` pump discards only what cannot be this
+  lane's event (non-JSON, non-object payloads, any type other than the
+  family's result kind). Schema validity of the detail is the family guard's
+  job: a parsed-but-invalid result re-enters as an engine event and is blocked
+  visibly (frontier/pending_bids/deadlock) instead of vanishing.
+- **Lane seal preserved/B** — the old full-schema pump gate was replaced by a
+  type-const gate, not removed: a family process still cannot inject
+  request/cancel events into its own or another family's lane. The full-schema
+  check had conflated the seal with detail validity.
+- **Note** — bProgram mounts guards only for the systemOne/systemTwo overrides
+  today; shell/store/mcp results that are schema-invalid re-enter and appear
+  as selected events (visible, unmatched) rather than guard-blocked. Mounting
+  guards for the default families is the natural follow-up if wanted.
+
 ### 2026-09-23 — init: interactive default, no --interactive flag
 - **Shape/B** — `behavioral init` with no input at a TTY runs the prompt tour;
   JSON positional or piped stdin is the agent path (the framework's existing
@@ -105,9 +120,9 @@ guard and the serve egress path are inert. Sketch before building:
 
 ## Open Questions
 
-- **Sequencing** — the deferred result-lane visibility fix (re-enter
-  parsed-but-invalid results so the mounted result guard blocks them visibly);
-  then the interface pack (`ui_*` producers).
+- **Sequencing** — the interface pack (`ui_*` producers) is next up; guard
+  mounts for the default families (shell/store/mcp) are an optional
+  follow-up.
 - **Where the interface pack lives** — the root pack (`behaviors.threads.ts`,
   always mounted) vs a family-scoped pack (e.g. a `ui.threads.ts`).
 - **How much view-generation policy is thread-authored vs model-authored** — the
