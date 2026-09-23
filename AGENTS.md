@@ -70,7 +70,7 @@ depend on; if a `src/<feature>` CLI command changed, run that feature's tests pl
 tests; if only `src/controller/` changed, run the controller test surfaces; if shared code changed
 and the impact is broad or unclear, expand coverage until the affected surface is credibly covered.
 
-`docs:` and `chore:` commits may skip executable validation when they do not change faculty
+`docs:` and `chore:` commits may skip executable validation when they do not change
 behavior.
 
 ## Directory Boundaries
