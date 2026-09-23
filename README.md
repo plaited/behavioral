@@ -69,8 +69,8 @@ is blocked by the faculty guard — visibly, in the traces.
 
 **System faculties are endpoint-carrying overrides.** `systemOne` and `systemTwo`
 have no defaults: without an endpoint they are simply absent — no process, no
-route. The config surface (`configSystemOne`/`configSystemOne(respond)` for a
-custom provider entry, `useSystemOne({ endpoint })`/`useSystemTwo({ endpoints })`
+route. The config surface (`configSystemOne(respond)`/`configSystemTwo(respond)`
+for a custom provider entry, `useSystemOne({ endpoint })`/`useSystemTwo({ endpoints })`
 for the host) delivers endpoint config via environment data; secrets never cross
 the wire.
 
