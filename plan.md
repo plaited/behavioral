@@ -5,7 +5,8 @@ irreducible coordination floor — the behavioral engine (`behavioral()`) plus t
 agent loop (turn cycle, stop condition, compaction gate, tool dispatch bridge;
 Phase 1) — and almost no policy rules. Improvement happens by composing plugins:
 everything above the kernel is a plugin (`plugin.json`), and the agent grows as
-behaviors (threads + handlers), tools, and skills are added to or removed from a
+threads, behaviors (the spawned capability families), and skills
+are added to or removed from a
 space. The self-improving loop (Phase 5.5) is the agent authoring candidate
 behaviors/skills, verifying them, and promoting them into a space — which is
 plugin mutation, observed and gated. This is the neuro-symbolic harness from
@@ -153,6 +154,25 @@ ingress + a plugin-shipped behavior surface.
      scan/catalog (76c0cafd), manifests (aff0fc18), links recipes (8d56f6dd),
      the conventions skill, docs sweep. Remaining: the deletion sweep (fleet 6 → 0)
      and the governor thread (plugin admission). -->
+
+### 2026-09-21 — ruled: the families are BEHAVIORS (the naming ruling)
+
+- **THE NAME IS "BEHAVIOR" (pilot):** the spawned capability families
+  (shell, store, responses, mcp) are the agent's behaviors — each one a
+  thing the agent DOES. Domain-true to behavioral programming itself (the
+  behavior is the unit of what the system does), and follows the b-dialect
+  (b-threads are the engine's synchronization units; behaviors are its
+  capability units).
+- **THE COLLISION CLEARED (pilot: "that collision is out dated"):** the
+  stale plan framing "behaviors (threads + handlers)" is retired — handlers
+  are gone from the composition surface, threads arrive via packs. Threads
+  are threads; behaviors are the spawned capabilities. No ambiguity
+  remains.
+- **THE SURFACE (pilot-directed):** `workers` param on useBehavioral →
+  `behaviors` (line 83: the allow-list), `WorkerFamily` → `Behavior`,
+  family prose follows. Scope question pending: filenames (*.worker.ts),
+  the src/workers/ directory, and the `worker_error` WIRE EVENT (a wire
+  rename touches the packs + engine + specs — atomic-commit material).
 
 ### 2026-09-21 — ruled (pilot): Workers die COMPLETELY — no dual-mode lane, one cut
 
