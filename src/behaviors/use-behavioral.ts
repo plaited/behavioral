@@ -1,6 +1,6 @@
 import { TRACE_MESSAGE_KINDS } from '../behavioral/behavioral.constants.ts'
 import { behavioral } from '../behavioral/behavioral.ts'
-import type { BPEvent, Thread, Trace, TraceListener, Trigger } from '../behavioral/behavioral.types.ts'
+import type { BPEvent, JsonObject, SelectionTrace, Thread, Trace, Trigger } from '../behavioral/behavioral.types.ts'
 import { BEHAVIOR_MESSAGE_KINDS } from './behaviors.constants.ts'
 import {
   validateFrontierRequestEvent,
@@ -40,8 +40,16 @@ import { useProcess } from './use-process.ts'
  *
  * `behaviors` is the allow-list (unset = all four behaviors on); `shell` and
  * `store` are the two instance overrides — pre-curried useProcess returns
- * for host-constructed families (sandboxed shell, durable store); the host
- * owns those processes' lifecycles.
+ * for host-constructed families (sandboxed shell, durable store). The
+ * composition invokes every factory and owns the resulting process
+ * lifecycles, overrides included (the host hands over a factory, not a
+ * handle).
+ *
+ * The lifecycle is explicit: construction wires the engine, families, and
+ * routes but does NOT flush the deferred pack mounts. The host subscribes
+ * (`runtime.useTrace`) first, then calls `runtime.start()` — the boot
+ * cascade runs after subscribers attach, so boot traces are observable.
+ * `runtime.trigger` auto-starts (idempotent) for trigger-only hosts.
  */
 
 /** The selectable worker families (engine and frontier are never selectable — always on). */
@@ -54,11 +62,7 @@ const frontierFamily = (
   send: (event: BPEvent) => void
   gate: (event: BPEvent) => boolean
 } => {
-  const wire = (event: {
-    type: string
-    detail: import('../behavioral/behavioral.types.ts').JsonObject & { id: string }
-    space?: string
-  }): void => {
+  const wire = (event: { type: string; detail: JsonObject & { id: string }; space?: string }): void => {
     addThreads([
       {
         ...(event.space === undefined ? {} : { space: event.space }),
@@ -78,14 +82,10 @@ const frontierFamily = (
 }
 
 export const useBehavioral = ({
-  traceListener,
-  useTrigger,
   behaviors,
   shell: shellOverride,
   store: storeOverride,
 }: {
-  traceListener: TraceListener
-  useTrigger: (trigger: Trigger) => void
   /** Allow-list: unset = all default behaviors on; set = only the named behaviors spawn. */
   behaviors?: Behavior[]
   /** The shell family override: a pre-curried useProcess return (sandboxed shell). */
@@ -98,12 +98,12 @@ export const useBehavioral = ({
 
   // ── The engine, in-process ────────────────────────────────────────────────
 
-  const program = behavioral()
+  const { addThread, step, trigger: engineTrigger, useTrace } = behavioral()
 
   /** The in-process re-entry law: addThread + the trailing step. */
   const addThreads = (threads: Thread[]): void => {
-    for (const thread of threads) program.addThread(thread)
-    program.step()
+    for (const thread of threads) addThread(thread)
+    step()
   }
 
   // Boot-order law: pack mounts (and any family construction's thread
@@ -208,10 +208,9 @@ export const useBehavioral = ({
 
   // ── The engine pump: traces out, gated events to their family lanes ─────
 
-  program.useTrace((trace: Trace) => {
-    void traceListener(trace)
+  useTrace((trace: Trace) => {
     if (trace.kind !== TRACE_MESSAGE_KINDS.selection) return
-    const candidate = (trace as import('../behavioral/behavioral.types.ts').SelectionTrace).selected
+    const candidate = (trace as SelectionTrace).selected
     const event = { type: candidate.type, detail: candidate.detail, space: candidate.space } as BPEvent
     const family = families[event.type]
     if (family === undefined) return
@@ -221,30 +220,42 @@ export const useBehavioral = ({
     family.send(event)
   })
 
-  // The deferred mounts flush now — pump subscribed, routes registered: the
-  // boot cascade (scan boots → shell_requests → family processes) runs in a
-  // world that can route it. Re-entries go live from here on.
-  mounting = false
-  addThreads(pendingThreads)
+  // ── The explicit start: flush the deferred pack mounts ────────────────
 
-  // Host ingress: useTrigger admits one external event through the program.
-  useTrigger(((event: BPEvent) => {
-    program.trigger(event)
-  }) as Trigger)
+  // Construction wires the pump and routes but does not flush. The host
+  // subscribes (useTrace) FIRST, then calls start() — the boot cascade
+  // (scan boots → shell_requests → family processes) runs in a world whose
+  // subscribers are attached, so boot traces are observable. Idempotent;
+  // `trigger` calls it so trigger-only hosts still boot on their first event.
+  let started = false
+  const start = (): void => {
+    if (started) return
+    started = true
+    mounting = false
+    addThreads(pendingThreads)
+  }
+
+  // Ingress: the returned trigger flushes the boot cascade first (idempotent).
+  const trigger: Trigger = (event) => {
+    start()
+    engineTrigger(event)
+  }
 
   // ── The runtime handle ────────────────────────────────────────────────────
 
-  // Hosts terminate what the composition spawned. Host-provided overrides
-  // (shell/store processes) are NOT terminated here — the host owns those
-  // (the override ruling's lifecycle half). The engine and frontier are
-  // in-process: nothing to terminate, they end with the host process.
+  // The composition owns every family process it invoked — overrides
+  // included: the host hands over a curried factory, the composition holds
+  // the only `terminate` handle. (The engine and frontier are in-process:
+  // nothing to terminate, they end with the host process.)
   return {
-    program,
+    trigger,
+    useTrace,
+    start,
     terminate: (): void => {
       bindEmit(null)
-      if (shellOverride === undefined) shell.terminate()
+      shell.terminate()
       responses.terminate()
-      if (storeOverride === undefined) store.terminate()
+      store.terminate()
       mcp.terminate()
     },
   }

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { TRACE_MESSAGE_KINDS } from '../../behavioral/behavioral.constants.ts'
-import type { SelectionTrace, Trace, Trigger } from '../../behavioral/behavioral.types.ts'
+import type { SelectionTrace, Trace } from '../../behavioral/behavioral.types.ts'
 import { BEHAVIOR_MESSAGE_KINDS } from '../behaviors.constants.ts'
 import {
   validateShellCancelEvent,
@@ -14,12 +14,18 @@ import { startMcpServer } from './mcp-server-fixture.ts'
 /**
  * useBehavioral — the runtime composition — through its REAL surface: the
  * hook spawns every family itself (engine + frontier router-owned, always
- * on; mcp/shell/responses/store default-on, pruned by the `workers`
- * allow-list). The host wires ingress (useTrigger) and observation
- * (traceListener) only; configuration flows through env-data (store:
- * :memory: by default, STORE_DB_PATH_KEY for durable). `shell` is the one
- * instance-level override: the pre-curried useProcess return substituting
- * the default shell family.
+ * on; mcp/shell/responses/store default-on, pruned by the `behaviors`
+ * allow-list). The host attaches ingress and observation through the
+ * returned handle — `runtime.trigger(...)` and `runtime.useTrace(...)`.
+ * `shell` is the one instance-level override: the pre-curried useProcess
+ * return substituting the default shell family.
+ *
+ * Lifecycle note: the composition does NOT flush its deferred pack mounts at
+ * construction. The host subscribes (`runtime.useTrace`), then calls
+ * `runtime.start()` — the flush runs after subscribers attach, so boot-cascade
+ * selection traces (e.g. the skill-scan `shell_request`) are observable.
+ * `runtime.trigger` auto-starts (idempotent), so a host that never calls
+ * `start()` still boots on its first event.
  *
  * The default thread packs are family-shipped: the shell pack
  * (shell.threads.ts — skill/plugin scans + links) mounts with shell+store
@@ -47,19 +53,25 @@ const storeRequest = (traces: Trace[], op: string, collection: string): Selectio
     return detail?.op === op && detail?.input?.collection === collection
   })
 
+/** Construct the composition, attach observation, then start (the boot flush). */
+const startRuntime = (options: Parameters<typeof useBehavioral>[0] = {}) => {
+  const traces: Trace[] = []
+  const runtime = useBehavioral(options)
+  runtime.useTrace((trace) => {
+    traces.push(trace)
+  })
+  runtime.start()
+  return { runtime, traces }
+}
+
 describe('useBehavioral — the runtime composition', () => {
   test('the shell pack ships with the shell family: the skill scan self-starts through the composition', async () => {
-    const traces: Trace[] = []
-    const runtime = useBehavioral({
-      traceListener: (trace) => {
-        traces.push(trace)
-      },
-      useTrigger: () => {},
-    })
+    const { runtime, traces } = startRuntime()
     try {
-      // The skill scan boot is part of the shell pack — wiring the
-      // composition is enough to start it. Its shell_request (the scan
-      // recipe) fires with no host input at all…
+      // The skill scan boot is part of the shell pack — starting the
+      // composition is enough to start it (no host trigger). Because the
+      // subscriber attaches BEFORE `start()`, the boot selection trace is
+      // observable…
       await waitForTraces(traces, (s) =>
         s.some(
           (t) =>
@@ -81,19 +93,9 @@ describe('useBehavioral — the runtime composition', () => {
   })
 
   test('a full round-trip via the default packs: links_request → run op → result re-entry', async () => {
-    const traces: Trace[] = []
-    let trigger: Trigger | undefined
-    const runtime = useBehavioral({
-      traceListener: (trace) => {
-        traces.push(trace)
-      },
-      useTrigger: (t) => {
-        trigger = t
-      },
-    })
+    const { runtime, traces } = startRuntime()
     try {
-      expect(trigger).toBeDefined()
-      trigger!({
+      runtime.trigger({
         type: 'links_request',
         detail: { id: 'l1', recipe: 'extract-links', input: { markdown: 'See [a](a.ts)' } },
       })
@@ -121,21 +123,11 @@ describe('useBehavioral — the runtime composition', () => {
   })
 
   test('the mcp spine ships with the mcp family: granted ingress fires the store get', async () => {
-    const traces: Trace[] = []
-    let trigger: Trigger | undefined
-    const runtime = useBehavioral({
-      traceListener: (trace) => {
-        traces.push(trace)
-      },
-      useTrigger: (t) => {
-        trigger = t
-      },
-    })
+    const { runtime, traces } = startRuntime()
     try {
-      expect(trigger).toBeDefined()
       // No capture exists, so the get returns nothing and the spine waits —
       // but the GET itself is the observable: the spine is mounted.
-      trigger!({ type: 'mcp_authorization_granted', detail: { id: 'none' } })
+      runtime.trigger({ type: 'mcp_authorization_granted', detail: { id: 'none' } })
       await waitForTraces(traces, (s) => storeRequest(s, 'get', 'mcp-calls') !== undefined)
       const get = storeRequest(selectionsOf(traces), 'get', 'mcp-calls')
       expect((get?.selected.detail as { input?: { collection?: string } } | undefined)?.input?.collection).toBe(
@@ -146,15 +138,8 @@ describe('useBehavioral — the runtime composition', () => {
     }
   })
 
-  test('the workers allow-list prunes families: without shell, the shell pack does not mount', async () => {
-    const traces: Trace[] = []
-    const runtime = useBehavioral({
-      behaviors: ['responses'],
-      traceListener: (trace) => {
-        traces.push(trace)
-      },
-      useTrigger: () => {},
-    })
+  test('the behaviors allow-list prunes families: without shell, the shell pack does not mount', async () => {
+    const { runtime, traces } = startRuntime({ behaviors: ['responses'] })
     try {
       // No shell → no scan boot, no shell_request ever. Settle past any
       // boot cascade the packs could have run.
@@ -168,20 +153,10 @@ describe('useBehavioral — the runtime composition', () => {
   })
 
   test('the mcp family responds through the composition (real loopback server)', async () => {
-    const traces: Trace[] = []
+    const { runtime, traces } = startRuntime()
     const server = await startMcpServer()
     const loopback = Bun.serve({ port: 0, fetch: (req) => server.fetch(req.url, req) })
-    let trigger: Trigger | undefined
-    const runtime = useBehavioral({
-      traceListener: (trace) => {
-        traces.push(trace)
-      },
-      useTrigger: (t) => {
-        trigger = t
-      },
-    })
     try {
-      expect(trigger).toBeDefined()
       // Drive the mcp family via the spine's replay path: granted → get →
       // (empty capture) → nothing. Instead, assert family presence through
       // a direct trigger-shaped caller: the composition mounts the spine,
@@ -190,7 +165,7 @@ describe('useBehavioral — the runtime composition', () => {
       // covered by the mcp worker spec; composition-level assertion is the
       // spine mount (previous test). This test pins: the composition does
       // not crash when mcp is default-on with a live server present.
-      trigger!({ type: 'mcp_authorization_required_probe', detail: {} })
+      runtime.trigger({ type: 'mcp_authorization_required_probe', detail: {} })
       await Bun.sleep(200)
       const types = new Set(selectionsOf(traces).map((t) => t.selected.type))
       expect(types.has(BEHAVIOR_MESSAGE_KINDS.mcp_request)).toBe(false) // no capture → no replay
@@ -203,8 +178,6 @@ describe('useBehavioral — the runtime composition', () => {
   })
 
   test('shell overrides the default family — a host-constructed shell takes the route', async () => {
-    const traces: Trace[] = []
-    let trigger: Trigger | undefined
     const hostShell = useProcess({
       command: ['bun', 'run', 'tests/fixtures/probe.proc.ts'],
       name: 'shell',
@@ -213,22 +186,13 @@ describe('useBehavioral — the runtime composition', () => {
       validateEventCancel: validateShellCancelEvent,
       validateResultEvent: validateShellRequestResultEvent,
     })
-    const runtime = useBehavioral({
-      traceListener: (trace) => {
-        traces.push(trace)
-      },
-      useTrigger: (t) => {
-        trigger = t
-      },
-      shell: hostShell,
-    })
+    const { runtime, traces } = startRuntime({ shell: hostShell })
     try {
-      expect(trigger).toBeDefined()
       // A raw shell_request (root ingress — no pack involvement): the
       // satellite fixture answers with {ok:true, value:{op}} — a shape the
       // REAL shell never produces. Its arrival proves the override took the
       // shell route. (The pack rides the host's threads — [] here by choice.)
-      trigger!({
+      runtime.trigger({
         type: BEHAVIOR_MESSAGE_KINDS.shell_request,
         detail: { id: 'ov1', label: 'probe', input: { op: 'echo' } },
       })
@@ -245,8 +209,6 @@ describe('useBehavioral — the runtime composition', () => {
   })
 
   test('a crashed satellite re-enters one worker_error event', async () => {
-    const traces: Trace[] = []
-    let trigger: Trigger | undefined
     const hostShell = useProcess({
       command: ['bun', 'run', 'tests/fixtures/probe.proc.ts'],
       name: 'shell',
@@ -255,19 +217,10 @@ describe('useBehavioral — the runtime composition', () => {
       validateEventCancel: validateShellCancelEvent,
       validateResultEvent: validateShellRequestResultEvent,
     })
-    const runtime = useBehavioral({
-      traceListener: (trace) => {
-        traces.push(trace)
-      },
-      useTrigger: (t) => {
-        trigger = t
-      },
-      shell: hostShell,
-    })
+    const { runtime, traces } = startRuntime({ shell: hostShell })
     try {
-      expect(trigger).toBeDefined()
       // The crash fixture throws on its FIRST message — drive one into it.
-      trigger!({
+      runtime.trigger({
         type: BEHAVIOR_MESSAGE_KINDS.shell_request,
         detail: { id: 'c1', label: 'probe', input: { op: 'die' } },
       })
@@ -276,6 +229,53 @@ describe('useBehavioral — the runtime composition', () => {
       expect((crash?.selected.detail as { behavior?: string } | undefined)?.behavior).toBe('shell')
     } finally {
       runtime.terminate()
+    }
+  })
+
+  test('terminate kills overridden families too — the composition owns every process it invokes', async () => {
+    const factory = useProcess({
+      command: ['bun', 'run', 'tests/fixtures/probe.proc.ts'],
+      name: 'shell',
+      threads: [],
+      validateRequestEvent: validateShellRequestEvent,
+      validateEventCancel: validateShellCancelEvent,
+      validateResultEvent: validateShellRequestResultEvent,
+    })
+    // Capture the real handle the composition invokes: the host passes the
+    // curried factory, so the composition holds the only terminate handle.
+    let invoked: ReturnType<typeof factory> | undefined
+    let terminated = false
+    const hostShell = ((addThreads: Parameters<typeof factory>[0], space?: string) => {
+      const handle = factory(addThreads, space)
+      invoked = handle
+      return {
+        ...handle,
+        terminate: () => {
+          terminated = true
+          handle.terminate()
+        },
+      }
+    }) as typeof factory
+
+    const { runtime, traces } = startRuntime({ shell: hostShell })
+    try {
+      runtime.trigger({
+        type: BEHAVIOR_MESSAGE_KINDS.shell_request,
+        detail: { id: 'ov-term', label: 'probe', input: { op: 'echo' } },
+      })
+      await waitForTraces(traces, (s) =>
+        s.some(
+          (t) =>
+            t.selected.type === BEHAVIOR_MESSAGE_KINDS.shell_request_result &&
+            (t.selected.detail as { id?: string } | undefined)?.id === 'ov-term',
+        ),
+      )
+      expect(invoked).toBeDefined()
+      runtime.terminate()
+      expect(terminated).toBe(true)
+    } finally {
+      runtime.terminate()
+      invoked?.terminate()
     }
   })
 })
