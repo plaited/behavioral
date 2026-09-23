@@ -153,7 +153,7 @@ export type McpOp =
 
 export type McpRequestEvent = {
   type: typeof BEHAVIOR_MESSAGE_KINDS.mcp_request
-  /** `op` selects the MCP client operation; the backing schema lives in `src/behaviors/mcp-client.types.ts`. */
+  /** `op` selects the MCP client operation; the backing schema lives in `src/behaviors/mcp/types.ts`. */
   detail: { id: string; op: McpOp; input: JsonObject }
   space?: string
 }

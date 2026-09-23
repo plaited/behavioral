@@ -26,7 +26,7 @@ import * as path from 'node:path'
 import { TRACE_MESSAGE_KINDS } from '../behavioral/behavioral.constants.ts'
 import type { Trace, TraceListener } from '../behavioral/behavioral.types.ts'
 import { behavioralHome } from '../behaviors/behavioral-home.ts'
-import { ROOT_SPACE } from '../behaviors/store.types.ts'
+import { ROOT_SPACE } from '../behaviors/store/types.ts'
 import { CREDENTIAL_RULES, type CredentialRule } from './credential-patterns.ts'
 
 /** Marker substituted for every redacted value. */

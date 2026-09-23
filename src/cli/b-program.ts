@@ -14,10 +14,10 @@ import {
   StoreRequestResultEventSchema,
   validateFrontierRequestEvent,
 } from '../behaviors/behaviors.types.ts'
-import { handleFrontierMessage } from '../behaviors/frontier.behavior.ts'
-import { mcpThreads } from '../behaviors/mcp-client.threads.ts'
+import { handleFrontierMessage } from '../behaviors/frontier/behavior.ts'
+import { mcpThreads } from '../behaviors/mcp/threads.ts'
 import { bindEmit } from '../behaviors/process-lane.ts'
-import { shellThreads } from '../behaviors/shell.threads.ts'
+import { shellThreads } from '../behaviors/shell/threads.ts'
 import { useBehavior } from '../behaviors/use-behavior.ts'
 import type { Behavior } from '../behaviors.ts'
 
@@ -145,7 +145,7 @@ export const bProgram = ({
   const shell =
     shellOverride === undefined
       ? useBehavior({
-          command: ['bun', 'run', 'shell.behavior.ts'],
+          command: ['bun', 'run', 'shell/behavior.ts'],
           name: 'shell',
           threads: has('shell') && has('store') ? shellThreads : [],
           requestSchema: ShellRequestEventSchema,
@@ -166,7 +166,7 @@ export const bProgram = ({
   const store =
     storeOverride === undefined
       ? useBehavior({
-          command: ['bun', 'run', 'store.behavior.ts'],
+          command: ['bun', 'run', 'store/behavior.ts'],
           name: 'store',
           threads: [],
           requestSchema: StoreRequestEventSchema,
@@ -176,7 +176,7 @@ export const bProgram = ({
       : storeOverride(familyAddThreads)
 
   const mcp = useBehavior({
-    command: ['bun', 'run', 'mcp-client.behavior.ts'],
+    command: ['bun', 'run', 'mcp/behavior.ts'],
     name: 'mcp',
     // The spine requires mcp + store.
     threads: has('mcp') && has('store') ? mcpThreads : [],

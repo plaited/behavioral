@@ -74,32 +74,39 @@ and the impact is broad or unclear, expand coverage until the affected surface i
 
 ## Directory Boundaries
 
-**`src/behaviors/`** — the process layer: the behavior event wire
-(`behaviors.types.ts` + `behaviors.constants.ts` — every request/result event kind,
-validators, and the kind registry), the behavior
-wiring primitive (`use-behavior.ts`, `useBehavior` — Bun.spawn processes speaking the
-wire over stdio lines; it compiles the family's event schemas and returns them so
-the composition derives guard threads; exit-code crash synthesis as `behavior_error`;
-respawn on demand), the process lane (`process-lane.ts` — stdio emit/inbound, the envData
-bridge, bindEmit for the frontier embed), and the behavior families:
-`system-two.behavior.ts` (Open Responses model calls; a provider entry —
-`configSystemTwo(respond)` wires it, `useSystemTwo({ endpoints })` seeds the endpoint
-map) and `system-one.behavior.ts` (TypeSafe/OpenRouter Decisions; `configSystemOne` +
-`useSystemOne({ endpoint })`, with 429/529 retry), `shell.behavior.ts`
-(bun-direct script execution — `run` op TS scripts via `bun run -`, `shell` op
-Bun Shell commands through the wrapper; temp-file payloads over ~100KB, deleted
-on every exit), `frontier.behavior.ts` (the in-process embed — imported and driven
-by the composition; standalone spawns are a compatibility entry),
-`store.behavior.ts` (durable space-scoped persistence), `mcp-client.behavior.ts`
-(remote MCP connections/sessions/auth). Each behavior owns its event types + input
-boundary; results echo the request `space`; op runners errors-as-data. Shared
-process-layer modules live here too: `behavioral-home.ts` (the `BEHAVIORAL_HOME`
-root) and `keychain-oauth-provider.ts` (the MCP OAuth `BunKeychain` over
-`Bun.secrets` plus the issuer-binding v2 provider).
+**`src/behaviors/`** — the process layer. Shared modules sit at the top: the
+behavior event wire (`behaviors.types.ts` + `behaviors.constants.ts` — every
+request/result event kind, validators, and the kind registry), the behavior
+wiring primitive (`use-behavior.ts`, `useBehavior` — Bun.spawn processes speaking
+the wire over stdio lines; it compiles the family's event schemas and returns
+them so the composition derives guard threads; exit-code crash synthesis as
+`behavior_error`; respawn on demand), the process lane (`process-lane.ts` — stdio
+emit/inbound, the envData bridge, bindEmit for the frontier embed),
+`behavioral-home.ts` (the `BEHAVIORAL_HOME` root), `resolve-behavior-entry.ts`
+(bundled/absolute/home-relative provider-entry paths), `keychain-oauth-provider.ts`
+(the MCP OAuth `BunKeychain` over `Bun.secrets` plus the issuer-binding v2
+provider), and `behaviors.threads.ts` (the composition's root guard pack).
+Each FAMILY lives in its own subfolder — `behavior.ts` (the process entry),
+`threads.ts` (its default pack), `types.ts`/`schemas.ts`, `config.ts` (the system
+families), plus its `tests/`:
+- `system-two/` — Open Responses model calls; a provider entry —
+  `configSystemTwo(respond)` wires it, `useSystemTwo({ endpoints })` seeds the
+  endpoint map
+- `system-one/` — TypeSafe/OpenRouter Decisions; `configSystemOne` +
+  `useSystemOne({ endpoint })`, with 429/529 retry
+- `shell/` — bun-direct script execution — `run` op TS scripts via `bun run -`,
+  `shell` op Bun Shell commands through the wrapper; temp-file payloads over
+  ~100KB, deleted on every exit
+- `store/` — durable space-scoped persistence
+- `mcp/` — remote MCP connections/sessions/auth
+- `frontier/` — the in-process embed — imported and driven by the composition;
+  standalone spawns are a compatibility entry
+Each behavior owns its event types + input boundary; results echo the request
+`space`; op runners errors-as-data.
 **`src/tools/`** — deleted (fleet 0): the ICL conversion retired the CLI tool
-fleet. mcp-client is the mcp behavior (`src/behaviors/mcp-client.behavior.ts`);
+fleet. mcp-client is the mcp behavior (`src/behaviors/mcp/behavior.ts`);
 skill/plugin operations are the shell family's thread pack
-(`src/behaviors/shell.threads.ts`) + recipes + store, taught by
+(`src/behaviors/shell/threads.ts`) + recipes + store, taught by
 `skills/skill-conventions/`.
 **`src/behaviors.ts`** — the behaviors public surface (package export `./behaviors`): the
 `Behavior` union, the wire types + JSON schemas/validators (`behaviors.types.ts`), the override thread
@@ -130,14 +137,15 @@ JSON-RPC IPC host lives here too: `b-program.ts` (the runtime composition, `bPro
 entry — ingress messages → triggers, `ui_*` selections → client notifications, redacted
 traces out), `load-config.ts` (`<BEHAVIORAL_HOME>/config.ts`), and `trace-consumer.ts`.
 **`src/utils/`** — shared pure utilities.
-**`src/behaviors/*.threads.ts`** — behavior thread packs: `shell.threads.ts` (the
-ICL pack — skill/plugin scans, catalog/manifest schema gates, links dispatchers
-+ stored recipes) and `mcp.threads.ts` (the auth replay spine). Packs ship with
-their family; `getBehavioral` mounts a pack when the family and its required
+**`src/behaviors/<family>/threads.ts`** — behavior thread packs: `shell/threads.ts`
+(the ICL pack — skill/plugin scans, catalog/manifest schema gates, links dispatchers
++ stored recipes) and `mcp/threads.ts` (the auth replay spine). Packs ship with
+their family; `bProgram` mounts a pack when the family and its required
 families are on — except `behaviors.threads.ts`, the composition's **root
 pack** (the guard threads), always mounted regardless of the allow-list. The
-former `src/threads/` is dissolved; its engine-layer specs
-live in `src/behaviors/tests/*.threads.spec.ts`.
+former `src/threads/` is dissolved; its engine-layer specs live with their
+families (`src/behaviors/<family>/tests/`), while specs for the shared modules
+stay in `src/behaviors/tests/`.
 **`tasks/`** — Harbor skill-authoring task specs (challenge content; not shipped, not a plugin).
 **`scripts/`** — repo setup and package-maintenance shell glue.
 **`skills/`** — published reference skills.
@@ -219,7 +227,7 @@ input boundaries are the pattern homes). Trust the validated value downstream.
 `ajv` instance. Prefer structural schemas (`oneOf` branches, strict `additionalProperties: false` at
 every level) so constraints are explicit and JSON-schema replay contracts stay aligned. Do not
 hand-maintain a parallel Zod shape alongside an AJV one. Schema-data is exported for reuse (the
-catalog/manifest/recipe contracts in `src/behaviors/shell.threads.ts`).
+catalog/manifest/recipe contracts in `src/behaviors/shell/threads.ts`).
 **No cross-module schema drift.** When a CLI command returns a shape produced by another module,
 the output schema must derive from or reference that module's exported schema —
 not be hand-mirrored. Failure mode: a module's output type changes; a downstream CLI/tool schema

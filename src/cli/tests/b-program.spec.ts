@@ -7,11 +7,11 @@ import {
   ShellRequestEventSchema,
   ShellRequestResultEventSchema,
 } from '../../behaviors/behaviors.types.ts'
-import { useSystemOne } from '../../behaviors/config-system-one.ts'
-import { useSystemTwo } from '../../behaviors/config-system-two.ts'
-import { startDecisionsServer } from '../../behaviors/tests/fixtures/decisions-server.ts'
-import { ASSISTANT_TEXT, startOpenResponsesServer } from '../../behaviors/tests/fixtures/model-server.ts'
-import { startMcpServer } from '../../behaviors/tests/mcp-server-fixture.ts'
+import { startMcpServer } from '../../behaviors/mcp/tests/fixtures/mcp-server-fixture.ts'
+import { useSystemOne } from '../../behaviors/system-one/config.ts'
+import { startDecisionsServer } from '../../behaviors/system-one/tests/fixtures/decisions-server.ts'
+import { useSystemTwo } from '../../behaviors/system-two/config.ts'
+import { ASSISTANT_TEXT, startOpenResponsesServer } from '../../behaviors/system-two/tests/fixtures/model-server.ts'
 import { useBehavior } from '../../behaviors/use-behavior.ts'
 import { bProgram } from '../b-program.ts'
 
@@ -32,7 +32,7 @@ import { bProgram } from '../b-program.ts'
  * `start()` still boots on its first event.
  *
  * The default thread packs are family-shipped: the shell pack
- * (shell.threads.ts — skill/plugin scans + links) mounts with shell+store
+ * (shell/threads.ts — skill/plugin scans + links) mounts with shell+store
  * on; the mcp spine (mcp.threads.ts) mounts with store+mcp on.
  */
 

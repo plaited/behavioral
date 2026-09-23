@@ -7,8 +7,8 @@ import { TRACE_MESSAGE_KINDS } from '../../behavioral/behavioral.constants.ts'
 import { behavioral } from '../../behavioral/behavioral.ts'
 import type { BPEvent, JsonObject, SelectionTrace, Thread, Trace } from '../../behavioral/behavioral.types.ts'
 import { BEHAVIOR_MESSAGE_KINDS } from '../behaviors.constants.ts'
-import { useSystemOne } from '../config-system-one.ts'
-import { useSystemTwo } from '../config-system-two.ts'
+import { useSystemOne } from '../system-one/config.ts'
+import { useSystemTwo } from '../system-two/config.ts'
 
 /**
  * The config helpers' `entry` resolution — the custom-provider seam:
@@ -39,14 +39,14 @@ const FAMILY = {
     input: { state: 'x', questions: { q: { type: 'noul', instructions: 'x' } } },
     wire: (entry: string) => useSystemOne({ endpoint: { url: 'http://unused.local', model: 'm' }, entry }),
     factory: 'configSystemOne',
-    module: 'config-system-one.ts',
+    module: 'system-one/config.ts',
   },
   systemTwo: {
     kind: BEHAVIOR_MESSAGE_KINDS.system_two_request,
     input: { provider: 'custom', modelId: 'm', input: [] },
     wire: (entry: string) => useSystemTwo({ endpoints: { custom: { url: 'http://unused.local' } }, entry }),
     factory: 'configSystemTwo',
-    module: 'config-system-two.ts',
+    module: 'system-two/config.ts',
   },
 } as const
 

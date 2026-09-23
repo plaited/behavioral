@@ -17,8 +17,8 @@ The runtime, config, observability, and IPC host are landed.
   `useBehavior` (`src/behaviors/use-behavior.ts`): it takes a family's event
   schemas, compiles them, and returns them so the composition derives a guard
   thread (a malformed family message is blocked, visible in traces).
-- **System families** — `system-two.behavior.ts` (Open Responses; the bundled
-  provider entry) and `system-one.behavior.ts` (TypeSafe/OpenRouter Decisions;
+- **System families** — `system-two/behavior.ts` (Open Responses; the bundled
+  provider entry) and `system-one/behavior.ts` (TypeSafe/OpenRouter Decisions;
   429/529 retry). Each is a provider entry: `configSystemTwo(respond)` /
   `configSystemOne(respond)` owns the wire plumbing, and `useSystemTwo({ endpoints })`
   / `useSystemOne({ endpoint })` is the host helper that seeds the endpoint via
