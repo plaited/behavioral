@@ -155,6 +155,31 @@ ingress + a plugin-shipped behavior surface.
      the conventions skill, docs sweep. Remaining: the deletion sweep (fleet 6 → 0)
      and the governor thread (plugin admission). -->
 
+### 2026-09-22 — ruled: controller vocabulary namespaced ui_*; the trace is the transcript
+
+- **The controller message vocabulary is namespaced `ui_*`** (pilot): incoming →
+  `ui_render`/`ui_attrs`/`ui_navigate`/`ui_dispatch_custom_event`/
+  `ui_scale_check`; outgoing → `ui_event`/`ui_form_submit`/`ui_snapshot`/
+  `ui_success`/`ui_error`/`ui_scale_check_result`. Aligns with the engine's
+  underscore convention (`shell_request`) and gives `keyMirror` valid
+  identifier keys. The JSON-RPC host can then use the event type as the method
+  name — an identity codec (one vocabulary, N carriers). LANDED.
+- **The trace is the two-way transcript** (pilot; `recordTransport` withdrawn):
+  every ClientMessage becomes an ingress BPEvent → on the trace as a selection
+  (or `deadlock`/`trigger_error`); every ServerMessage is the projection of a
+  `ui_*` selection → also traced. A headless consumer reads `useTrace` / the
+  JSONL trace log; no separate recorder abstraction. Requirement: the codec is
+  LOSSLESS (full detail in, full detail out) so the trace is complete.
+- **Server/client boundary** (pilot): the agent server is a logical message
+  endpoint + trace; it may persist artifacts to `~/.behavioral`, but it does
+  NOT render, serve static files, hot-reload, or own the controller transport.
+  The client owns the page, the `controller.ts` hookup, rendering, hot reload,
+  and asset serving.
+- **JSON-RPC host sketch:** ingress `ui_*`/`trigger` → BPEvent → `trigger`;
+  egress `ui_*` selection → notification (identity method) plus redacted
+  `trace` notifications; `trigger` is the control request; subscribe then
+  `start()`. Open: turn/settle signal (the engine has no idle event).
+
 ### 2026-09-22 — landed: the betterleaks install script + CI wiring
 
 - **The registry source is betterleaks** — gitleaks is feature-frozen
