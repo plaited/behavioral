@@ -155,6 +155,19 @@ ingress + a plugin-shipped behavior surface.
      the conventions skill, docs sweep. Remaining: the deletion sweep (fleet 6 → 0)
      and the governor thread (plugin admission). -->
 
+### 2026-09-22 — landed: the process-layer consolidation (home + oauth)
+
+- **`behavioralHome()` → `src/behaviors/behavioral-home.ts`** (pilot): it is a
+  process-layer concern, not a platform-agnostic util, and `src/cli/` already
+  imports from `src/behaviors/`, so this is the clean one-way order. The store
+  and the cli (`loadConfig`, `traceLogSink`) import it directly — no
+  behaviors→cli inversion.
+- **`src/oauth/` dissolved** (pilot): `keychain.ts` + `keychain-oauth-provider.ts`
+  merged into `src/behaviors/keychain-oauth-provider.ts` (the `Keychain` type +
+  `BunKeychain`/`InMemoryKeychain` + `BunKeychainOAuthProvider`), its spec moved
+  to `src/behaviors/tests/`, and `src/oauth.ts` deleted (not a package export,
+  no importers). `mcp-client.behavior.ts` imports the merged module directly.
+
 ### 2026-09-22 — landed: behavioralHome + loadConfig
 
 - **`behavioralHome()`** (`src/utils/behavioral-home.ts`): `BEHAVIORAL_HOME ??

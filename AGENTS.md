@@ -90,7 +90,10 @@ on every exit), `frontier.behavior.ts` (the in-process embed — imported and dr
 by the composition; standalone spawns are a compatibility entry),
 `store.behavior.ts` (durable space-scoped persistence), `mcp-client.behavior.ts`
 (remote MCP connections/sessions/auth). Each behavior owns its event types + input
-boundary; results echo the request `space`; op runners errors-as-data.
+boundary; results echo the request `space`; op runners errors-as-data. Shared
+process-layer modules live here too: `behavioral-home.ts` (the `BEHAVIORAL_HOME`
+root) and `keychain-oauth-provider.ts` (the MCP OAuth `BunKeychain` over
+`Bun.secrets` plus the issuer-binding v2 provider).
 **`src/tools/`** — deleted (fleet 0): the ICL conversion retired the CLI tool
 fleet. mcp-client is the mcp behavior (`src/behaviors/mcp-client.behavior.ts`);
 skill/plugin operations are the shell family's thread pack
