@@ -90,7 +90,7 @@ const createSubject = (): SendTrace => {
  * @param options - Optional factory options.
  * @param options.sessionId - Host-supplied session identity stamped on every
  *   trace alongside `instanceId`. The engine never mints or returns session
- *   ids — an ingress host (e.g. the ACP host) owns session identity policy.
+ *   ids — the host layer owns session identity policy.
  *   Defaults to the self-minted `instanceId` when omitted.
  *
  * **Channel invariant:** a selected event carries `ingress: true` iff it was admitted

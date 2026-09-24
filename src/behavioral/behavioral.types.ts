@@ -321,7 +321,7 @@ export type Threads = Thread[]
  *
  * The two id axes are separate and both live on the wire: `instanceId` is the
  * per-process identity the engine self-mints; `sessionId` is the host's
- * session identity (an ACP/ingress host mints and loads sessions), defaulted
+ * session identity (the host mints and manages session ids), defaulted
  * to the `instanceId` when no host supplies one. The engine accepts a session
  * id at factory time — it never mints one and never returns ids.
  *

@@ -38,7 +38,7 @@ const { useAddThread, trigger, useTrace } = behavioral({ sessionId?: string })
 ```
 
 The optional `sessionId` is host-supplied session identity stamped on every
-trace alongside the self-minted `instanceId` (an ACP ingress host owns session
+trace alongside the self-minted `instanceId` (the host layer owns session
 identity policy); absent it defaults to the `instanceId`.
 
 Threads are JSON objects: `{ label: string, rules: Idioms[], once?: true }`.

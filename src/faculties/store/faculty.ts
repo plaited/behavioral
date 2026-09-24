@@ -17,9 +17,8 @@
  *
  * **The sqlite schema is worker-internal.** Only JSON ops cross the wire —
  * no SQL, no expressions — so backings stay swappable per host (bun:sqlite
- * here, sql.js or a Rust engine under Tauri, IndexedDB in a browser) without
- * protocol change. The backing is one owned connection for the worker's
- * lifetime (WAL for file dbs), with version-stamped migrations on boot.
+ * here, sql.js, IndexedDB in a browser) without protocol change. The backing
+ * is one owned connection for the worker's lifetime (WAL for file dbs), with version-stamped migrations on boot.
  *
  * **Not the authority surface:** threads/html learning stays files+git
  * (2026-09-17 growth-model decision); this store is regenerable index +

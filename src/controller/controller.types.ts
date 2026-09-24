@@ -135,7 +135,7 @@ export type ControllerConstructorArgs = {
    * Optional message carrier. When omitted the controller uses its built-in
    * WebSocket carrier (byte-for-byte the pre-seam behavior). When provided,
    * the controller sends/receives through it instead of opening a WebSocket —
-   * the injection point a non-WS carrier (e.g. Tauri IPC) plugs into.
+   * the injection point a non-WS carrier (e.g. native IPC) plugs into.
    */
   transport?: Transport
 }
@@ -358,7 +358,7 @@ export type TransportEvent =
 
 /**
  * The controller's message carrier — the seam a non-WebSocket transport
- * (Tauri IPC, etc.) plugs into without touching controller logic.
+ * (native IPC, etc.) plugs into without touching controller logic.
  *
  * @remarks
  * The controller sends outgoing {@link ClientMessage}s via `send`, registers
