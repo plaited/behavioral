@@ -36,6 +36,7 @@ const selectionOf = (selected: { type: string; detail?: JsonObject; space?: stri
   kind: TRACE_MESSAGE_KINDS.selection,
   timestamp: 0,
   instanceId: 'i',
+  sessionId: 'i',
   step: 1,
   selected: { priority: 0, ...selected },
 })

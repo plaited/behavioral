@@ -65,7 +65,9 @@ type ReplayResult = {
   message?: string
 }
 type ExploreResult = {
-  traces: Array<{ messages: Array<{ kind: string; selected?: { type: string } }> }>
+  traces: Array<{
+    messages: Array<{ kind: string; selected?: { type: string }; instanceId?: string; sessionId?: string }>
+  }>
   findings: Array<{ code: string }>
   report: { visitedCount: number; findingCount: number; truncated: boolean }
   stateGraph: Record<string, { successors: Array<{ selection: { type: string } }> }>
@@ -304,6 +306,43 @@ describe('explore', () => {
       frontier.call('e1', 'explore', { threads, strategy: 'dfs', maxDepth: 3 })
       const { result } = await frontier.resultFor('e1')
       expect((result as ExploreResult).report.visitedCount).toBeGreaterThan(0)
+    } finally {
+      frontier.terminate()
+    }
+  })
+
+  test('stamps the host sessionId on every synthetic trace, defaulting to the instanceId', async () => {
+    const frontier = spawnFrontierWorker()
+    try {
+      // Host-supplied: both id axes ride the trace wire — instanceId per-process,
+      // sessionId the host's session identity.
+      frontier.call('e1', 'explore', {
+        threads,
+        strategy: 'bfs',
+        maxDepth: 3,
+        instanceId: 'test',
+        sessionId: 'sess_host',
+      })
+      const { result } = await frontier.resultFor('e1')
+      const explore = result as ExploreResult
+      expect(explore.isError).toBeFalsy()
+      expect(explore.traces.length).toBeGreaterThan(0)
+      for (const record of explore.traces) {
+        for (const message of record.messages) {
+          expect(message.sessionId).toBe('sess_host')
+          expect(message.instanceId).toBe('test')
+        }
+      }
+
+      // Absent sessionId defaults to the instanceId — same treatment as the
+      // engine, no drift between the faculty's schemas and TraceBase.
+      frontier.call('e2', 'explore', { threads, strategy: 'bfs', maxDepth: 3, instanceId: 'test' })
+      const defaulted = await frontier.resultFor('e2')
+      for (const record of (defaulted.result as ExploreResult).traces) {
+        for (const message of record.messages) {
+          expect(message.sessionId).toBe('test')
+        }
+      }
     } finally {
       frontier.terminate()
     }

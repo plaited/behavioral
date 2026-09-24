@@ -34,8 +34,12 @@ import type {
 `useAddHandler`, no `sendTrace`, no generic type parameter:
 
 ```ts
-const { useAddThread, trigger, useTrace } = behavioral({ instanceId?: string })
+const { useAddThread, trigger, useTrace } = behavioral({ sessionId?: string })
 ```
+
+The optional `sessionId` is host-supplied session identity stamped on every
+trace alongside the self-minted `instanceId` (an ACP ingress host owns session
+identity policy); absent it defaults to the `instanceId`.
 
 Threads are JSON objects: `{ label: string, rules: Idioms[], once?: true }`.
 Each idiom is one sync point with `request` (propose an event), `waitFor`

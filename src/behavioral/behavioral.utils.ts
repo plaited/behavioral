@@ -119,6 +119,7 @@ export const resumePendingThreadsForSelectedEvent = ({
   selectedEvent,
   sendTrace,
   instanceId,
+  sessionId,
   step,
 }: {
   running: Set<RunningBid>
@@ -126,6 +127,7 @@ export const resumePendingThreadsForSelectedEvent = ({
   selectedEvent: CandidateBid
   sendTrace?: SendTrace
   instanceId: string
+  sessionId: string
   step: number
 }) => {
   const transformers: Transformer[] = []
@@ -147,6 +149,7 @@ export const resumePendingThreadsForSelectedEvent = ({
         timestamp: Date.now(),
         step,
         instanceId,
+        sessionId,
         selected: selectedEvent,
         threadLabel: label,
       })

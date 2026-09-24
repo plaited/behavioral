@@ -319,13 +319,38 @@ export type Threads = Thread[]
  * `TRACE_MESSAGE_KINDS` so narrowing by `kind` remains unambiguous in the
  * unified `Trace | T` stream.
  *
+ * The two id axes are separate and both live on the wire: `instanceId` is the
+ * per-process identity the engine self-mints; `sessionId` is the host's
+ * session identity (an ACP/ingress host mints and loads sessions), defaulted
+ * to the `instanceId` when no host supplies one. The engine accepts a session
+ * id at factory time — it never mints one and never returns ids.
+ *
+ * @see {@link TraceBaseSchema} for the runtime (JSON-schema) mirror
  * @see {@link Trace} for the engine's closed trace union
  */
 type TraceBase = {
   kind: string
   timestamp: number
   instanceId: string
+  sessionId: string
 }
+
+/**
+ * Wire schema for the fields every trace carries — the runtime mirror of
+ * {@link TraceBase}. The one home for the trace wire's common shape: per-kind
+ * trace validators derive from this (spread the properties, extend `required`)
+ * instead of hand-mirroring the fields.
+ */
+export const TraceBaseSchema = {
+  type: 'object',
+  properties: {
+    kind: { type: 'string' },
+    timestamp: { type: 'number' },
+    instanceId: { type: 'string' },
+    sessionId: { type: 'string' },
+  },
+  required: ['kind', 'timestamp', 'instanceId', 'sessionId'],
+} as const
 
 // ---------------------------------------------------------------------------
 // Trace kinds

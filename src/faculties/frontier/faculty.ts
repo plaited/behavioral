@@ -67,14 +67,17 @@ const createFrontierTrace = ({
   frontier,
   step,
   instanceId,
+  sessionId,
 }: {
   frontier: Frontier
   step: number
   instanceId: string
+  sessionId: string
 }): FrontierTrace => ({
   kind: 'frontier',
   timestamp: Date.now(),
   instanceId,
+  sessionId,
   step,
   status: frontier.status,
   candidates: frontier.candidates.map((candidate) => ({
@@ -97,22 +100,34 @@ const createSelectionTrace = ({
   selected,
   step,
   instanceId,
+  sessionId,
 }: {
   selected: CandidateBid
   step: number
   instanceId: string
+  sessionId: string
 }): SelectionTrace => ({
   kind: TRACE_MESSAGE_KINDS.selection,
   timestamp: Date.now(),
   instanceId,
+  sessionId,
   step,
   selected,
 })
 
-const createDeadlockTrace = ({ step, instanceId }: { step: number; instanceId: string }): Trace => ({
+const createDeadlockTrace = ({
+  step,
+  instanceId,
+  sessionId,
+}: {
+  step: number
+  instanceId: string
+  sessionId: string
+}): Trace => ({
   kind: TRACE_MESSAGE_KINDS.deadlock,
   timestamp: Date.now(),
   instanceId,
+  sessionId,
   step,
 })
 
@@ -221,6 +236,8 @@ type DeadlockFinding = {
  * @param args.space - Optional space stamp applied to all thread rules.
  * @param args.instanceId - Instance id stamped on synthetic interrupt/transform
  *   traces emitted during resumption. Defaults to a minted `ueid('bp_')`.
+ * @param args.sessionId - Host session id stamped on the same traces alongside
+ *   `instanceId`. Defaults to the `instanceId` — the faculty never mints one.
  * @returns The replay result containing the pending set and final frontier.
  *
  * @throws If a selection event is not enabled at its replay step.
@@ -232,12 +249,15 @@ const replayToFrontierRaw = ({
   messages = [],
   space,
   instanceId = ueid('bp_'),
+  sessionId,
 }: {
   threads: Thread[]
   messages?: Trace[]
   space?: string
   instanceId?: string
+  sessionId?: string
 }): ReplayToFrontierResult => {
+  const resolvedSessionId = sessionId ?? instanceId
   const pending = new Set<PendingBid>()
   const running = new Set<RunningBid>()
 
@@ -286,6 +306,7 @@ const replayToFrontierRaw = ({
       pending,
       selectedEvent: matched,
       instanceId,
+      sessionId: resolvedSessionId,
       step,
     })
     advanceRunningToPending(resumed, pending)
@@ -340,11 +361,13 @@ const getRequestSuccessors = ({
   selectionPolicy,
   step,
   instanceId,
+  sessionId,
 }: {
   frontier: Frontier
   selectionPolicy: 'all-enabled' | 'scheduler'
   step: number
   instanceId: string
+  sessionId: string
 }) => {
   if (frontier.status !== FRONTIER_STATUS.ready) {
     return []
@@ -355,7 +378,7 @@ const getRequestSuccessors = ({
       ? [...frontier.enabled].sort((left, right) => left.priority - right.priority).slice(0, 1)
       : frontier.enabled
 
-  return enabled.map((candidate) => createSelectionTrace({ selected: candidate, step, instanceId }))
+  return enabled.map((candidate) => createSelectionTrace({ selected: candidate, step, instanceId, sessionId }))
 }
 
 const getTriggerSuccessors = ({
@@ -366,6 +389,7 @@ const getTriggerSuccessors = ({
   triggers,
   space,
   instanceId,
+  sessionId,
 }: {
   pending: Set<PendingBid>
   messages: Trace[]
@@ -374,6 +398,7 @@ const getTriggerSuccessors = ({
   triggers: BPEvent[]
   space?: string
   instanceId: string
+  sessionId: string
 }) => {
   const successors: SelectionTrace[] = []
 
@@ -399,6 +424,7 @@ const getTriggerSuccessors = ({
       const selection = createSelectionTrace({
         step,
         instanceId,
+        sessionId,
         selected: {
           priority: 0,
           type: trigger.type,
@@ -414,6 +440,7 @@ const getTriggerSuccessors = ({
           messages: [...messages, selection],
           space,
           instanceId,
+          sessionId,
         })
         successors.push(selection)
       } catch {
@@ -710,6 +737,8 @@ type ExploreFrontiersArgs = {
   space?: string
   /** Instance id stamped on synthetic traces. Defaults to a minted `ueid('bp_')` — pass the analyzed kernel's id to make joins natural. */
   instanceId?: string
+  /** Host session id stamped on synthetic traces alongside `instanceId`. Defaults to the `instanceId` — the faculty never mints one. */
+  sessionId?: string
 }
 
 /**
@@ -755,10 +784,13 @@ const exploreFrontiersRaw = ({
   maxDepth,
   space,
   instanceId = ueid('bp_'),
+  sessionId,
 }: ExploreFrontiersArgs): ExploreFrontiersResult => {
   if (strategy !== 'bfs' && strategy !== 'dfs') {
     throw new Error(`Unsupported frontier exploration strategy "${String(strategy)}".`)
   }
+
+  const resolvedSessionId = sessionId ?? instanceId
 
   const pending: WorkItem[] = [{ messages }]
   const visited = new Set<string>()
@@ -774,6 +806,7 @@ const exploreFrontiersRaw = ({
       messages: current.messages,
       space,
       instanceId,
+      sessionId: resolvedSessionId,
     })
 
     const stateKey = frontierStateKey({ pending: currentPending })
@@ -796,7 +829,7 @@ const exploreFrontiersRaw = ({
       successors: [],
     })
 
-    const frontierTrace = createFrontierTrace({ frontier, step, instanceId })
+    const frontierTrace = createFrontierTrace({ frontier, step, instanceId, sessionId: resolvedSessionId })
 
     traces.push({
       messages: [...current.messages, frontierTrace],
@@ -807,6 +840,7 @@ const exploreFrontiersRaw = ({
       selectionPolicy,
       step,
       instanceId,
+      sessionId: resolvedSessionId,
     })
     const triggerSuccessors = getTriggerSuccessors({
       pending: currentPending,
@@ -816,13 +850,18 @@ const exploreFrontiersRaw = ({
       triggers,
       space,
       instanceId,
+      sessionId: resolvedSessionId,
     })
     const successors = [...requestSuccessors, ...triggerSuccessors]
 
     if (frontier.status === FRONTIER_STATUS.deadlock && triggerSuccessors.length === 0) {
       findings.push({
         code: 'deadlock',
-        messages: [...current.messages, frontierTrace, createDeadlockTrace({ step, instanceId })],
+        messages: [
+          ...current.messages,
+          frontierTrace,
+          createDeadlockTrace({ step, instanceId, sessionId: resolvedSessionId }),
+        ],
       })
     }
 
@@ -958,6 +997,7 @@ export type FrontierReplayInput = {
   messages?: SelectionTrace[]
   space?: string
   instanceId?: string
+  sessionId?: string
 }
 
 export type FrontierReplayOutput = {
@@ -978,6 +1018,11 @@ export const FrontierReplayInputSchema = {
       type: 'string',
       nullable: true,
       description: 'instance id stamped on synthetic traces; defaults to a minted ueid("bp_")',
+    },
+    sessionId: {
+      type: 'string',
+      nullable: true,
+      description: 'host session id stamped on synthetic traces; defaults to the instanceId',
     },
   },
   required: ['threads'],
@@ -1033,6 +1078,7 @@ export type FrontierExploreInput = {
   maxDepth: number
   space?: string
   instanceId?: string
+  sessionId?: string
 }
 
 export type FrontierExploreOutput = {
@@ -1082,6 +1128,11 @@ export const FrontierExploreInputSchema = {
       nullable: true,
       description: 'instance id stamped on synthetic traces; defaults to a minted ueid("bp_")',
     },
+    sessionId: {
+      type: 'string',
+      nullable: true,
+      description: 'host session id stamped on synthetic traces; defaults to the instanceId',
+    },
   },
   required: ['threads', 'maxDepth'],
   additionalProperties: false,
@@ -1110,6 +1161,7 @@ export type FrontierVerifyInput = {
   progress?: string[]
   space?: string
   instanceId?: string
+  sessionId?: string
 }
 
 export type FrontierVerifyOutput = {
@@ -1166,6 +1218,11 @@ export const FrontierVerifyInputSchema = {
       nullable: true,
       description: 'instance id stamped on synthetic traces; defaults to a minted ueid("bp_")',
     },
+    sessionId: {
+      type: 'string',
+      nullable: true,
+      description: 'host session id stamped on synthetic traces; defaults to the instanceId',
+    },
   },
   required: ['threads', 'maxDepth'],
   additionalProperties: false,
@@ -1218,9 +1275,9 @@ const OP_RUNNERS: Record<string, ToolRunner> = {
   replay: {
     validate: validateReplayInput,
     errors: () => ajv.errorsText(validateReplayInput.errors),
-    run: ({ threads, messages, space, instanceId }: FrontierReplayInput): FrontierReplayOutput => {
+    run: ({ threads, messages, space, instanceId, sessionId }: FrontierReplayInput): FrontierReplayOutput => {
       try {
-        const { pending, frontier } = replayToFrontierRaw({ threads, messages, space, instanceId })
+        const { pending, frontier } = replayToFrontierRaw({ threads, messages, space, instanceId, sessionId })
         return { frontier, stateKey: frontierStateKey({ pending }), pendingCount: pending.size }
       } catch (err) {
         return {
@@ -1245,6 +1302,7 @@ const OP_RUNNERS: Record<string, ToolRunner> = {
       maxDepth,
       space,
       instanceId,
+      sessionId,
     }: FrontierExploreInput): FrontierExploreOutput => {
       try {
         const { traces, findings, report, stateGraph } = exploreFrontiersRaw({
@@ -1256,6 +1314,7 @@ const OP_RUNNERS: Record<string, ToolRunner> = {
           maxDepth,
           space,
           instanceId,
+          sessionId,
         })
         return { traces, findings, report, stateGraph: serializeStateGraph(stateGraph) }
       } catch (err) {
@@ -1290,6 +1349,7 @@ const OP_RUNNERS: Record<string, ToolRunner> = {
       progress,
       space,
       instanceId,
+      sessionId,
     }: FrontierVerifyInput): FrontierVerifyOutput => {
       try {
         const { status, findings, report, livelocks } = verifyFrontiersRaw({
@@ -1302,6 +1362,7 @@ const OP_RUNNERS: Record<string, ToolRunner> = {
           progress,
           space,
           instanceId,
+          sessionId,
         })
         return { status, findings, report, livelocks }
       } catch (err) {
