@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { acquireInstanceLock, type InstanceLock, instancePidfilePath } from '../instance-lock.ts'
@@ -14,24 +14,24 @@ const acquired = (lock: InstanceLock | { acquired: false; pid: number }): Instan
 }
 
 describe('acquireInstanceLock', () => {
-  test('acquiring a free home writes the pidfile with the given pid', () => {
+  test('acquiring a free home writes the pidfile with the given pid', async () => {
     const home = tempHome()
     try {
-      const lock = acquired(acquireInstanceLock({ home, pid: 4242 }))
+      const lock = acquired(await acquireInstanceLock({ home, pid: 4242 }))
       const path = instancePidfilePath(home)
-      expect(existsSync(path)).toBe(true)
-      expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({ pid: 4242 })
-      lock.release()
+      expect(await Bun.file(path).exists()).toBe(true)
+      expect(await Bun.file(path).json()).toEqual({ pid: 4242 })
+      await lock.release()
     } finally {
       rmSync(home, { recursive: true, force: true })
     }
   })
 
-  test('a pidfile held by a live pid blocks acquisition and reports the pid', () => {
+  test('a pidfile held by a live pid blocks acquisition and reports the pid', async () => {
     const home = tempHome()
     try {
-      acquired(acquireInstanceLock({ home, pid: process.pid }))
-      const second = acquireInstanceLock({ home, pid: 1 })
+      await acquireInstanceLock({ home, pid: process.pid })
+      const second = await acquireInstanceLock({ home, pid: 1 })
       expect(second.acquired).toBe(false)
       if (!second.acquired) expect(second.pid).toBe(process.pid)
     } finally {
@@ -39,7 +39,7 @@ describe('acquireInstanceLock', () => {
     }
   })
 
-  test('a stale pidfile (pid no longer alive) is reaped and acquisition succeeds', () => {
+  test('a stale pidfile (pid no longer alive) is reaped and acquisition succeeds', async () => {
     const home = tempHome()
     const path = instancePidfilePath(home)
     // A pid that cannot exist: high fixed value, no process holds it. EPERM
@@ -51,18 +51,18 @@ describe('acquireInstanceLock', () => {
     } catch (error) {
       expect((error as NodeJS.ErrnoException).code).toBe('ESRCH')
     }
-    writeFileSync(path, JSON.stringify({ pid: deadPid }))
-    const lock = acquired(acquireInstanceLock({ home, pid: process.pid }))
-    expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({ pid: process.pid })
-    lock.release()
+    await Bun.write(path, JSON.stringify({ pid: deadPid }))
+    const lock = acquired(await acquireInstanceLock({ home, pid: process.pid }))
+    expect(await Bun.file(path).json()).toEqual({ pid: process.pid })
+    await lock.release()
   })
 
-  test('release removes the pidfile', () => {
+  test('release removes the pidfile', async () => {
     const home = tempHome()
     try {
-      const lock = acquired(acquireInstanceLock({ home, pid: process.pid }))
-      lock.release()
-      expect(existsSync(instancePidfilePath(home))).toBe(false)
+      const lock = acquired(await acquireInstanceLock({ home, pid: process.pid }))
+      await lock.release()
+      expect(await Bun.file(instancePidfilePath(home)).exists()).toBe(false)
     } finally {
       rmSync(home, { recursive: true, force: true })
     }

@@ -63,15 +63,19 @@ describe('Router-level flags (subprocess)', () => {
     expect(stderr).toContain('--version')
   })
 
-  test('no args exits 1 and prints usage', async () => {
+  test('no args runs the attach-or-start default (a closed stdin detaches cleanly)', async () => {
     const proc = Bun.spawn(['bun', 'bin/behavioral.ts'], {
       stdout: 'pipe',
       stderr: 'pipe',
       cwd: path.resolve(import.meta.dir, '../../..'),
+      env: { ...process.env, BEHAVIORAL_HOME: path.join('/tmp', `behavioral-cli-default-${Date.now()}`) },
     })
-    expect(await proc.exited).toBe(1)
+    // No running instance → the bare command starts a foreground instance; the
+    // closed stdin (non-TTY) ends the TUI and detaches cleanly.
+    const code = await proc.exited
+    expect(code).toBe(0)
     const stderr = await new Response(proc.stderr).text()
-    expect(stderr).toContain('Commands')
+    expect(stderr).not.toContain('Commands')
   })
 
   test('--schema lists all commands', async () => {
@@ -309,5 +313,30 @@ describe('makeCli', () => {
     expect(stderr).toContain('--schema <input|output>')
     expect(stderr).toContain('--dry-run')
     expect(stderr).toContain('--help')
+  })
+})
+
+describe('makeCliRouter — the default (no-subcommand) entry', () => {
+  test('a bare invocation runs the default handler with the remaining args', async () => {
+    const proc = Bun.spawn(
+      [
+        'bun',
+        '-e',
+        `import { makeCliRouter } from '${cliPath}';
+        const router = makeCliRouter({
+          name: 'behavioral',
+          description: 'test',
+          commands: { serve: async () => {} },
+          default: async (args) => {
+            process.stdout.write('default ran:' + JSON.stringify(args));
+          },
+        });
+        await router(['behavioral']);`,
+      ],
+      { stdout: 'pipe', stderr: 'pipe' },
+    )
+    expect(await proc.exited).toBe(0)
+    const output = await new Response(proc.stdout).text()
+    expect(output).toContain('default ran:[]')
   })
 })

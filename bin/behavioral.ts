@@ -21,6 +21,13 @@ export const runCli = makeCliRouter({
       await init(args)
     },
   },
+  // The bare command is attach-or-start: attach to a running instance over
+  // <home>/instance.sock, or start the foreground instance. Lazy: --help and
+  // the subcommands must not load the composition graph until invoked.
+  default: async () => {
+    const { attachOrStart } = await import('../src/cli/attach-or-start.ts')
+    await attachOrStart()
+  },
 })
 
 await runCli(Bun.argv)

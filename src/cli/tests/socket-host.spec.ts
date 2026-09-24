@@ -110,7 +110,7 @@ describe('createSocketHost', () => {
   test('a trigger request lands as an engine event and answers accepted', async () => {
     const home = tempHome()
     const fake = fakeRuntime()
-    const host = createSocketHost({ runtime: fake.runtime, home })
+    const host = await createSocketHost({ runtime: fake.runtime, home })
     const client = await attachClient(host.path)
     client.send({ type: 'trigger', detail: { event: { type: 'kick' } } })
     type ResponseFrame = { id: number; result?: unknown; error?: unknown }
@@ -127,7 +127,7 @@ describe('createSocketHost', () => {
   test('redacted traces fan back out to every connected client', async () => {
     const home = tempHome()
     const fake = fakeRuntime()
-    const host = createSocketHost({ runtime: fake.runtime, home })
+    const host = await createSocketHost({ runtime: fake.runtime, home })
     const first = await attachClient(host.path)
     const second = await attachClient(host.path)
     fake.emit(traceOf(TRACE_MESSAGE_KINDS.idle))
@@ -149,7 +149,7 @@ describe('createSocketHost', () => {
   test('a ui_* selection is pushed to clients as its own notification', async () => {
     const home = tempHome()
     const fake = fakeRuntime()
-    const host = createSocketHost({ runtime: fake.runtime, home })
+    const host = await createSocketHost({ runtime: fake.runtime, home })
     const client = await attachClient(host.path)
     fake.emit(selectionOf({ type: 'ui_render', detail: { id: 'r1', target: 'main' } }))
     const frame = await client.waitFor<{ method: string; params: JsonObject }>(
@@ -164,7 +164,7 @@ describe('createSocketHost', () => {
   test('an unknown method is answered with a JSON-RPC error', async () => {
     const home = tempHome()
     const fake = fakeRuntime()
-    const host = createSocketHost({ runtime: fake.runtime, home })
+    const host = await createSocketHost({ runtime: fake.runtime, home })
     const client = await attachClient(host.path)
     client.sendRaw('{"jsonrpc":"2.0","id":2,"method":"nope"}')
     const frame = await client.waitFor<{ id: number; error?: { code: number } }>(
@@ -180,7 +180,7 @@ describe('createSocketHost', () => {
     const home = tempHome()
     const path = instanceSocketPath(home)
     const fake = fakeRuntime()
-    const host = createSocketHost({ runtime: fake.runtime, home })
+    const host = await createSocketHost({ runtime: fake.runtime, home })
     expect(existsSync(path)).toBe(true)
     await host.close()
     expect(existsSync(path)).toBe(false)
@@ -190,7 +190,7 @@ describe('createSocketHost', () => {
     const home = tempHome()
     writeFileSync(instanceSocketPath(home), 'garbage from a crashed instance')
     const fake = fakeRuntime()
-    const host = createSocketHost({ runtime: fake.runtime, home })
+    const host = await createSocketHost({ runtime: fake.runtime, home })
     const client = await attachClient(host.path)
     client.send({ type: 'trigger', detail: { event: { type: 'kick' } } })
     await client.waitFor((frame) => (frame as { id?: number }).id === 1, 'trigger response')
@@ -201,7 +201,7 @@ describe('createSocketHost', () => {
   test('a plain HTTP request on the carrier is refused with 426', async () => {
     const home = tempHome()
     const fake = fakeRuntime()
-    const host = createSocketHost({ runtime: fake.runtime, home })
+    const host = await createSocketHost({ runtime: fake.runtime, home })
     const response = await fetch('http://localhost/', { unix: host.path })
     expect(response.status).toBe(426)
     await host.close()

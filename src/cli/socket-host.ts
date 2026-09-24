@@ -1,4 +1,3 @@
-import { rmSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ServerWebSocket } from 'bun'
 import { behavioralHome } from '../faculties/behavioral-home.ts'
@@ -43,16 +42,19 @@ export type SocketHost = {
  *
  * @public
  */
-export const createSocketHost = ({
+export const createSocketHost = async ({
   runtime,
   home = behavioralHome(),
 }: {
   runtime: HostRuntime
   home?: string
-}): SocketHost => {
+}): Promise<SocketHost> => {
   const path = instanceSocketPath(home)
-  // A socket file left by a dead instance cannot be bound again — remove it.
-  rmSync(path, { force: true })
+  // A socket file left by a dead instance cannot be bound again — remove it
+  // before the bind (ENOENT means there was nothing to reap).
+  await Bun.file(path)
+    .delete()
+    .catch(() => {})
 
   const clients = new Set<ServerWebSocket<unknown>>()
   const frame = (method: string, params: unknown): string => JSON.stringify({ jsonrpc: '2.0', method, params })
@@ -131,7 +133,9 @@ export const createSocketHost = ({
     path,
     close: async () => {
       await server.stop(true)
-      rmSync(path, { force: true })
+      await Bun.file(path)
+        .delete()
+        .catch(() => {})
     },
   }
 }

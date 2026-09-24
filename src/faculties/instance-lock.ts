@@ -1,4 +1,3 @@
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 /**
@@ -26,12 +25,20 @@ const pidAlive = (pid: number): boolean => {
   }
 }
 
+/** Delete the pidfile if present (Bun file IO; missing file is a no-op). */
+const removePidfile = async (path: string): Promise<void> => {
+  // ENOENT means already gone — force semantics.
+  await Bun.file(path)
+    .delete()
+    .catch(() => {})
+}
+
 /**
  * The acquired instance lock — `release()` removes the pidfile.
  *
  * @public
  */
-export type InstanceLock = { acquired: true; release: () => void }
+export type InstanceLock = { acquired: true; release: () => Promise<void> }
 
 /**
  * The lock is held: a live instance owns the home; `pid` is its pid.
@@ -51,18 +58,18 @@ export type InstanceLockHeld = { acquired: false; pid: number }
  *
  * @public
  */
-export const acquireInstanceLock = ({
+export const acquireInstanceLock = async ({
   home,
   pid = process.pid,
 }: {
   home: string
   pid?: number
-}): InstanceLock | InstanceLockHeld => {
+}): Promise<InstanceLock | InstanceLockHeld> => {
   const path = instancePidfilePath(home)
-  if (existsSync(path)) {
+  if (await Bun.file(path).exists()) {
     let holder: number | undefined
     try {
-      const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'))
+      const parsed: unknown = await Bun.file(path).json()
       if (typeof parsed === 'object' && parsed !== null && typeof (parsed as { pid?: unknown }).pid === 'number') {
         holder = (parsed as { pid: number }).pid
       }
@@ -70,8 +77,8 @@ export const acquireInstanceLock = ({
       // Unreadable pidfile: treat as stale, reaped below.
     }
     if (holder !== undefined && pidAlive(holder)) return { acquired: false, pid: holder }
-    rmSync(path, { force: true })
+    await removePidfile(path)
   }
-  writeFileSync(path, JSON.stringify({ pid }))
-  return { acquired: true, release: () => rmSync(path, { force: true }) }
+  await Bun.write(path, JSON.stringify({ pid }))
+  return { acquired: true, release: () => removePidfile(path) }
 }
