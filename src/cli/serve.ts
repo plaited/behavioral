@@ -14,8 +14,14 @@ import { collectSecretValues, createTraceConsumer, traceLogSink } from './trace-
  */
 export type HostRuntime = Pick<ReturnType<typeof bProgram>, 'trigger' | 'useTrace' | 'start' | 'terminate'>
 
-/** Map one inbound JSON-RPC message onto the engine. */
-const dispatch = (runtime: HostRuntime, message: JsonRpcMessage): unknown => {
+/**
+ * Map one inbound JSON-RPC message onto the engine — the ONE host-side
+ * dispatcher. Every carrier (stdio lane, unix socket, later the controller
+ * WebSocket) reuses it: one protocol, one dispatcher, multiple carriers.
+ *
+ * @public
+ */
+export const dispatchToRuntime = (runtime: HostRuntime, message: JsonRpcMessage): unknown => {
   const { method, params } = message
   if (method === 'trigger') {
     runtime.trigger((params as { event: BPEvent }).event)
@@ -31,6 +37,36 @@ const dispatch = (runtime: HostRuntime, message: JsonRpcMessage): unknown => {
     return undefined
   }
   throw new Error(`unknown method: ${method}`)
+}
+
+/**
+ * Wire the engine's egress to the JSONL trace log plus one carrier sink:
+ * redacted traces flow as `trace` emissions, `ui_*` selections as their own
+ * `<type>` emissions with the selection detail. Shared by every carrier.
+ *
+ * @public
+ */
+export const wireRuntimeEgress = ({
+  runtime,
+  home,
+  emit,
+}: {
+  runtime: HostRuntime
+  home: string
+  emit: (method: string, params: unknown) => void
+}): void => {
+  const consumer = createTraceConsumer({
+    secrets: collectSecretValues(),
+    sinks: [traceLogSink({ root: join(home, 'traces') }), (trace) => emit('trace', trace)],
+  })
+  runtime.useTrace(consumer)
+
+  // Egress-as-selection: a `ui_*` selection becomes a client notification.
+  runtime.useTrace((trace) => {
+    if (trace.kind !== TRACE_MESSAGE_KINDS.selection) return
+    const selected = trace.selected
+    if (selected.type.startsWith('ui_')) emit(selected.type, selected.detail)
+  })
 }
 
 /**
@@ -51,21 +87,10 @@ export const createHost = ({
   write: (line: string) => void
   home?: string
 }): { rpc: JsonRpcServer } => {
-  const rpc = createJsonRpcServer({ input, write, onMessage: (message) => dispatch(runtime, message) })
+  const rpc = createJsonRpcServer({ input, write, onMessage: (message) => dispatchToRuntime(runtime, message) })
 
   // Observability: redacted traces to the JSONL log and the client.
-  const consumer = createTraceConsumer({
-    secrets: collectSecretValues(),
-    sinks: [traceLogSink({ root: join(home, 'traces') }), (trace) => rpc.notify('trace', trace)],
-  })
-  runtime.useTrace(consumer)
-
-  // Egress-as-selection: a `ui_*` selection becomes a client notification.
-  runtime.useTrace((trace) => {
-    if (trace.kind !== TRACE_MESSAGE_KINDS.selection) return
-    const selected = trace.selected
-    if (selected.type.startsWith('ui_')) rpc.notify(selected.type, selected.detail)
-  })
+  wireRuntimeEgress({ runtime, home, emit: rpc.notify })
 
   runtime.start()
   rpc.notify('ready')
