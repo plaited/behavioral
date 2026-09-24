@@ -1,4 +1,5 @@
 import type { Thread } from '../behavioral/behavioral.types.ts'
+import { TUI_DETAIL_SCHEMAS } from '../cli/tui.ts'
 import { CONTROLLER_DETAIL_SCHEMAS } from '../controller/controller.schemas.ts'
 
 /**
@@ -75,5 +76,13 @@ const invalidControllerMessages: GuardEntry[] = Object.entries(CONTROLLER_DETAIL
   ([type, detailSchema]) => ({ type, detailSchema: detailSchema as Record<string, unknown> }),
 )
 
+const invalidTuiMessages: GuardEntry[] = Object.entries(TUI_DETAIL_SCHEMAS).map(([type, detailSchema]) => ({
+  type,
+  detailSchema: detailSchema as Record<string, unknown>,
+}))
+
 /** The root threads: default threads mounted by every composition. */
-export const facultiesThreads: Thread[] = guardThreads('guard:controller-schema', invalidControllerMessages)
+export const facultiesThreads: Thread[] = guardThreads('guard:ingress-schema', [
+  ...invalidControllerMessages,
+  ...invalidTuiMessages,
+])
