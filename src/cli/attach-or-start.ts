@@ -17,6 +17,12 @@ const defaultCreateRuntime = async (): Promise<HostRuntime> => {
 export type AttachOrStartOptions = {
   /** The single `<home>` root; defaults to `behavioralHome()`. */
   home?: string
+  /**
+   * Start-time only: serve the controller GUI with per-request rebundling.
+   * An attaching process cannot flip a running instance — the flag reaches
+   * the instance the caller starts, never one it attaches to.
+   */
+  dev?: boolean
   /** The TUI's line source; defaults to stdin. */
   input?: NodeJS.ReadableStream
   /** The TUI's terminal writer; defaults to stdout. */
@@ -50,6 +56,7 @@ export const attachOrStart = async ({
     process.stdout.write(text)
   },
   createRuntime = defaultCreateRuntime,
+  dev = false,
 }: AttachOrStartOptions = {}): Promise<AttachOrStartResult> => {
   const lock = await acquireInstanceLock({ home })
   if (!lock.acquired) {
@@ -66,7 +73,7 @@ export const attachOrStart = async ({
   // Start: foreground engine + socket host + TUI (a socket client like every
   // other client — no in-process fast path).
   const runtime = await createRuntime()
-  const host = await createSocketHost({ runtime, home })
+  const host = await createSocketHost({ runtime, home, dev })
   let cleaned = false
   const cleanup = async (): Promise<void> => {
     if (cleaned) return

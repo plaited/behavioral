@@ -1,5 +1,6 @@
 import { join } from 'node:path'
 import type { ServerWebSocket } from 'bun'
+import { bundleController, CONNECT_BEHAVIORAL_ROUTE } from '../controller/bundle-controller.ts'
 import { behavioralHome } from '../faculties/behavioral-home.ts'
 import type { JsonRpcMessage } from './json-rpc.ts'
 import { dispatchToRuntime, type HostRuntime, wireRuntimeEgress } from './serve.ts'
@@ -33,9 +34,15 @@ export type SocketHost = {
 /**
  * Start the attach lane: a unix-socket `Bun.serve` over the shared host
  * dispatcher, with redacted traces and `ui_*` selections fanning out to every
- * connected client.
+ * connected client. The same listener serves the bundled controller GUI at
+ * {@link CONNECT_BEHAVIORAL_ROUTE} — the browser's carrier and the TUI's
+ * carrier are two clients of one host (Carriers/H).
  *
  * @remarks
+ * With `dev: true` the controller bundle is rebuilt per request (the Bun
+ * fullstack-dev-server surface lands when the GUI entry exists); without it
+ * the production bundle is built once and cached. Engine/wire are identical
+ * in both modes — `--dev` gates the GUI-serving surface only.
  * Unlike {@link createHost}, this does NOT call `runtime.start()` — the
  * foreground entry composes the runtime, the socket host, and its clients,
  * then starts the composition itself.
@@ -45,9 +52,12 @@ export type SocketHost = {
 export const createSocketHost = async ({
   runtime,
   home = behavioralHome(),
+  dev = false,
 }: {
   runtime: HostRuntime
   home?: string
+  /** Rebuild the controller bundle per request instead of caching it. */
+  dev?: boolean
 }): Promise<SocketHost> => {
   const path = instanceSocketPath(home)
   // A socket file left by a dead instance cannot be bound again — remove it
@@ -112,12 +122,17 @@ export const createSocketHost = async ({
         clients.delete(ws)
       },
     },
-    fetch: (_req, server) =>
-      // Later slices serve the controller GUI here (Carriers/H); today the
-      // unix carrier is WebSocket-only.
-      server.upgrade(_req)
+    fetch: async (req, server) => {
+      const url = new URL(req.url)
+      if (url.pathname === CONNECT_BEHAVIORAL_ROUTE) {
+        // Prod: one AOT bundle, cached. Dev: rebundle per request.
+        const routes = await bundleController({ dev })
+        return routes[CONNECT_BEHAVIORAL_ROUTE] ?? new Response(null, { status: 404 })
+      }
+      return server.upgrade(req)
         ? undefined
-        : new Response('behavioral instance socket — a WebSocket upgrade is required\n', { status: 426 }),
+        : new Response('behavioral instance socket — a WebSocket upgrade is required\n', { status: 426 })
+    },
   })
 
   // Egress: one redaction pass, the JSONL log, then fan out to every client.
