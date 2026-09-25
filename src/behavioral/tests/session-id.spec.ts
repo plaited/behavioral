@@ -34,4 +34,12 @@ describe('session id wiring', () => {
       expect(trace.sessionId).toBe(instanceId)
     }
   })
+
+  test('two minted instanceIds are distinct but share the bp_ prefix', () => {
+    const first = runProgram().instanceId
+    const second = runProgram().instanceId
+    expect(first.startsWith('bp_')).toBe(true)
+    expect(second.startsWith('bp_')).toBe(true)
+    expect(first).not.toBe(second)
+  })
 })
