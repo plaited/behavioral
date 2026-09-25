@@ -56,7 +56,7 @@ import {
   validateMcpRequestEvent,
 } from '../faculties.types.ts'
 import { emit, envData, wireInbound } from '../process-lane.ts'
-import { BunKeychain, tokensKey } from './keychain-oauth-provider.ts'
+import { BunKeychain, vendKeychainToken } from '../security/keychain-oauth-provider.ts'
 import { MCP_BROKER_BOOT_SECRET_KEY, MCP_BROKER_URL_KEY, MCP_OP_INPUT_VALIDATORS } from './types.ts'
 
 // ---------------------------------------------------------------------------
@@ -92,18 +92,9 @@ const brokerToken = async (): Promise<string | undefined> => {
   }
 }
 
-/** The keychain floor: read tokens persisted by prior BunKeychainOAuthProvider flows. */
-const keychainToken = async (serverUrl: string): Promise<string | undefined> => {
-  try {
-    const raw = await keychain.get(tokensKey(serverUrl))
-    if (raw === null) return undefined
-    const tokens = JSON.parse(raw) as { access_token?: string }
-    return typeof tokens.access_token === 'string' && tokens.access_token !== '' ? tokens.access_token : undefined
-  } catch {
-    // Corrupt blobs are absent tokens — fail-closed, never a throw.
-    return undefined
-  }
-}
+/** The keychain floor: read tokens persisted by prior grant flows (the security faculty's store). */
+const keychainToken = async (serverUrl: string): Promise<string | undefined> =>
+  vendKeychainToken({ serverUrl, keychain })
 
 /** The per-server token: broker first, keychain floor second, absent last. */
 const getToken = async (serverUrl: string): Promise<string | undefined> =>

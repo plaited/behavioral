@@ -173,6 +173,27 @@ export type McpCancelEvent = {
   space?: string
 }
 
+/** Security operations — credential vending for remote servers (broker first, keychain floor second). */
+export type SecurityRequestEvent = {
+  type: typeof FACULTY_MESSAGE_KINDS.credential_request
+  detail: { id: string; input: JsonObject }
+  space?: string
+}
+
+export type SecurityRequestResultEvent = {
+  type: typeof FACULTY_MESSAGE_KINDS.credential_result
+  detail: WorkerResultDetail
+  space?: string
+}
+
+// A vend is a quick broker/keychain read, but a down broker can hang — the
+// async faculties keep their cancels (shell, response, mcp, security).
+export type SecurityCancelEvent = {
+  type: typeof FACULTY_MESSAGE_KINDS.credential_cancel
+  detail: { id: string }
+  space?: string
+}
+
 /** Union of every event the router can move between ports. @public */
 export type WorkerEvent =
   | SystemTwoRequestEvent
@@ -187,6 +208,9 @@ export type WorkerEvent =
   | McpRequestEvent
   | McpRequestResultEvent
   | McpCancelEvent
+  | SecurityRequestEvent
+  | SecurityRequestResultEvent
+  | SecurityCancelEvent
   | FrontierRequestEvent
   | FrontierRequestResultEvent
   | StoreRequestEvent
@@ -396,6 +420,40 @@ export const McpCancelEventSchema: JSONSchemaType<McpCancelEvent> = {
   additionalProperties: false,
 }
 
+export const SecurityRequestEventSchema: JSONSchemaType<SecurityRequestEvent> = {
+  type: 'object',
+  properties: {
+    type: { type: 'string', const: FACULTY_MESSAGE_KINDS.credential_request },
+    detail: {
+      type: 'object',
+      properties: { id: { type: 'string', minLength: 1 }, input: jsonObjectSchema },
+      required: ['id', 'input'],
+      additionalProperties: false,
+    },
+    space: { type: 'string', nullable: true },
+  },
+  required: ['type', 'detail'],
+  additionalProperties: false,
+}
+
+export const SecurityRequestResultEventSchema = resultEventSchema(FACULTY_MESSAGE_KINDS.credential_result)
+
+export const SecurityCancelEventSchema: JSONSchemaType<SecurityCancelEvent> = {
+  type: 'object',
+  properties: {
+    type: { type: 'string', const: FACULTY_MESSAGE_KINDS.credential_cancel },
+    detail: {
+      type: 'object',
+      properties: { id: { type: 'string', minLength: 1 } },
+      required: ['id'],
+      additionalProperties: false,
+    },
+    space: { type: 'string', nullable: true },
+  },
+  required: ['type', 'detail'],
+  additionalProperties: false,
+}
+
 export const FacultyErrorEventSchema: JSONSchemaType<FacultyErrorEvent> = {
   type: 'object',
   properties: {
@@ -424,6 +482,9 @@ export const validateShellCancelEvent = ajv.compile(ShellCancelEventSchema)
 export const validateMcpRequestEvent = ajv.compile(McpRequestEventSchema)
 export const validateMcpRequestResultEvent = ajv.compile(McpRequestResultEventSchema)
 export const validateMcpCancelEvent = ajv.compile(McpCancelEventSchema)
+export const validateSecurityRequestEvent = ajv.compile(SecurityRequestEventSchema)
+export const validateSecurityRequestResultEvent = ajv.compile(SecurityRequestResultEventSchema)
+export const validateSecurityCancelEvent = ajv.compile(SecurityCancelEventSchema)
 // No frontier cancel event: analyses are synchronous — nothing is in flight
 // to abort (the async faculties keep their cancels).
 export const FrontierRequestEventSchema: JSONSchemaType<FrontierRequestEvent> = {

@@ -32,14 +32,11 @@ import { ajv, type JsonObject } from '../../behavioral/behavioral.types.ts'
 import type { McpOp } from '../faculties.types.ts'
 
 // ---------------------------------------------------------------------------
-// Env-data — the worker's auth binding (the injection law one level down)
+// Env-data — the vend's broker binding. One home: `security/types.ts` (the
+// security faculty's); re-exported here until the mcp faculty's deprecation.
 // ---------------------------------------------------------------------------
 
-/** Env-data key holding the taskbar broker's base URL (the Pattern-2 binding). */
-export const MCP_BROKER_URL_KEY = 'MCP_BROKER_URL'
-
-/** Env-data key holding the per-boot broker secret (never tool input). */
-export const MCP_BROKER_BOOT_SECRET_KEY = 'MCP_BROKER_BOOT_SECRET'
+export { MCP_BROKER_BOOT_SECRET_KEY, MCP_BROKER_URL_KEY } from '../security/types.ts'
 
 // ---------------------------------------------------------------------------
 // Op inputs — one shape per op, no `mode` discriminator, no auth fields
