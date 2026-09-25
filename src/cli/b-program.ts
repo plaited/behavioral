@@ -1,6 +1,7 @@
 import { TRACE_MESSAGE_KINDS } from '../behavioral/behavioral.constants.ts'
 import { behavioral } from '../behavioral/behavioral.ts'
 import type { BPEvent, JsonObject, SelectionTrace, Thread, Trace } from '../behavioral/behavioral.types.ts'
+import { validateThread } from '../behavioral/behavioral.types.ts'
 import { FACULTY_MESSAGE_KINDS } from '../faculties/faculties.constants.ts'
 import { eventGuardEntries, facultiesThreads, guardThreads } from '../faculties/faculties.threads.ts'
 import {
@@ -244,7 +245,31 @@ export const bProgram = ({
       gate: (event: BPEvent): boolean => systemTwo.invalidEventGate(event),
     })
   }
-  route([FACULTY_MESSAGE_KINDS.frontier_request], { send: frontier.send, gate: frontier.gate })
+  // The admission path — pending add_thread ids. An id registers when its
+  // request routes through the frontier lane (the request leg below); the
+  // correlated frontier_request_result carries the verdict. The map is the
+  // authorization: only results correlated to requests this composition
+  // itself routed can ever admit. A null thread (the proposal failed the
+  // Thread-schema gate at registration) never admits.
+  const pendingAdmissions = new Map<string, Thread | null>()
+
+  route([FACULTY_MESSAGE_KINDS.frontier_request], {
+    send: (event: BPEvent): void => {
+      // The request leg: register the id against the proposed thread, then
+      // route through the frontier dispatch. The frontier stays
+      // analysis-shaped — it validates and returns; the composition owns the
+      // write (the verdict leg, in the pump below).
+      const detail = event.detail as { id?: string; op?: string; input?: { thread?: unknown } } | undefined
+      if (detail?.op === 'add_thread' && typeof detail.id === 'string') {
+        pendingAdmissions.set(
+          detail.id,
+          validateThread(detail.input?.thread) ? (detail.input as { thread: Thread }).thread : null,
+        )
+      }
+      frontier.send(event)
+    },
+    gate: frontier.gate,
+  })
   if (has('store')) {
     route([FACULTY_MESSAGE_KINDS.store_request], {
       send: (event: BPEvent): void => store.send(event),
@@ -267,9 +292,24 @@ export const bProgram = ({
 
   // ── The engine pump: traces out, gated events to their faculty lanes ─────
 
+  // The verdict leg: a frontier_request_result correlated to a pending
+  // add_thread id. Both verdict legs must be ok for the thread to admit under
+  // the re-entry law (addThread + step): the outer envelope (the analysis ran)
+  // and the inner verdict (it verified). The rejection is data — the
+  // requester reads the why from the verdict trace.
   useTrace((trace: Trace) => {
     if (trace.kind !== TRACE_MESSAGE_KINDS.selection) return
     const candidate = (trace as SelectionTrace).selected
+    if (candidate.type === FACULTY_MESSAGE_KINDS.frontier_request_result) {
+      const detail = candidate.detail as { id?: string; ok?: boolean; result?: { ok?: boolean } } | undefined
+      const id = detail?.id
+      if (typeof id === 'string' && pendingAdmissions.has(id)) {
+        const thread = pendingAdmissions.get(id)
+        pendingAdmissions.delete(id)
+        if (detail?.ok === true && thread && detail.result?.ok === true) addThreads([thread])
+      }
+      return
+    }
     const event = { type: candidate.type, detail: candidate.detail, space: candidate.space } as BPEvent
     const faculty = lanes[event.type]
     if (faculty === undefined) return

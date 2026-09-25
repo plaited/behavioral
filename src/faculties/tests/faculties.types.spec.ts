@@ -183,6 +183,13 @@ describe('workers.types event vocabulary', () => {
       })
       expect(valid).toBe(true)
     })
+    test('accepts the add_thread operation — the admission path', () => {
+      const valid = validateFrontierRequestEvent({
+        type: FACULTY_MESSAGE_KINDS.frontier_request,
+        detail: { id: 'fr_1', op: 'add_thread', input: { thread: { label: 't', rules: [] }, maxDepth: 8 } },
+      })
+      expect(valid).toBe(true)
+    })
     test('rejects an unknown operation — frontier is its own worker, not a tool', () => {
       const valid = validateFrontierRequestEvent({
         type: FACULTY_MESSAGE_KINDS.frontier_request,

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { TRACE_MESSAGE_KINDS } from '../../behavioral/behavioral.constants.ts'
-import type { SelectionTrace, Trace } from '../../behavioral/behavioral.types.ts'
+import type { BPEvent, JsonObject, SelectionTrace, Trace } from '../../behavioral/behavioral.types.ts'
 import { FACULTY_MESSAGE_KINDS } from '../../faculties/faculties.constants.ts'
 import {
   SecurityCancelEventSchema,
@@ -246,6 +246,74 @@ describe('bProgram — the runtime composition', () => {
     } finally {
       runtime.terminate()
     }
+  })
+
+  describe('add_thread — the admission path', () => {
+    const addThreadRequest = (id: string, thread: JsonObject, extra?: JsonObject): BPEvent => ({
+      type: FACULTY_MESSAGE_KINDS.frontier_request,
+      detail: { id, op: 'add_thread', input: { thread, maxDepth: 8, ...extra } },
+    })
+
+    const resultDetailFor = (traces: Trace[], id: string) => {
+      const sel = selectionsOf(traces).find(
+        (t) =>
+          t.selected.type === FACULTY_MESSAGE_KINDS.frontier_request_result &&
+          (t.selected.detail as { id?: string }).id === id,
+      )
+      return sel?.selected.detail as { id?: string; ok?: boolean; result?: { ok?: boolean } } | undefined
+    }
+
+    test('a valid proposal is admitted: the verdict returns and the thread_added provision fires', async () => {
+      const { runtime, traces } = startRuntime()
+      try {
+        runtime.trigger(addThreadRequest('at1', { label: 'greeter', rules: [{ request: { type: 'ping' } }] }))
+        await waitForTraces(traces, (s) =>
+          s.some(
+            (t) =>
+              (t.selected.detail as { id?: string } | undefined)?.id === 'at1' &&
+              t.selected.type === FACULTY_MESSAGE_KINDS.frontier_request_result,
+          ),
+        )
+        const detail = resultDetailFor(traces, 'at1')
+        // The verdict is data: the frontier validated, the composition owns the write.
+        expect(detail?.ok).toBe(true)
+        expect(detail?.result?.ok).toBe(true)
+        const added = traces.find(
+          (t) =>
+            t.kind === TRACE_MESSAGE_KINDS.thread_added &&
+            (t as { thread?: { label?: string } }).thread?.label === 'greeter',
+        )
+        expect(added).toBeDefined()
+      } finally {
+        runtime.terminate()
+      }
+    })
+
+    test('an invalid proposal is rejected data — no admission, no thread_added', async () => {
+      const { runtime, traces } = startRuntime()
+      try {
+        // `rules` missing: the derived Thread-schema gate rejects the whole input.
+        runtime.trigger(addThreadRequest('at2', { label: 'broken' }))
+        await waitForTraces(traces, (s) =>
+          s.some(
+            (t) =>
+              (t.selected.detail as { id?: string } | undefined)?.id === 'at2' &&
+              t.selected.type === FACULTY_MESSAGE_KINDS.frontier_request_result,
+          ),
+        )
+        const detail = resultDetailFor(traces, 'at2')
+        expect(detail?.ok).toBe(false)
+        expect(
+          traces.some(
+            (t) =>
+              t.kind === TRACE_MESSAGE_KINDS.thread_added &&
+              (t as { thread?: { label?: string } }).thread?.label === 'broken',
+          ),
+        ).toBe(false)
+      } finally {
+        runtime.terminate()
+      }
+    })
   })
 
   test('terminate kills overridden faculties too — the composition owns every process it invokes', async () => {

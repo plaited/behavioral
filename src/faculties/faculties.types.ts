@@ -114,7 +114,7 @@ export type FacultyErrorEvent = {
 }
 
 /** Frontier operations — its own worker faculty, like the responses client. */
-export type FrontierOp = 'replay' | 'explore' | 'verify'
+export type FrontierOp = 'replay' | 'explore' | 'verify' | 'add_thread'
 
 export type FrontierRequestEvent = {
   type: typeof FACULTY_MESSAGE_KINDS.frontier_request
@@ -426,7 +426,7 @@ export const FrontierRequestEventSchema: JSONSchemaType<FrontierRequestEvent> = 
       type: 'object',
       properties: {
         id: { type: 'string', minLength: 1 },
-        op: { type: 'string', enum: ['replay', 'explore', 'verify'] },
+        op: { type: 'string', enum: ['replay', 'explore', 'verify', 'add_thread'] },
         input: jsonObjectSchema,
       },
       required: ['id', 'op', 'input'],

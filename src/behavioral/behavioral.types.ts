@@ -290,7 +290,14 @@ export type Thread = {
   rules: Idioms[]
 }
 
-const ThreadSchema: JSONSchemaType<Thread> = {
+/**
+ * The runtime schema mirror of {@link Thread} — the admission gate's home.
+ * Exported so wire consumers (the frontier's `add_thread` op) derive their
+ * input schemas from it instead of hand-mirroring the tuple shape.
+ *
+ * @internal
+ */
+export const ThreadSchema: JSONSchemaType<Thread> = {
   type: 'object',
   properties: {
     space: { type: 'string', nullable: true },

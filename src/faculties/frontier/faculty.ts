@@ -43,7 +43,7 @@ import type {
   Thread,
   Trace,
 } from '../../behavioral/behavioral.types.ts'
-import { ajv, BPEventSchema } from '../../behavioral/behavioral.types.ts'
+import { ajv, BPEventSchema, ThreadSchema } from '../../behavioral/behavioral.types.ts'
 import {
   advanceRunningToPending,
   computeFrontier,
@@ -1241,6 +1241,84 @@ export const FrontierVerifyInputSchema = {
  * channel).
  */
 
+export type FrontierAddThreadInput = {
+  /** The single proposed thread — validated against the engine's own ThreadSchema home. */
+  thread: Thread
+  /** The currently mounted thread set the proposal is analyzed against. Defaults to none. */
+  threads?: Thread[]
+  /** The current trace state — a selection-trace prefix the analysis replays. Defaults to none. */
+  messages?: SelectionTrace[]
+  maxDepth: number
+  progress?: string[]
+  space?: string
+  instanceId?: string
+  sessionId?: string
+}
+
+export type FrontierAddThreadOutput = {
+  /** The verdict: true iff the proposal verified. The op does NOT admit — the composition owns the write. */
+  ok: boolean
+  /** The proposed thread, echoed verbatim. */
+  thread: Thread
+  status: 'verified' | 'failed' | 'truncated'
+  findings: FrontierVerifyOutput['findings']
+  livelocks: FrontierVerifyOutput['livelocks']
+  report: FrontierReport
+  isError?: boolean
+  message?: string
+}
+
+export const FrontierAddThreadInputSchema = {
+  type: 'object',
+  properties: {
+    thread: ThreadSchema,
+    threads: {
+      ...threadsJsonSchema,
+      nullable: true,
+      description: 'the currently mounted thread set to analyze against',
+    },
+    messages: { ...messagesJsonSchema, nullable: true },
+    maxDepth: {
+      type: 'integer',
+      minimum: 1,
+      description:
+        'Required. Exploration bound. Finite-state programs close their state graph and terminate before this. Never treat truncated as a pass.',
+    },
+    progress: {
+      type: 'array',
+      items: { type: 'string' },
+      nullable: true,
+      description: 'Event types that count as progress; cycles never selecting one are livelocks (status "failed").',
+    },
+    space: { type: 'string', nullable: true, description: 'space stamp applied to all thread rules' },
+    instanceId: {
+      type: 'string',
+      nullable: true,
+      description: 'instance id stamped on synthetic traces; defaults to a minted bp_ UUID v7',
+    },
+    sessionId: {
+      type: 'string',
+      nullable: true,
+      description: 'host session id stamped on synthetic traces; defaults to the instanceId',
+    },
+  },
+  required: ['thread', 'maxDepth'],
+  additionalProperties: false,
+  description:
+    'Validate a proposed thread for admission: schema-check the thread tuple (the engine ThreadSchema home), then structurally verify the proposal against the current thread set + trace state. Returns the verdict + analysis findings; does NOT admit — the composition owns the write.',
+} as unknown as JSONSchemaType<FrontierAddThreadInput>
+
+/**
+ * Validate a proposed thread for admission — the structural layer of dynamic
+ * thread addition.
+ *
+ * The `thread` tuple is schema-checked against the engine's own ThreadSchema
+ * (derived, not mirrored); then `verifyFrontiersRaw` analyzes the proposal
+ * joined to the current thread set over the trace prefix. The result is the
+ * verdict + findings as data — the frontier stays analysis-shaped and never
+ * writes to the engine; the composition admits on `ok`.
+ */
+
 // ---------------------------------------------------------------------------
 // Event dispatch — the wire surface
 // ---------------------------------------------------------------------------
@@ -1264,6 +1342,7 @@ const postResult = ({ id, result, space }: { id: string; result: unknown; space?
 const validateReplayInput = ajv.compile(FrontierReplayInputSchema)
 const validateExploreInput = ajv.compile(FrontierExploreInputSchema)
 const validateVerifyInput = ajv.compile(FrontierVerifyInputSchema)
+const validateAddThreadInput = ajv.compile(FrontierAddThreadInputSchema)
 
 type ToolRunner = {
   validate: (input: unknown) => boolean
@@ -1372,6 +1451,51 @@ const OP_RUNNERS: Record<string, ToolRunner> = {
           report: {
             strategy: strategy ?? 'bfs',
             selectionPolicy: selectionPolicy ?? 'all-enabled',
+            visitedCount: 0,
+            findingCount: 0,
+            truncated: false,
+            maxDepth,
+          },
+          livelocks: [],
+          isError: true,
+          message: (err as Error).message,
+        }
+      }
+    },
+  },
+  add_thread: {
+    validate: validateAddThreadInput,
+    errors: () => ajv.errorsText(validateAddThreadInput.errors),
+    run: ({
+      thread,
+      threads,
+      messages,
+      maxDepth,
+      progress,
+      space,
+      instanceId,
+      sessionId,
+    }: FrontierAddThreadInput): FrontierAddThreadOutput => {
+      try {
+        const { status, findings, report, livelocks } = verifyFrontiersRaw({
+          threads: [...(threads ?? []), thread],
+          messages,
+          maxDepth,
+          progress,
+          space,
+          instanceId,
+          sessionId,
+        })
+        return { ok: status === 'verified', thread, status, findings, report, livelocks }
+      } catch (err) {
+        return {
+          ok: false,
+          thread,
+          status: 'failed' as const,
+          findings: [],
+          report: {
+            strategy: 'bfs' as const,
+            selectionPolicy: 'all-enabled' as const,
             visitedCount: 0,
             findingCount: 0,
             truncated: false,

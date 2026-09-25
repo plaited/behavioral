@@ -825,3 +825,83 @@ describe('frontier-verify livelock integration (real programs)', () => {
     }
   })
 })
+
+describe('add_thread', () => {
+  type AddThreadResult = {
+    ok: boolean
+    thread: Thread
+    status: 'verified' | 'failed' | 'truncated'
+    findings: Array<{ code: string }>
+    livelocks: Array<{ code: string }>
+    report: { visitedCount: number }
+    isError?: boolean
+    message?: string
+  }
+
+  test('a valid proposed thread verifies: ok true, the thread echoed, the analysis attached', async () => {
+    const frontier = spawnFrontierWorker()
+    try {
+      const thread: Thread = { label: 'greeter', rules: [{ request: { type: 'ping' } }] }
+      frontier.call('a1', 'add_thread', { thread, maxDepth: 8 })
+      const result = (await frontier.resultFor('a1')).result as AddThreadResult
+      expect(result.ok).toBe(true)
+      expect(result.status).toBe('verified')
+      expect(result.thread).toEqual(thread)
+      expect(result.findings).toHaveLength(0)
+    } finally {
+      frontier.terminate()
+    }
+  })
+
+  test('a thread failing the Thread schema is boundary-rejected with error data', async () => {
+    const frontier = spawnFrontierWorker()
+    try {
+      // `rules` is required by the engine's Thread schema home — the derived
+      // input schema rejects the whole input at the boundary.
+      frontier.call('a1', 'add_thread', { thread: { label: 'broken' }, maxDepth: 8 })
+      const { ok, error } = await frontier.resultFor('a1')
+      expect(ok).toBe(false)
+      expect(String(error?.message)).toContain('invalid input')
+    } finally {
+      frontier.terminate()
+    }
+  })
+
+  test('a deadlock-producing proposal is rejected with the analysis findings', async () => {
+    const frontier = spawnFrontierWorker()
+    try {
+      // The mounted set blocks `ping`; the proposed thread requests `ping` and
+      // waits forever — the joined set deadlocks.
+      const threads: Thread[] = [{ label: 'blocker', once: true, rules: [{ block: [{ type: 'ping' }] }] }]
+      const thread: Thread = {
+        label: 'greeter',
+        rules: [{ request: { type: 'ping' } }, { waitFor: [{ type: 'never' }] }],
+      }
+      frontier.call('a1', 'add_thread', { thread, threads, maxDepth: 8 })
+      const result = (await frontier.resultFor('a1')).result as AddThreadResult
+      expect(result.ok).toBe(false)
+      expect(result.status).toBe('failed')
+      expect(result.findings.length).toBeGreaterThanOrEqual(1)
+      expect(result.findings[0]!.code).toBe('deadlock')
+      expect(result.thread).toEqual(thread)
+    } finally {
+      frontier.terminate()
+    }
+  })
+
+  test('a livelocking proposal is rejected via the progress spec', async () => {
+    const frontier = spawnFrontierWorker()
+    try {
+      // The proposed thread loops forever selecting only `tick` — with
+      // progress = ['done'] that cycle never makes progress.
+      const thread: Thread = { label: 'spinner', rules: [{ request: { type: 'tick' } }] }
+      frontier.call('a1', 'add_thread', { thread, progress: ['done'], maxDepth: 8 })
+      const result = (await frontier.resultFor('a1')).result as AddThreadResult
+      expect(result.ok).toBe(false)
+      expect(result.status).toBe('failed')
+      expect(result.livelocks.length).toBeGreaterThanOrEqual(1)
+    } finally {
+      frontier.terminate()
+    }
+  })
+})
