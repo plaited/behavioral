@@ -121,4 +121,18 @@ describe('rpc.client', () => {
       expect(outcome.error.message).toContain('connection refused')
     }
   })
+
+  test('an aborted signal is error data — cancellation rides the transport', async () => {
+    const { impl } = fetchMock([new Error('The operation was aborted')])
+    const controller = new AbortController()
+    const outcome = await send({
+      url: 'https://rpc.example/mcp',
+      method: 'ping',
+      id: 'r5',
+      fetch: impl,
+      signal: controller.signal,
+    })
+    expect(outcome.ok).toBe(false)
+    if (!outcome.ok) expect(outcome.error.code).toBe('network')
+  })
 })

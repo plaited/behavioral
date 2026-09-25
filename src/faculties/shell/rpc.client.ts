@@ -45,6 +45,8 @@ export type SendInput = {
   getAuthToken?: GetAuthToken
   /** Injectable transport. Defaults to the platform `fetch`. */
   fetch?: typeof fetch
+  /** Abort signal for the in-flight POST — cancellation rides the transport. */
+  signal?: AbortSignal
 }
 
 /** Build the JSON-RPC 2.0 request envelope for one call. */
@@ -94,6 +96,7 @@ export const send = async ({
   id = crypto.randomUUID(),
   getAuthToken,
   fetch: fetchImpl = fetch,
+  signal,
 }: SendInput): Promise<RpcResult> => {
   const token = getAuthToken === undefined ? undefined : await getAuthToken().catch(() => undefined)
   const headers: Record<string, string> = { 'content-type': 'application/json', accept: 'application/json' }
@@ -104,6 +107,7 @@ export const send = async ({
       method: 'POST',
       headers,
       body: JSON.stringify(envelope({ method, params, id })),
+      ...(signal === undefined ? {} : { signal }),
     })
   } catch (err) {
     return {
