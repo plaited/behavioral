@@ -160,6 +160,24 @@ describe('vendKeychainToken — the keychain floor of credential vending', () =>
     expect(await vendKeychainToken({ serverUrl: SERVER_URL, keychain })).toBe('atk-9')
   })
 
+  test('a ctx issuer binds the floor: a blob stamped for another AS is treated as absent', async () => {
+    const keychain = InMemoryKeychain()
+    await keychain.set(
+      tokensKey(SERVER_URL),
+      JSON.stringify({ access_token: 'atk-9', token_type: 'Bearer', issuer: 'https://as-a.example.com' }),
+    )
+    // The resolved AS is B — the A-stamped blob is not B's credential.
+    expect(
+      await vendKeychainToken({ serverUrl: SERVER_URL, keychain, issuer: 'https://as-b.example.com' }),
+    ).toBeUndefined()
+    // Matching issuer → vended.
+    expect(await vendKeychainToken({ serverUrl: SERVER_URL, keychain, issuer: 'https://as-a.example.com' })).toBe(
+      'atk-9',
+    )
+    // No ctx issuer (pre-discovery read) → the most-recently-saved blob vends.
+    expect(await vendKeychainToken({ serverUrl: SERVER_URL, keychain })).toBe('atk-9')
+  })
+
   test('treats a missing slot, a corrupt blob, and an empty access_token as absent', async () => {
     const keychain = InMemoryKeychain()
     expect(await vendKeychainToken({ serverUrl: SERVER_URL, keychain })).toBeUndefined()

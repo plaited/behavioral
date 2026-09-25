@@ -46,7 +46,12 @@ import {
 } from '../faculties.types.ts'
 import { emit, envData, wireInbound } from '../process-lane.ts'
 import { BunKeychain, vendKeychainToken } from './keychain-oauth-provider.ts'
-import { MCP_BROKER_BOOT_SECRET_KEY, MCP_BROKER_URL_KEY, validateCredentialRequestInput } from './types.ts'
+import {
+  MCP_BROKER_BOOT_SECRET_KEY,
+  MCP_BROKER_URL_KEY,
+  validateCredentialRequestInput,
+  validateSecurityRequestContext,
+} from './types.ts'
 
 // ---------------------------------------------------------------------------
 // Auth binding — module scope, from boundary-legal data only
@@ -74,8 +79,9 @@ const brokerToken = async (): Promise<string | undefined> => {
 }
 
 /** The per-server vend: broker first, keychain floor second, absent last. */
-const vendCredential = async (serverUrl: string): Promise<string | undefined> =>
-  (await brokerToken()) ?? (await vendKeychainToken({ serverUrl, keychain }))
+const vendCredential = async (serverUrl: string, issuer?: string): Promise<string | undefined> =>
+  (await brokerToken()) ??
+  (await vendKeychainToken({ serverUrl, keychain, ...(issuer === undefined ? {} : { issuer }) }))
 
 // ---------------------------------------------------------------------------
 // In-flight vends — enough state to stop one by correlation id
@@ -138,7 +144,7 @@ const handleInbound = async (message: unknown): Promise<void> => {
   // defense in depth at the process boundary.
   if (!validateSecurityRequestEvent(message)) return
   const event = message as SecurityRequestEvent
-  const { id, input } = event.detail
+  const { id, input, ctx } = event.detail
 
   // Input that fails the boundary is error data, not a throw: the id is
   // valid, so the caller learns why nothing was vended.
@@ -151,12 +157,27 @@ const handleInbound = async (message: unknown): Promise<void> => {
     })
     return
   }
+  // The host-supplied binding lane — its own strict boundary, same
+  // error-data rule (the strict shape is this faculty's, not the wire's).
+  let issuer: string | undefined
+  if (ctx !== undefined) {
+    const validateContext = validateSecurityRequestContext as unknown as ValidateFunction<unknown>
+    if (!validateContext(ctx)) {
+      postResult({
+        id,
+        space: event.space,
+        error: { code: 'error', message: `invalid input: ${ajv.errorsText(validateContext.errors)}` },
+      })
+      return
+    }
+    issuer = (ctx as { issuer?: string }).issuer
+  }
   const { serverUrl } = input as { serverUrl: string }
 
   const vend: Vend = { stopReason: null }
   active.set(id, vend)
   try {
-    const token = await vendCredential(serverUrl)
+    const token = await vendCredential(serverUrl, issuer)
     // A stop wins over the outcome: the (possibly already-vended) credential
     // is discarded and the caller learns the request was canceled.
     if (vend.stopReason === 'canceled') {

@@ -143,6 +143,19 @@ export const tokensKey = (serverUrl: string): string => `${hostOf(serverUrl)}:to
 const clientInfoKey = (serverUrl: string): string => `${hostOf(serverUrl)}:clientinfo`
 const discoveryKey = (serverUrl: string): string => `${hostOf(serverUrl)}:discovery`
 
+/**
+ * The issuer-binding rule, shared by the provider reads and the keychain
+ * floor: a blob stamped for a different authorization server is not this
+ * AS's credential — absent, never vended to the wrong server. An unstamped
+ * (legacy) blob binds to whatever AS asks; no ctx issuer (the pre-discovery
+ * read) accepts the most-recently-saved blob.
+ */
+export const issuerMatches = (stored: string | undefined, requested: string | undefined): boolean => {
+  if (requested === undefined) return true
+  if (stored === undefined) return true
+  return stored === requested
+}
+
 // ---------------------------------------------------------------------------
 // The keychain floor — credential vending's last leg
 // ---------------------------------------------------------------------------
@@ -150,7 +163,9 @@ const discoveryKey = (serverUrl: string): string => `${hostOf(serverUrl)}:discov
 /**
  * The keychain floor of credential vending: read the token slot for a server
  * and vend its `access_token`, fail-closed. A missing slot, a corrupt blob,
- * or an empty access token is an absent credential — never a throw.
+ * an empty access token, or a blob bound to a different authorization server
+ * (`issuer`, when the caller supplies one from its resolved discovery) is an
+ * absent credential — never a throw.
  *
  * MINIMAL: token expiry is not detected (no `expires_in` bookkeeping, no
  * refresh) — an expired token vends until the remote server rejects it.
@@ -160,15 +175,25 @@ const discoveryKey = (serverUrl: string): string => `${hostOf(serverUrl)}:discov
 export const vendKeychainToken = async ({
   serverUrl,
   keychain,
+  issuer,
 }: {
   serverUrl: string
   keychain: Keychain
+  /** The caller's resolved AS issuer — binds the read (undefined = most-recently-saved). */
+  issuer?: string
 }): Promise<string | undefined> => {
   try {
     const raw = await keychain.get(tokensKey(serverUrl))
     if (raw === null) return undefined
-    const tokens = JSON.parse(raw) as { access_token?: unknown }
-    return typeof tokens.access_token === 'string' && tokens.access_token !== '' ? tokens.access_token : undefined
+    const tokens = JSON.parse(raw) as { access_token?: unknown; issuer?: unknown }
+    const accessToken =
+      typeof tokens.access_token === 'string' && tokens.access_token !== '' ? tokens.access_token : undefined
+    if (accessToken === undefined) return undefined
+    const stamped = typeof tokens.issuer === 'string' && tokens.issuer !== '' ? tokens.issuer : undefined
+    // Issuer-binding: a blob bound to another AS must not be vended — the
+    // caller's resolved issuer is the only accepted binding.
+    if (!issuerMatches(stamped, issuer)) return undefined
+    return accessToken
   } catch {
     return undefined
   }
@@ -435,11 +460,7 @@ export class BunKeychainOAuthProvider {
   }
 
   #issuerMatches(stored: string | undefined, requested: string | undefined): boolean {
-    // ctx === undefined (pre-discovery read) → accept the most-recently-saved.
-    if (requested === undefined) return true
-    // An unstamped blob is legacy state — bound to whatever AS asks.
-    if (stored === undefined) return true
-    return stored === requested
+    return issuerMatches(stored, requested)
   }
 
   async #loadTokens(): Promise<StoredOAuthTokens | undefined> {

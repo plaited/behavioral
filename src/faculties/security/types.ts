@@ -128,3 +128,30 @@ export const CredentialRequestInputSchema: JSONSchemaType<CredentialRequestInput
 }
 
 export const validateCredentialRequestInput = ajv.compile(CredentialRequestInputSchema)
+
+/**
+ * The `credential_request` event's optional `detail.ctx` — the host-supplied
+ * override lane (the you.com MCP pattern: host-only parameters ride out-of-band
+ * beside `input`, never as model-facing arguments). Carries the issuer-binding
+ * context the credential read is keyed by.
+ */
+export type SecurityRequestContext = {
+  /** The resolved authorization-server `issuer` — binds the keychain read. */
+  issuer?: string
+}
+
+export const SecurityRequestContextSchema: JSONSchemaType<SecurityRequestContext> = {
+  type: 'object',
+  properties: {
+    issuer: {
+      type: 'string',
+      minLength: 1,
+      nullable: true,
+      description: 'the resolved authorization-server issuer binding',
+    },
+  },
+  required: [],
+  additionalProperties: false,
+}
+
+export const validateSecurityRequestContext = ajv.compile(SecurityRequestContextSchema)

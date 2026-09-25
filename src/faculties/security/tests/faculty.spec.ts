@@ -125,6 +125,35 @@ describe('security faculty — credential vending over the wire', () => {
     expect(result.error?.code).toBe('canceled')
   })
 
+  test('a ctx-carrying request is valid on the wire and vends (the binding rides out-of-band)', async () => {
+    const broker = brokerServer()
+    brokers.push(broker)
+    const worker = spawnSecurityWorker({ MCP_BROKER_URL: broker.url, MCP_BROKER_BOOT_SECRET: 'boot-secret' })
+    workers.push(worker)
+    // ctx rides beside input (the host-supplied override lane) — never a
+    // model-facing input field.
+    worker.call({
+      id: 'cred7',
+      input: { serverUrl: SERVER_URL },
+      ctx: { issuer: 'https://as.example.com' },
+    } as JsonObject)
+    const raw = await worker.resultFor('cred7')
+    const result = raw.detail as unknown as WireResult
+    expect(result.ok).toBe(true)
+    expect(result.result?.token).toBe('broker-tok')
+  })
+
+  test('a ctx that fails its boundary is error data naming the failure', async () => {
+    const worker = spawnSecurityWorker()
+    workers.push(worker)
+    worker.call({ id: 'cred8', input: { serverUrl: SERVER_URL }, ctx: { issuer: 42 } } as JsonObject)
+    const raw = await worker.resultFor('cred8')
+    const result = raw.detail as unknown as WireResult
+    expect(result.ok).toBe(false)
+    expect(result.error?.code).toBe('error')
+    expect(result.error?.message).toContain('invalid input')
+  })
+
   test('the request space is echoed on the result', async () => {
     const worker = spawnSecurityWorker()
     workers.push(worker)

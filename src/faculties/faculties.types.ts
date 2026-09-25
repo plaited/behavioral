@@ -176,7 +176,8 @@ export type McpCancelEvent = {
 /** Security operations — credential vending for remote servers (broker first, keychain floor second). */
 export type SecurityRequestEvent = {
   type: typeof FACULTY_MESSAGE_KINDS.credential_request
-  detail: { id: string; input: JsonObject }
+  /** `ctx` is the optional host-supplied binding (e.g. the resolved AS issuer) — out-of-band, never a model-facing input field. */
+  detail: { id: string; ctx?: JsonObject; input: JsonObject }
   space?: string
 }
 
@@ -426,7 +427,13 @@ export const SecurityRequestEventSchema: JSONSchemaType<SecurityRequestEvent> = 
     type: { type: 'string', const: FACULTY_MESSAGE_KINDS.credential_request },
     detail: {
       type: 'object',
-      properties: { id: { type: 'string', minLength: 1 }, input: jsonObjectSchema },
+      properties: {
+        id: { type: 'string', minLength: 1 },
+        // The host-supplied binding lane — its strict shape is the security
+        // faculty's boundary (SecurityRequestContextSchema), not the wire's.
+        ctx: { type: 'object', required: [], additionalProperties: true, nullable: true },
+        input: jsonObjectSchema,
+      },
       required: ['id', 'input'],
       additionalProperties: false,
     },
