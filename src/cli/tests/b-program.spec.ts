@@ -314,6 +314,22 @@ describe('bProgram — the runtime composition', () => {
         runtime.terminate()
       }
     })
+
+    test('an admitted thread goes live: its request is a candidate in the next super-step', async () => {
+      const { runtime, traces } = startRuntime()
+      try {
+        runtime.trigger(addThreadRequest('at3', { label: 'greeter', rules: [{ request: { type: 'ping' } }] }))
+        // The candidate→live transition: admission re-enters (addThread + step),
+        // so the greeter's request selects — the thread participates in the
+        // program, not just the trace log. And it keeps participating: a
+        // looping (non-once) greeter re-requests ping each super-step.
+        await waitForTraces(traces, (s) => s.some((t) => t.selected.type === 'ping'))
+        const pingSelections = selectionsOf(traces).filter((t) => t.selected.type === 'ping')
+        expect(pingSelections.length).toBeGreaterThanOrEqual(2)
+      } finally {
+        runtime.terminate()
+      }
+    })
   })
 
   test('terminate kills overridden faculties too — the composition owns every process it invokes', async () => {
