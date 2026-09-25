@@ -55,7 +55,10 @@ const RPC_AUTH_RESULT_DETAIL = {
  * requestor — a `credential_required` shell result (first attempt only: the
  * gate requires no `authToken`, bounding the loop on a post-vend 401)
  * requests a credential for the call's server URL, carrying the original
- * request out-of-band in `ctx.echo` for the replay join.
+ * request — and its own out-of-band `ctx` join lane — in `ctx.echo` for the
+ * replay join. Serves BOTH paths with one gate: the declarative one (the op
+ * short-circuits `auth: true` before calling) and the reactive one (a 401
+ * challenge on an unauthenticated call maps to the same typed result).
  */
 const credRequestor: Thread = {
   label: 'rpc-auth/requestor',
@@ -65,7 +68,7 @@ const credRequestor: Thread = {
         {
           type: FACULTY_MESSAGE_KINDS.shell_request_result,
           query:
-            '. as $d | select($d.ok == false and $d.error.code? == "credential_required" and $d.error.request.input.auth == true and ($d.error.request.input.authToken == null)) | {id: ($d.id + "-cred"), input: {serverUrl: $d.error.request.input.url}, ctx: {echo: {id: $d.id, input: $d.error.request.input}}}',
+            '. as $d | select($d.ok == false and $d.error.code? == "credential_required" and ($d.error.request.input.authToken == null)) | {id: ($d.id + "-cred"), input: {serverUrl: $d.error.request.input.url}, ctx: {echo: {id: $d.id, input: $d.error.request.input, ctx: $d.ctx}}}',
           target: FACULTY_MESSAGE_KINDS.credential_request,
           detailSchema: RPC_AUTH_RESULT_DETAIL,
         },
@@ -77,7 +80,8 @@ const credRequestor: Thread = {
 /**
  * replayer — a vended `credential_result` carrying the echoed request
  * replays the original `shell_request` with the bearer merged into the
- * input. The op proceeds with the token; the op itself never knew OAuth.
+ * input and the request's `ctx` join lane restored. The op proceeds with
+ * the token; the op itself never knew OAuth.
  */
 const credReplayer: Thread = {
   label: 'rpc-auth/replayer',
@@ -87,7 +91,7 @@ const credReplayer: Thread = {
         {
           type: FACULTY_MESSAGE_KINDS.credential_result,
           query:
-            '. as $d | select($d.ok == true and ($d.result.echo != null)) | {id: $d.result.echo.id, input: ($d.result.echo.input + {authToken: $d.result.token})}',
+            '. as $d | select($d.ok == true and ($d.result.echo != null)) | {id: $d.result.echo.id, input: ($d.result.echo.input + {authToken: $d.result.token}), ctx: $d.result.echo.ctx}',
           target: FACULTY_MESSAGE_KINDS.shell_request,
           detailSchema: {
             type: 'object',

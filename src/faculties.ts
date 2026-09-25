@@ -13,12 +13,11 @@
  */
 
 /** The selectable capability faculties (the `bProgram` allow-list). */
-export type Faculty = 'shell' | 'store' | 'mcp' | 'security'
+export type Faculty = 'shell' | 'store' | 'security'
 
 export * from './faculties/faculties.types.ts'
-export * from './faculties/mcp/threads.ts'
-export * from './faculties/mcp/types.ts'
 export * from './faculties/security/types.ts'
+export * from './faculties/shell/remote-mcp.threads.ts'
 export * from './faculties/shell/rpc-auth.threads.ts'
 export * from './faculties/shell/threads.ts'
 export * from './faculties/shell/types.ts'

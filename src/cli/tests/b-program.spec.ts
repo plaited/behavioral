@@ -10,7 +10,11 @@ import {
   ShellRequestEventSchema,
   ShellRequestResultEventSchema,
 } from '../../faculties/faculties.types.ts'
-import { startMcpServer } from '../../faculties/mcp/tests/fixtures/mcp-server-fixture.ts'
+import {
+  REMOTE_MCP_EVENT_TYPES,
+  REMOTE_MCP_PROTOCOL_VERSION,
+  REMOTE_MCP_STORE_COLLECTION,
+} from '../../faculties/shell/remote-mcp.threads.ts'
 import { useSystemOne } from '../../faculties/system-one/config.ts'
 import { startDecisionsServer } from '../../faculties/system-one/tests/fixtures/decisions-server.ts'
 import { useSystemTwo } from '../../faculties/system-two/config.ts'
@@ -21,7 +25,7 @@ import { bProgram } from '../b-program.ts'
 /**
  * bProgram — the runtime composition — through its REAL surface: the
  * hook spawns every faculty itself (engine + frontier router-owned, always
- * on; mcp/shell/responses/store default-on, pruned by the `faculties`
+ * on; shell/responses/store default-on, pruned by the `faculties`
  * allow-list). The host attaches ingress and observation through the
  * returned handle — `runtime.trigger(...)` and `runtime.useTrace(...)`.
  * `shell` is the one instance-level override: the pre-curried useFaculty
@@ -36,7 +40,7 @@ import { bProgram } from '../b-program.ts'
  *
  * The default threads are faculty-shipped: the shell threads
  * (shell/threads.ts — skill/plugin scans + links) mounts with shell+store
- * on; the mcp spine (mcp.threads.ts) mounts with store+mcp on.
+ * on; the remote-mcp pack mounts with shell+security+store on.
  */
 
 const selectionsOf = (traces: Trace[]): SelectionTrace[] =>
@@ -129,22 +133,6 @@ describe('bProgram — the runtime composition', () => {
     }
   })
 
-  test('the mcp spine ships with the mcp faculty: granted ingress fires the store get', async () => {
-    const { runtime, traces } = startRuntime()
-    try {
-      // No capture exists, so the get returns nothing and the spine waits —
-      // but the GET itself is the observable: the spine is mounted.
-      runtime.trigger({ type: 'mcp_authorization_granted', detail: { id: 'none' } })
-      await waitForTraces(traces, (s) => storeRequest(s, 'get', 'mcp-calls') !== undefined)
-      const get = storeRequest(selectionsOf(traces), 'get', 'mcp-calls')
-      expect((get?.selected.detail as { input?: { collection?: string } } | undefined)?.input?.collection).toBe(
-        'mcp-calls',
-      )
-    } finally {
-      runtime.terminate()
-    }
-  })
-
   test('the faculties allow-list prunes faculties: without shell, no route — a triggered shell_request is never answered', async () => {
     const { runtime, traces } = startRuntime({ faculties: ['store'] })
     try {
@@ -171,31 +159,6 @@ describe('bProgram — the runtime composition', () => {
       ).toBe(false)
     } finally {
       runtime.terminate()
-    }
-  })
-
-  test('the mcp faculty responds through the composition (real loopback server)', async () => {
-    const { runtime, traces } = startRuntime()
-    const server = await startMcpServer()
-    const loopback = Bun.serve({ port: 0, fetch: (req) => server.fetch(req.url, req) })
-    try {
-      // Drive the mcp faculty via the spine's replay path: granted → get →
-      // (empty capture) → nothing. Instead, assert faculty presence through
-      // a direct trigger-shaped caller: the composition mounts the spine,
-      // and the spine's auth-retry fires the get — already covered above.
-      // Here: the honest direct check — the fixture loopback round-trip is
-      // covered by the mcp worker spec; composition-level assertion is the
-      // spine mount (previous test). This test pins: the composition does
-      // not crash when mcp is default-on with a live server present.
-      runtime.trigger({ type: 'mcp_authorization_required_probe', detail: {} })
-      await Bun.sleep(200)
-      const types = new Set(selectionsOf(traces).map((t) => t.selected.type))
-      expect(types.has(FACULTY_MESSAGE_KINDS.mcp_request)).toBe(false) // no capture → no replay
-      expect(true).toBe(true)
-    } finally {
-      runtime.terminate()
-      loopback.stop(true)
-      await server.close()
     }
   })
 
@@ -435,6 +398,66 @@ describe('bProgram — the runtime composition', () => {
     } finally {
       runtime.terminate()
       await server.close()
+    }
+  })
+
+  test('the remote-mcp pack ships with shell+security+store: discovery registers the tools', async () => {
+    // A plain JSON-RPC endpoint speaking server/discover + tools/list — the
+    // 2026-07-28 stateless era needs no handshake.
+    const rpc = Bun.serve({
+      port: 0,
+      fetch: async (request) => {
+        const body = (await request.json()) as { id?: unknown; method?: string }
+        const method = body.method
+        if (method === 'server/discover')
+          return Response.json({
+            jsonrpc: '2.0',
+            id: body.id,
+            result: { supportedVersions: ['2026-07-28'], capabilities: { tools: {} } },
+          })
+        if (method === 'tools/list')
+          return Response.json({
+            jsonrpc: '2.0',
+            id: body.id,
+            result: { tools: [{ name: 'echo', description: 'echoes' }] },
+          })
+        return Response.json({ jsonrpc: '2.0', id: body.id, error: { code: -32601, message: 'nope' } })
+      },
+    })
+    const { runtime, traces } = startRuntime()
+    try {
+      runtime.trigger({
+        type: REMOTE_MCP_EVENT_TYPES.discover,
+        detail: { id: 'r1', input: { url: `http://localhost:${rpc.port}/mcp` } },
+      })
+      // The pack drives the generic rpc op: server/discover → tools/list →
+      // the store registry put (alongside the skills/plugins tenants).
+      await waitForTraces(traces, (s) => storeRequest(s, 'put', REMOTE_MCP_STORE_COLLECTION) !== undefined)
+      const put = storeRequest(selectionsOf(traces), 'put', REMOTE_MCP_STORE_COLLECTION)
+      const input = (put?.selected.detail as { input?: { key?: string; value?: { tools?: Array<{ name?: string }> } } })
+        ?.input
+      expect(input?.key).toContain('localhost')
+      expect(input?.value?.tools?.[0]?.name).toBe('echo')
+      // The outcome surfaces to the host.
+      await waitForTraces(traces, (s) =>
+        selectionsOf(s).some((t) => t.selected.type === REMOTE_MCP_EVENT_TYPES.discovered),
+      )
+      const surfaced = selectionsOf(traces).find((t) => t.selected.type === REMOTE_MCP_EVENT_TYPES.discovered)
+      const surfacedDetail = surfaced?.selected.detail as { id?: string } | undefined
+      expect(surfacedDetail?.id).toBe('r1')
+      // The pack's issued ops carry the protocol stamp (observed on the result lane).
+      expect(
+        selectionsOf(traces).some(
+          (t) =>
+            t.selected.type === FACULTY_MESSAGE_KINDS.shell_request &&
+            (t.selected.detail as { input?: { headers?: Record<string, string> } }).input?.headers?.[
+              'MCP-Protocol-Version'
+            ] === REMOTE_MCP_PROTOCOL_VERSION,
+        ),
+      ).toBe(true)
+    } finally {
+      runtime.terminate()
+      rpc.stop(true)
     }
   })
 

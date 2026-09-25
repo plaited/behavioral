@@ -50,7 +50,7 @@ const credentialRequired = (id: string, url: string, extraInput: JsonObject = {}
   },
 })
 
-const vended = (credId: string, echo: { id: string; input: JsonObject }): BPEvent => ({
+const vended = (credId: string, echo: { id: string; input: JsonObject; ctx?: JsonObject }): BPEvent => ({
   type: FACULTY_MESSAGE_KINDS.credential_result,
   detail: { id: credId, ok: true, result: { token: 'vended-1', echo } },
 })
@@ -63,27 +63,68 @@ describe('rpc auth threads — the vend-and-replay spine', () => {
     const detail = request?.detail as {
       id?: string
       input?: { serverUrl?: string }
-      ctx?: { echo?: { id?: string; input?: Record<string, unknown> } }
+      ctx?: { echo?: { id?: string; input?: Record<string, unknown>; ctx?: unknown } }
     }
     expect(detail.id).toBe('c1-cred')
     expect(detail.input?.serverUrl).toBe('https://mcp.example.com/mcp')
     expect(detail.ctx?.echo).toEqual({
       id: 'c1',
       input: { op: 'rpc', url: 'https://mcp.example.com/mcp', auth: true, method: 'tools/list' },
+      ctx: null,
     })
   })
 
-  test('the vended credential replays the call with the bearer merged in', () => {
+  test('a remote 401 challenge (no auth flag) also requests a credential — the reactive path', () => {
+    // The pack's issued rpc ops carry ctx but no auth flag: the op maps a
+    // 401-on-unauthenticated-call to credential_required, so the seam serves
+    // both the declarative and the reactive path with one gate.
     const selected = runProgram([
-      vended('c2-cred', { id: 'c2', input: { op: 'rpc', url: 'https://mcp.example.com/mcp', auth: true } }),
+      {
+        type: FACULTY_MESSAGE_KINDS.shell_request_result,
+        detail: {
+          id: 'c1r-call',
+          ok: false,
+          ctx: { echo: { source: 'c1r', url: 'https://mcp.example.com/mcp', leg: 'call', attempt: 0 } },
+          error: {
+            code: 'credential_required',
+            durationMs: 3,
+            message: 'credential required for https://mcp.example.com/mcp',
+            request: { op: 'rpc', input: { op: 'rpc', url: 'https://mcp.example.com/mcp', method: 'tools/call' } },
+          },
+        },
+      },
+    ])
+    const request = selected.find((s) => s.type === FACULTY_MESSAGE_KINDS.credential_request)
+    expect(request).toBeDefined()
+    const detail = request?.detail as { id?: string; ctx?: { echo?: { ctx?: unknown } } }
+    expect(detail.id).toBe('c1r-call-cred')
+    // The echoed ctx preserves the pack's join payload through the vend.
+    expect(detail.ctx?.echo?.ctx).toEqual({
+      echo: { source: 'c1r', url: 'https://mcp.example.com/mcp', leg: 'call', attempt: 0 },
+    })
+  })
+
+  test('the vended credential replays the call with the bearer merged in and ctx restored', () => {
+    const selected = runProgram([
+      vended('c2-cred', {
+        id: 'c2',
+        input: { op: 'rpc', url: 'https://mcp.example.com/mcp', auth: true },
+        ctx: { echo: { source: 'c2', leg: 'call', round: 0, attempt: 0 } },
+      }),
     ])
     const replay = selected.find((s) => s.type === FACULTY_MESSAGE_KINDS.shell_request)
     expect(replay).toBeDefined()
-    const detail = replay?.detail as { id?: string; input?: { authToken?: string; auth?: boolean; url?: string } }
+    const detail = replay?.detail as {
+      id?: string
+      ctx?: unknown
+      input?: { authToken?: string; auth?: boolean; url?: string }
+    }
     expect(detail.id).toBe('c2')
     expect(detail.input?.authToken).toBe('vended-1')
     expect(detail.input?.auth).toBe(true)
     expect(detail.input?.url).toBe('https://mcp.example.com/mcp')
+    // The pack's join payload survives the vend round-trip.
+    expect(detail.ctx).toEqual({ echo: { source: 'c2', leg: 'call', round: 0, attempt: 0 } })
   })
 
   test('an absent credential never replays — the caller keeps the credential_required error', () => {

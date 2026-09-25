@@ -14,8 +14,9 @@ import { spawnFaculty } from '../../tests/faculty-harness.ts'
 type WireResult = {
   id: string
   ok: boolean
+  ctx?: unknown
   result?: { output?: JsonObject; durationMs?: number }
-  error?: { code?: string; message?: string; remoteCode?: number | string }
+  error?: { code?: string; message?: string; remoteCode?: number | string; request?: { input?: { url?: string } } }
   space?: string
 }
 
@@ -189,5 +190,68 @@ describe('shell rpc op', () => {
     const result = wire(raw)
     expect(result.ok).toBe(true)
     expect(server.requests[0]?.headers.authorization).toBe('Bearer vended-tok')
+  })
+
+  test('a remote 401 on an unauthenticated call is reactive credential_required data', async () => {
+    const server = rpcServer(() => new Response('unauthorized', { status: 401 }))
+    servers.push(server)
+    const worker = spawnShellWorker()
+    workers.push(worker)
+    worker.call({ id: 'rpc10', input: { op: 'rpc', url: server.url, method: 'tools/list' } })
+    const raw = await worker.resultFor('rpc10')
+    const result = wire(raw)
+    // The 401 challenge maps to the typed vend-and-replay capture payload —
+    // the seam vends and replays; a token'd 401 stays a remote error.
+    expect(result.ok).toBe(false)
+    expect(result.error?.code).toBe('credential_required')
+    const error = result.error as { request?: { input?: { url?: string } } }
+    expect(error.request?.input?.url).toBe(server.url)
+  })
+
+  test("a remote 401 on a token'd call stays a remote error — the loop is bounded", async () => {
+    const server = rpcServer(() => new Response('unauthorized', { status: 401 }))
+    servers.push(server)
+    const worker = spawnShellWorker()
+    workers.push(worker)
+    worker.call({
+      id: 'rpc11',
+      input: { op: 'rpc', url: server.url, method: 'tools/list', authToken: 'stale-tok' },
+    })
+    const raw = await worker.resultFor('rpc11')
+    const result = wire(raw)
+    expect(result.ok).toBe(false)
+    expect(result.error?.code).toBe('error')
+    expect(result.error?.remoteCode).toBe(401)
+  })
+
+  test('request ctx echoes on the result — the thread join lane', async () => {
+    const server = rpcServer((body) => Response.json({ jsonrpc: '2.0', id: body.id, result: {} }))
+    servers.push(server)
+    const worker = spawnShellWorker()
+    workers.push(worker)
+    worker.call({
+      id: 'rpc12',
+      input: { op: 'rpc', url: server.url, method: 'x' },
+      ctx: { echo: { leg: 'call' } },
+    })
+    const raw = await worker.resultFor('rpc12')
+    const result = wire(raw)
+    expect(result.ok).toBe(true)
+    expect(result.ctx).toEqual({ echo: { leg: 'call' } })
+  })
+
+  test('op-supplied headers ride the fetch', async () => {
+    const server = rpcServer((body) => Response.json({ jsonrpc: '2.0', id: body.id, result: {} }))
+    servers.push(server)
+    const worker = spawnShellWorker()
+    workers.push(worker)
+    worker.call({
+      id: 'rpc13',
+      input: { op: 'rpc', url: server.url, method: 'x', headers: { 'MCP-Protocol-Version': '2026-07-28' } },
+    })
+    const raw = await worker.resultFor('rpc13')
+    const result = wire(raw)
+    expect(result.ok).toBe(true)
+    expect(server.requests[0]?.headers['mcp-protocol-version']).toBe('2026-07-28')
   })
 })

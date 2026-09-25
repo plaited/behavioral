@@ -27,7 +27,7 @@ export type FacultyEventSchemas = {
  * capability faculties run as Bun.spawn PROCESSES speaking the unchanged
  * behavioral wire over stdio lines (one JSON event per line), one process
  * instance per wiring (per space), replacing the Worker model for the
- * shell/store/mcp and system-one/system-two faculties.
+ * shell/store/security and system-one/system-two faculties.
  *
  * @remarks
  * Why processes over Workers (the ruling's arithmetic): a shared Worker was

@@ -117,6 +117,8 @@ export type ShellRpcOpInput = {
   auth?: boolean
   /** The vended bearer token — set by the replaying thread, never model input. */
   authToken?: string
+  /** Op-supplied headers (e.g. the remote-mcp pack's MCP-Protocol-Version stamp). */
+  headers?: Record<string, string>
   /** Wall-clock deadline for the call. @default 30_000 */
   timeoutMs?: number
 }
@@ -171,6 +173,7 @@ export const ShellRpcOpInputSchema: JSONSchemaType<ShellRpcOpInput> = {
     params: { type: 'object', required: [], additionalProperties: true, nullable: true },
     auth: { type: 'boolean', nullable: true },
     authToken: { type: 'string', nullable: true },
+    headers: { type: 'object', required: [], additionalProperties: { type: 'string' }, nullable: true },
     timeoutMs: { type: 'integer', minimum: 1, nullable: true },
   },
   required: ['op', 'url', 'method'],

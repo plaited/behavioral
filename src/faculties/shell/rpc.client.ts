@@ -43,6 +43,8 @@ export type SendInput = {
   id?: string | number
   /** Optional bearer-token vendor, consulted per call. */
   getAuthToken?: GetAuthToken
+  /** Caller-supplied headers (transport stamps; the vended bearer always rides last). */
+  headers?: Record<string, string>
   /** Injectable transport. Defaults to the platform `fetch`. */
   fetch?: typeof fetch
   /** Abort signal for the in-flight POST — cancellation rides the transport. */
@@ -95,17 +97,20 @@ export const send = async ({
   params,
   id = crypto.randomUUID(),
   getAuthToken,
+  headers,
   fetch: fetchImpl = fetch,
   signal,
 }: SendInput): Promise<RpcResult> => {
   const token = getAuthToken === undefined ? undefined : await getAuthToken().catch(() => undefined)
-  const headers: Record<string, string> = { 'content-type': 'application/json', accept: 'application/json' }
-  if (token !== undefined) headers.authorization = `Bearer ${token}`
+  const base: Record<string, string> = { 'content-type': 'application/json', accept: 'application/json' }
+  // Caller stamps ride the base; the vended bearer rides last (it always wins).
+  const requestHeaders: Record<string, string> = { ...base, ...(headers ?? {}) }
+  if (token !== undefined) requestHeaders.authorization = `Bearer ${token}`
   let response: Response
   try {
     response = await fetchImpl(url, {
       method: 'POST',
-      headers,
+      headers: requestHeaders,
       body: JSON.stringify(envelope({ method, params, id })),
       ...(signal === undefined ? {} : { signal }),
     })

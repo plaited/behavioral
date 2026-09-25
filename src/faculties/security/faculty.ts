@@ -112,6 +112,7 @@ const postResult = ({
   echo,
   error,
   space,
+  ctx,
 }: {
   id: string
   token?: string
@@ -119,12 +120,27 @@ const postResult = ({
   echo?: JsonObject
   error?: { code: string; message?: string }
   space?: string
+  ctx?: JsonObject
 }): void => {
   emit({
     type: FACULTY_MESSAGE_KINDS.credential_result,
+    // The request's ctx echoes on BOTH branches — the caller's join lane
+    // round-trips through failures too (the absent-credential surfacing).
     detail: (error === undefined
-      ? { id, ok: true, result: { token, ...(echo === undefined ? {} : { echo }) } }
-      : { id, ok: false, error: error as JsonObject }) as JsonObject & { id: string },
+      ? {
+          id,
+          ok: true,
+          result: { token, ...(echo === undefined ? {} : { echo }) },
+          ...(ctx === undefined ? {} : { ctx }),
+        }
+      : {
+          id,
+          ok: false,
+          error: error as JsonObject,
+          ...(ctx === undefined ? {} : { ctx }),
+        }) as unknown as JsonObject & {
+      id: string
+    },
     ...(space === undefined ? {} : { space }),
   })
 }
@@ -157,6 +173,7 @@ const handleInbound = async (message: unknown): Promise<void> => {
       id,
       space: event.space,
       error: { code: 'error', message: `invalid input: ${ajv.errorsText(validate.errors)}` },
+      ctx,
     })
     return
   }
@@ -170,6 +187,7 @@ const handleInbound = async (message: unknown): Promise<void> => {
         id,
         space: event.space,
         error: { code: 'error', message: `invalid input: ${ajv.errorsText(validateContext.errors)}` },
+        ctx,
       })
       return
     }
@@ -196,10 +214,11 @@ const handleInbound = async (message: unknown): Promise<void> => {
         id,
         space: event.space,
         error: { code: 'error', message: `no credential available for ${serverUrl}` },
+        ctx,
       })
       return
     }
-    postResult({ id, space: event.space, token, echo })
+    postResult({ id, space: event.space, token, echo, ctx })
   } catch (err) {
     // The vend is fail-closed by construction; this is the last-resort guard
     // so no worker-side throw ever escapes as a crash.
@@ -207,6 +226,7 @@ const handleInbound = async (message: unknown): Promise<void> => {
       id,
       space: event.space,
       error: { code: 'error', message: err instanceof Error ? err.message : String(err) },
+      ctx,
     })
   } finally {
     active.delete(id)

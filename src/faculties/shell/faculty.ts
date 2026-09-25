@@ -355,6 +355,7 @@ const runRpcOp = async ({
       // The replayed token rides the input (thread-injected); the op itself
       // never knows OAuth.
       getAuthToken: async () => input.authToken,
+      ...(input.headers === undefined ? {} : { headers: input.headers }),
       signal: controller.signal,
     })
     const durationMs = Math.round(performance.now() - started)
@@ -363,6 +364,17 @@ const runRpcOp = async ({
     if (execution.stopReason === 'canceled') return { code: 'canceled', durationMs }
     if (execution.stopReason === 'timeout') return { code: 'timeout', durationMs }
     if (outcome.ok) return { output: outcome.result, durationMs }
+    // The reactive auth path: a 401 challenge on an unauthenticated call maps
+    // to the typed vend-and-replay capture payload (the thread pack vends and
+    // replays). A 401 on a token'd call stays a remote error — bounded.
+    if (outcome.error.code === 401 && input.authToken === undefined) {
+      return {
+        code: 'credential_required',
+        durationMs,
+        message: `credential required for ${input.url}`,
+        request: { op: 'rpc', input },
+      }
+    }
     return {
       code: 'error',
       durationMs,
@@ -598,17 +610,26 @@ const postResult = ({
   payload,
   error,
   space,
+  ctx,
 }: {
   id: string
   payload?: ShellSuccess | RpcOpSuccess
   error?: ShellError | RpcOpError
   space?: string
+  ctx?: JsonObject
 }): void => {
   emit({
     type: FACULTY_MESSAGE_KINDS.shell_request_result,
+    // The request's ctx echoes at detail level — the out-of-band join lane
+    // (thread orchestration state round-trips beside ok, never model-facing).
     detail: (error === undefined
-      ? { id, ok: true, result: (payload ?? {}) as unknown as JsonObject }
-      : { id, ok: false, error: error as unknown as JsonObject }) as JsonObject & { id: string },
+      ? { id, ok: true, result: (payload ?? {}) as unknown as JsonObject, ...(ctx === undefined ? {} : { ctx }) }
+      : {
+          id,
+          ok: false,
+          error: error as unknown as JsonObject,
+          ...(ctx === undefined ? {} : { ctx }),
+        }) as unknown as JsonObject & { id: string },
     ...(space === undefined ? {} : { space }),
   })
 }
@@ -642,7 +663,7 @@ const handleInbound = async (message: unknown): Promise<void> => {
   // defense in depth at the process boundary.
   if (!validateShellRequestEvent(message)) return
   const event = message as ShellRequestEvent
-  const { id, input } = event.detail
+  const { id, input, ctx } = event.detail
 
   // Input that fails the boundary is error data, not a throw: the id is
   // valid, so the caller learns why nothing ran.
@@ -652,6 +673,7 @@ const handleInbound = async (message: unknown): Promise<void> => {
       id,
       space: event.space,
       error: errorInterior({ message: `invalid input: ${ajv.errorsText(validate.errors)}` }),
+      ctx,
     })
     return
   }
@@ -665,15 +687,16 @@ const handleInbound = async (message: unknown): Promise<void> => {
     // The clamp report rides whichever branch ran.
     const withClamp = clamped.length === 0 ? interior : { ...interior, clamped }
     if ('code' in interior) {
-      postResult({ id, space: event.space, error: withClamp as ShellError })
+      postResult({ id, space: event.space, error: withClamp as ShellError, ctx })
     } else {
-      postResult({ id, space: event.space, payload: withClamp as ShellSuccess })
+      postResult({ id, space: event.space, payload: withClamp as ShellSuccess, ctx })
     }
   } catch (err) {
     postResult({
       id,
       space: event.space,
       error: errorInterior({ message: err instanceof Error ? err.message : String(err) }),
+      ctx,
     })
   }
 }

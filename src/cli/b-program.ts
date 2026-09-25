@@ -4,9 +4,6 @@ import type { BPEvent, JsonObject, SelectionTrace, Thread, Trace } from '../beha
 import { FACULTY_MESSAGE_KINDS } from '../faculties/faculties.constants.ts'
 import { eventGuardEntries, facultiesThreads, guardThreads } from '../faculties/faculties.threads.ts'
 import {
-  McpCancelEventSchema,
-  McpRequestEventSchema,
-  McpRequestResultEventSchema,
   SecurityCancelEventSchema,
   SecurityRequestEventSchema,
   SecurityRequestResultEventSchema,
@@ -18,8 +15,8 @@ import {
   validateFrontierRequestEvent,
 } from '../faculties/faculties.types.ts'
 import { handleFrontierMessage } from '../faculties/frontier/faculty.ts'
-import { mcpThreads } from '../faculties/mcp/threads.ts'
 import { bindEmit } from '../faculties/process-lane.ts'
+import { remoteMcpThreads } from '../faculties/shell/remote-mcp.threads.ts'
 import { rpcAuthThreads } from '../faculties/shell/rpc-auth.threads.ts'
 import { shellThreads } from '../faculties/shell/threads.ts'
 import { useFaculty } from '../faculties/use-faculty.ts'
@@ -32,7 +29,7 @@ import type { Faculty } from '../faculties.ts'
  * what makes this safe on the main thread). Frontier is the in-process embed:
  * its analysis dispatch is imported and driven directly, its emit lane bound
  * to the composition's reenter. The capability faculties — shell, store, and
- * mcp as default processes; system One/Two as endpoint-carrying overrides —
+ * security as default processes; system One/Two as endpoint-carrying overrides —
  * are Bun.spawn PROCESSES speaking the unchanged wire over stdio lines —
  * per-space isolatable, abort-able, head-of-line-free — wired by the useFaculty
  * primitive.
@@ -42,7 +39,7 @@ import type { Faculty } from '../faculties.ts'
  * This was the engine transport's trailing step; it is the composition's
  * now.
  *
- * `faculties` is the allow-list (unset = shell/store/mcp on); `shell` and
+ * `faculties` is the allow-list (unset = shell/store/security on); `shell` and
  * `store` are the two default-faculty instance overrides (sandboxed shell,
  * durable store), and `systemOne`/`systemTwo` are endpoint-carrying overrides
  * with no default — all pre-curried useFaculty returns for host-constructed
@@ -117,7 +114,7 @@ export const bProgram = ({
    */
   systemTwo?: ReturnType<typeof useFaculty>
 }) => {
-  const enabled = new Set<Faculty>(faculties === undefined ? ['shell', 'store', 'mcp', 'security'] : faculties)
+  const enabled = new Set<Faculty>(faculties === undefined ? ['shell', 'store', 'security'] : faculties)
   const has = (faculty: Faculty): boolean => enabled.has(faculty)
 
   // ── The engine, in-process ────────────────────────────────────────────────
@@ -185,16 +182,6 @@ export const bProgram = ({
         })(facultyAddThreads)
       : storeOverride(facultyAddThreads)
 
-  const mcp = useFaculty({
-    command: ['bun', 'run', 'mcp/faculty.ts'],
-    name: 'mcp',
-    // The spine requires mcp + store.
-    threads: has('mcp') && has('store') ? mcpThreads : [],
-    requestSchema: McpRequestEventSchema,
-    cancelSchema: McpCancelEventSchema,
-    resultSchema: McpRequestResultEventSchema,
-  })(facultyAddThreads)
-
   // The security faculty: the cross-cutting credential/policy faculty — its
   // vending leg serves shell (remote rpc), system-two endpoints, ATProto,
   // and any future remote faculty. No threads of its own yet (the skeleton
@@ -255,12 +242,6 @@ export const bProgram = ({
       gate: (event: BPEvent): boolean => store.invalidEventGate(event),
     })
   }
-  if (has('mcp')) {
-    route([FACULTY_MESSAGE_KINDS.mcp_request, FACULTY_MESSAGE_KINDS.mcp_cancel], {
-      send: (event: BPEvent): void => mcp.send(event),
-      gate: (event: BPEvent): boolean => mcp.invalidEventGate(event),
-    })
-  }
   if (has('security')) {
     route([FACULTY_MESSAGE_KINDS.credential_request, FACULTY_MESSAGE_KINDS.credential_cancel], {
       send: (event: BPEvent): void => security.send(event),
@@ -271,6 +252,9 @@ export const bProgram = ({
   // The rpc auth seam: the vend-and-replay spine requires the op (shell) and
   // the vending leg (security) — the pack mounts only when both are on.
   if (has('shell') && has('security')) facultyAddThreads(rpcAuthThreads)
+  // The remote-mcp pack: the MCP layering over the rpc op — requires the
+  // executor (shell), the vending leg (security), and the registry (store).
+  if (has('shell') && has('security') && has('store')) facultyAddThreads(remoteMcpThreads)
 
   // ── The engine pump: traces out, gated events to their faculty lanes ─────
 
@@ -315,7 +299,6 @@ export const bProgram = ({
       bindEmit(null)
       shell.terminate()
       store.terminate()
-      mcp.terminate()
       security.terminate()
       systemOne?.terminate()
       systemTwo?.terminate()

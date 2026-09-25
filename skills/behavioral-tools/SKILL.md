@@ -1,6 +1,6 @@
 ---
 name: behavioral-tools
-description: Remote MCP operations for the behavioral agent via the mcp faculty — the mcp_request/mcp_request_result/mcp_cancel event wire (seven ops, typed authorization_required results, the auth replay spine) plus the auth/broker binding rules. The CLI tool fleet is retired: skills and plugins run through the skill-conventions skill (threads + recipes + store), git and raw shell belong to the shell faculty, HTML validation belongs to the controller floors + the classifier story , TypeScript LSP is a future faculty (TS 7.1 stable API).
+description: Remote MCP operations for the behavioral agent via the remote-mcp thread pack — the MCP layering over the shell faculty's generic `rpc` op (the 2026-07-28 stateless era: stamped `_meta` envelope, discovery, tools/call, the MRTR elicitation loop, bounded retry), with auth via the credential seam. The CLI tool fleet is retired: skills and plugins run through the skill-conventions skill (threads + recipes + store), git and raw shell belong to the shell faculty, HTML validation belongs to the controller floors + the classifier story , TypeScript LSP is a future faculty (TS 7.1 stable API).
 license: ISC
 compatibility: Requires bun and the behavioral CLI
 allowed-tools: Bash
@@ -12,12 +12,11 @@ Reference for the behavioral agent's compiled operator surfaces. As of the
 ICL conversion, **every compiled surface is a faculty or the shell** —
 the CLI tool fleet is retired:
 
-- **Remote MCP** is the mcp faculty: requests ride the behavioral
-  event wire (`mcp_request` / `mcp_request_result` / `mcp_cancel`), seven
-  ops, typed `authorization_required` results with request echo, auth bound
-  at the faculty's module scope (broker env-data + keychain floor — per-call
-  credentials are retired). See
-  [references/mcp-client.md](references/mcp-client.md).
+- **Remote MCP** is the remote-mcp thread pack over the shell faculty's
+  generic `rpc` op (the 2026-07-28 stateless era: stamped `_meta` envelope,
+  discovery, tools/call, the MRTR elicitation loop, bounded retry; auth via
+  the credential seam). See
+  [references/remote-mcp.md](references/remote-mcp.md).
 - **Skills and plugins** (discovery, reading, frontmatter validation, link
   extraction/validation) run through threads + the shell faculty (`bun run -`)
   + the store — taught by the **skill-conventions** skill.
@@ -29,5 +28,6 @@ the CLI tool fleet is retired:
 
 ## Module references
 
-- [mcp-client](references/mcp-client.md) — the mcp faculty: wire,
-  ops, typed results, auth binding, the replay spine, composing.
+- [remote-mcp](references/remote-mcp.md) — the remote-mcp thread pack:
+  the rpc op layering, trusted response shapes, the ctx join lane,
+  MRTR, composing.

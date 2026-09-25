@@ -95,24 +95,29 @@ faculties), plus its `tests/`:
 - `system-one/` — TypeSafe/OpenRouter Decisions; `configSystemOne` +
   `useSystemOne({ endpoint })`, with 429/529 retry
 - `shell/` — bun-direct script execution — `run` op TS scripts via `bun run -`,
-  `shell` op Bun Shell commands through the wrapper; temp-file payloads over
-  ~100KB, deleted on every exit
+  `shell` op Bun Shell commands through the wrapper; `rpc` op generic remote
+  JSON-RPC (the remote-mcp layering is the thread pack, not the op);
+  temp-file payloads over ~100KB, deleted on every exit
 - `store/` — durable space-scoped persistence
-- `mcp/` — remote MCP connections/sessions/auth; `keychain-oauth-provider.ts`
-  is the MCP OAuth `BunKeychain` over `Bun.secrets` plus the issuer-binding v2
-  provider (faculty-only: nothing outside `mcp/` imports it)
+- `security/` — the cross-cutting credential/policy faculty:
+  `keychain-oauth-provider.ts` is the issuer-bound OAuth `BunKeychain` over
+  `Bun.secrets` (SDK-free plain types in `security/types.ts`); the faculty
+  vends `credential_request` → `credential_result` (broker env-data first,
+  keychain floor second) — consumers are shell (remote MCP), system-two, ATProto
 - `frontier/` — the in-process embed — imported and driven by the composition;
   standalone spawns are a compatibility entry
 Each faculty owns its event types + input boundary; results echo the request
 `space`; op runners errors-as-data.
 **`src/tools/`** — deleted (fleet 0): the ICL conversion retired the CLI tool
-fleet. mcp-client is the mcp faculty (`src/faculties/mcp/faculty.ts`);
+fleet. Remote MCP is the remote-mcp thread pack over the shell faculty's
+generic `rpc` op (`src/faculties/shell/remote-mcp.threads.ts` — the retired
+`mcp` faculty's replacement; the official SDK dependency is gone);
 skill/plugin operations are the shell faculty's threads
 (`src/faculties/shell/threads.ts`) + recipes + store, taught by
 `skills/skill-conventions/`.
 **`src/faculties.ts`** — the faculties public surface (package export `./faculties`): the
 `Faculty` union, the wire types + JSON schemas/validators (`faculties.types.ts`), the override thread
-threads (`shellThreads`, `mcpThreads`), their schemas/types, `useFaculty`, and the
+threads (`shellThreads`), their schemas/types, `useFaculty`, and the
 System One/Two config surface (`configSystemOne`/`useSystemOne`,
 `configSystemTwo`/`useSystemTwo`) — what a
 `config.ts` imports to compose. (`facultiesThreads`, the default root threads, is internal.) The runtime composition itself is `src/cli/b-program.ts`.
@@ -141,7 +146,9 @@ traces out), `load-config.ts` (`<BEHAVIORAL_HOME>/config.ts`), and `trace-consum
 **`src/utils/`** — shared pure utilities.
 **`src/faculties/<faculty>/threads.ts`** — faculty threads: `shell/threads.ts`
 (the ICL threads — skill/plugin scans, catalog/manifest schema gates, links dispatchers
-+ stored recipes) and `mcp/threads.ts` (the auth replay spine). Threads ship with
++ stored recipes), `shell/rpc-auth.threads.ts` (the credential vend-and-replay
+spine), and `shell/remote-mcp.threads.ts` (the MCP layering over the rpc op).
+Threads ship with
 their faculty; `bProgram` mounts the faculty's threads when the faculty and its required
 faculties are on — except `faculties.threads.ts`, the composition's **root guard
 threads**, always mounted regardless of the allow-list. The
