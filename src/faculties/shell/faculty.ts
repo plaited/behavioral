@@ -48,7 +48,7 @@ import { ajv } from '../../behavioral/behavioral.types.ts'
 import { FACULTY_MESSAGE_KINDS } from '../faculties.constants.ts'
 import { type ShellRequestEvent, validateShellCancelEvent, validateShellRequestEvent } from '../faculties.types.ts'
 import { emit, wireInbound } from '../process-lane.ts'
-import { type GetAuthToken, send as sendRpc } from './rpc.client.ts'
+import { send as sendRpc } from './rpc.client.ts'
 import {
   type RpcOpError,
   type RpcOpSuccess,
@@ -189,16 +189,18 @@ const channelPayload = async ({
 }
 
 // ---------------------------------------------------------------------------
-// Credential seam — the security faculty's end of the rpc op (Slice 4 wiring)
+// Credential seam — the declarative auth gate (the thread pack vends)
 // ---------------------------------------------------------------------------
 
 /**
- * The rpc op's token vendor. MINIMAL: the seam stub returns no token — the
- * credential_request → credential_result round-trip through the security
- * faculty lands in Slice 4 (the op itself never knows OAuth; the thread
- * orchestrates the vending).
+ * The rpc op's credential gate: `auth: true` without a token short-circuits
+ * as typed `credential_required` — the op never calls the remote
+ * unauthenticated, and the vended token reaches it only through the
+ * replaying thread (`authToken` on the replayed input). The op itself never
+ * knows OAuth — the cross-faculty round-trip is the thread pack's
+ * (`shell/rpc-auth.threads.ts`), not this module's.
  */
-const getAuthToken: GetAuthToken = async () => undefined
+const needsCredential = (input: ShellRpcOpInput): boolean => input.auth === true && input.authToken === undefined
 
 // ---------------------------------------------------------------------------
 // In-flight execution — enough state to stop it by correlation id
@@ -330,6 +332,16 @@ const runRpcOp = async ({
   options: ShellOptions
 }): Promise<RpcOpSuccess | RpcOpError> => {
   const started = performance.now()
+  // The declarative auth gate: no vended token, no call — the typed
+  // credential_required result is the thread pack's capture payload.
+  if (needsCredential(input)) {
+    return {
+      code: 'credential_required',
+      durationMs: 0,
+      message: `credential required for ${input.url}`,
+      request: { op: 'rpc', input },
+    }
+  }
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
   const controller = new AbortController()
   const execution: Execution = { kind: 'rpc', controller, stopReason: null }
@@ -340,7 +352,9 @@ const runRpcOp = async ({
       url: input.url,
       method: input.method,
       ...(input.params === undefined ? {} : { params: input.params }),
-      getAuthToken,
+      // The replayed token rides the input (thread-injected); the op itself
+      // never knows OAuth.
+      getAuthToken: async () => input.authToken,
       signal: controller.signal,
     })
     const durationMs = Math.round(performance.now() - started)

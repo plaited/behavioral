@@ -7,6 +7,9 @@ import {
   McpCancelEventSchema,
   McpRequestEventSchema,
   McpRequestResultEventSchema,
+  SecurityCancelEventSchema,
+  SecurityRequestEventSchema,
+  SecurityRequestResultEventSchema,
   ShellCancelEventSchema,
   ShellRequestEventSchema,
   ShellRequestResultEventSchema,
@@ -17,6 +20,7 @@ import {
 import { handleFrontierMessage } from '../faculties/frontier/faculty.ts'
 import { mcpThreads } from '../faculties/mcp/threads.ts'
 import { bindEmit } from '../faculties/process-lane.ts'
+import { rpcAuthThreads } from '../faculties/shell/rpc-auth.threads.ts'
 import { shellThreads } from '../faculties/shell/threads.ts'
 import { useFaculty } from '../faculties/use-faculty.ts'
 import type { Faculty } from '../faculties.ts'
@@ -84,6 +88,7 @@ export const bProgram = ({
   faculties,
   shell: shellOverride,
   store: storeOverride,
+  security: securityOverride,
   systemOne: systemOneOverride,
   systemTwo: systemTwoOverride,
 }: {
@@ -93,6 +98,12 @@ export const bProgram = ({
   shell?: ReturnType<typeof useFaculty>
   /** The store faculty override: a pre-curried useFaculty return (durable store). */
   store?: ReturnType<typeof useFaculty>
+  /**
+   * The security faculty override: a pre-curried useFaculty return carrying
+   * env-data (the broker binding — spawned children see STARTUP env only, so
+   * hosts binding the broker mid-process pass it explicitly here).
+   */
+  security?: ReturnType<typeof useFaculty>
   /**
    * The System One faculty override (e.g. `useSystemOne({ endpoint })`). No
    * default: with no override the faculty carries no endpoint, so it is simply
@@ -106,7 +117,7 @@ export const bProgram = ({
    */
   systemTwo?: ReturnType<typeof useFaculty>
 }) => {
-  const enabled = new Set<Faculty>(faculties === undefined ? ['shell', 'store', 'mcp'] : faculties)
+  const enabled = new Set<Faculty>(faculties === undefined ? ['shell', 'store', 'mcp', 'security'] : faculties)
   const has = (faculty: Faculty): boolean => enabled.has(faculty)
 
   // ── The engine, in-process ────────────────────────────────────────────────
@@ -184,6 +195,22 @@ export const bProgram = ({
     resultSchema: McpRequestResultEventSchema,
   })(facultyAddThreads)
 
+  // The security faculty: the cross-cutting credential/policy faculty — its
+  // vending leg serves shell (remote rpc), system-two endpoints, ATProto,
+  // and any future remote faculty. No threads of its own yet (the skeleton
+  // vends); the rpc auth seam's pack lives with the op it serves.
+  const security =
+    securityOverride === undefined
+      ? useFaculty({
+          command: ['bun', 'run', 'security/faculty.ts'],
+          name: 'security',
+          threads: [],
+          requestSchema: SecurityRequestEventSchema,
+          cancelSchema: SecurityCancelEventSchema,
+          resultSchema: SecurityRequestResultEventSchema,
+        })(facultyAddThreads)
+      : securityOverride(facultyAddThreads)
+
   // ── Routing: event type → faculty lane (the only faculty knowledge) ────────
 
   // The root guard threads are always mounted, independent of the allow-list.
@@ -234,6 +261,16 @@ export const bProgram = ({
       gate: (event: BPEvent): boolean => mcp.invalidEventGate(event),
     })
   }
+  if (has('security')) {
+    route([FACULTY_MESSAGE_KINDS.credential_request, FACULTY_MESSAGE_KINDS.credential_cancel], {
+      send: (event: BPEvent): void => security.send(event),
+      gate: (event: BPEvent): boolean => security.invalidEventGate(event),
+    })
+  }
+
+  // The rpc auth seam: the vend-and-replay spine requires the op (shell) and
+  // the vending leg (security) — the pack mounts only when both are on.
+  if (has('shell') && has('security')) facultyAddThreads(rpcAuthThreads)
 
   // ── The engine pump: traces out, gated events to their faculty lanes ─────
 
@@ -279,6 +316,7 @@ export const bProgram = ({
       shell.terminate()
       store.terminate()
       mcp.terminate()
+      security.terminate()
       systemOne?.terminate()
       systemTwo?.terminate()
     },

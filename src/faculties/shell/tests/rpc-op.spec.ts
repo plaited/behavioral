@@ -152,4 +152,42 @@ describe('shell rpc op', () => {
     expect(result.error?.code).toBe('error')
     expect(result.error?.message).toContain('invalid input')
   })
+
+  test('an auth-declared rpc op without a token short-circuits as credential_required data', async () => {
+    let hits = 0
+    const server = rpcServer(() => {
+      hits += 1
+      return Response.json({ jsonrpc: '2.0', id: 1, result: {} })
+    })
+    servers.push(server)
+    const worker = spawnShellWorker()
+    workers.push(worker)
+    worker.call({ id: 'rpc8', input: { op: 'rpc', url: server.url, method: 'tools/list', auth: true } })
+    const raw = await worker.resultFor('rpc8')
+    const result = wire(raw)
+    expect(result.ok).toBe(false)
+    expect(result.error?.code).toBe('credential_required')
+    // The echo is the replay capture payload — the thread re-issues the call
+    // with the vended token; nothing reached the remote.
+    const error = result.error as { request?: { op?: string; input?: { url?: string; auth?: boolean } } }
+    expect(error.request?.op).toBe('rpc')
+    expect(error.request?.input?.url).toBe(server.url)
+    expect(error.request?.input?.auth).toBe(true)
+    expect(hits).toBe(0)
+  })
+
+  test('a token injected by the replay rides the fetch as a bearer header', async () => {
+    const server = rpcServer((body) => Response.json({ jsonrpc: '2.0', id: body.id, result: { ok: 1 } }))
+    servers.push(server)
+    const worker = spawnShellWorker()
+    workers.push(worker)
+    worker.call({
+      id: 'rpc9',
+      input: { op: 'rpc', url: server.url, method: 'tools/list', auth: true, authToken: 'vended-tok' },
+    })
+    const raw = await worker.resultFor('rpc9')
+    const result = wire(raw)
+    expect(result.ok).toBe(true)
+    expect(server.requests[0]?.headers.authorization).toBe('Bearer vended-tok')
+  })
 })

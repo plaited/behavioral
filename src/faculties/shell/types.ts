@@ -108,6 +108,15 @@ export type ShellRpcOpInput = {
   method: string
   /** The JSON-RPC params object, when the method takes one. */
   params?: JsonObject
+  /**
+   * Declare the call needs a vended credential: without a token the op
+   * short-circuits as typed `credential_required` (the thread pack's vend-
+   * and-replay capture payload) — it never calls the remote unauthenticated.
+   * The token itself rides `authToken`, injected by the replaying thread.
+   */
+  auth?: boolean
+  /** The vended bearer token — set by the replaying thread, never model input. */
+  authToken?: string
   /** Wall-clock deadline for the call. @default 30_000 */
   timeoutMs?: number
 }
@@ -160,6 +169,8 @@ export const ShellRpcOpInputSchema: JSONSchemaType<ShellRpcOpInput> = {
     url: { type: 'string', minLength: 1 },
     method: { type: 'string', minLength: 1 },
     params: { type: 'object', required: [], additionalProperties: true, nullable: true },
+    auth: { type: 'boolean', nullable: true },
+    authToken: { type: 'string', nullable: true },
     timeoutMs: { type: 'integer', minimum: 1, nullable: true },
   },
   required: ['op', 'url', 'method'],
@@ -228,7 +239,7 @@ export type ShellError = {
 // ---------------------------------------------------------------------------
 
 /** Terminal status of one rpc op — process-op statuses do not apply (no pid). */
-export type RpcStatus = 'canceled' | 'timeout' | 'error'
+export type RpcStatus = 'canceled' | 'timeout' | 'error' | 'credential_required'
 
 /** The rpc success payload — the remote call's decoded `result` rides `output`. */
 export type RpcOpSuccess = {
@@ -252,6 +263,11 @@ export type RpcOpError = {
   remoteCode?: number | string
   durationMs: number
   clamped?: string[]
+  /**
+   * The originating request, echoed only on `credential_required` — the
+   * vend-and-replay capture payload (the thread's join via `ctx.echo`).
+   */
+  request?: { op: 'rpc'; input: ShellRpcOpInput }
 }
 
 /** Every op runner's interior — one `code`-discriminated error branch over two payload families. */

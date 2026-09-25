@@ -109,18 +109,21 @@ const stopVend = ({ vend }: { vend: Vend }): void => {
 const postResult = ({
   id,
   token,
+  echo,
   error,
   space,
 }: {
   id: string
   token?: string
+  /** The ctx echo — the caller's out-of-band join payload, round-tripped verbatim. */
+  echo?: JsonObject
   error?: { code: string; message?: string }
   space?: string
 }): void => {
   emit({
     type: FACULTY_MESSAGE_KINDS.credential_result,
     detail: (error === undefined
-      ? { id, ok: true, result: { token } }
+      ? { id, ok: true, result: { token, ...(echo === undefined ? {} : { echo }) } }
       : { id, ok: false, error: error as JsonObject }) as JsonObject & { id: string },
     ...(space === undefined ? {} : { space }),
   })
@@ -172,6 +175,10 @@ const handleInbound = async (message: unknown): Promise<void> => {
     }
     issuer = (ctx as { issuer?: string }).issuer
   }
+  // The out-of-band echo rides ctx verbatim — the orchestrating thread's
+  // join payload (the you.com MCP `_meta` pattern: host-supplied data
+  // round-trips beside the model-facing arguments).
+  const echo = (ctx as { echo?: JsonObject } | undefined)?.echo
   const { serverUrl } = input as { serverUrl: string }
 
   const vend: Vend = { stopReason: null }
@@ -192,7 +199,7 @@ const handleInbound = async (message: unknown): Promise<void> => {
       })
       return
     }
-    postResult({ id, space: event.space, token })
+    postResult({ id, space: event.space, token, echo })
   } catch (err) {
     // The vend is fail-closed by construction; this is the last-resort guard
     // so no worker-side throw ever escapes as a crash.

@@ -1,0 +1,105 @@
+import { describe, expect, test } from 'bun:test'
+import { TRACE_MESSAGE_KINDS } from '../../../behavioral/behavioral.constants.ts'
+import { behavioral } from '../../../behavioral/behavioral.ts'
+import type { BPEvent, JsonObject, SelectionTrace, Trace } from '../../../behavioral/behavioral.types.ts'
+import { FACULTY_MESSAGE_KINDS } from '../../faculties.constants.ts'
+import { rpcAuthThreads } from '../rpc-auth.threads.ts'
+
+/**
+ * The rpc auth seam's thread library against the real engine — the
+ * vend-and-replay spine: a typed `credential_required` shell result requests
+ * a credential (carrying the original call out-of-band in `ctx.echo`), and
+ * the vended `credential_result` replays the call with the token merged in.
+ * The op never knows OAuth; the thread orchestrates the cross-faculty
+ * round-trip.
+ */
+
+type Selected = { type: string; detail: Record<string, unknown> | undefined }
+
+const runProgram = (events: BPEvent[]): Selected[] => {
+  const program = behavioral()
+  const selected: Selected[] = []
+  program.useTrace((trace: Trace) => {
+    if (trace.kind === TRACE_MESSAGE_KINDS.selection)
+      selected.push({
+        type: (trace as SelectionTrace).selected.type,
+        detail: (trace as SelectionTrace).selected.detail as Record<string, unknown> | undefined,
+      })
+  })
+  for (const thread of rpcAuthThreads) program.addThread(thread)
+  for (const event of events)
+    program.addThread({ label: `producer/${event.type}`, once: true, rules: [{ request: event }] })
+  // addThread is inert — trigger admits one ingress event and runs one
+  // super-step; the second pump cascades transform re-entries.
+  program.trigger({ type: 'rpc_auth_pump', detail: {} })
+  program.trigger({ type: 'rpc_auth_pump', detail: {} })
+  return selected
+}
+
+const credentialRequired = (id: string, url: string, extraInput: JsonObject = {}): BPEvent => ({
+  type: FACULTY_MESSAGE_KINDS.shell_request_result,
+  detail: {
+    id,
+    ok: false,
+    error: {
+      code: 'credential_required',
+      durationMs: 1,
+      message: 'credential required',
+      request: { op: 'rpc', input: { op: 'rpc', url, method: 'tools/list', auth: true, ...extraInput } },
+    },
+  },
+})
+
+const vended = (credId: string, echo: { id: string; input: JsonObject }): BPEvent => ({
+  type: FACULTY_MESSAGE_KINDS.credential_result,
+  detail: { id: credId, ok: true, result: { token: 'vended-1', echo } },
+})
+
+describe('rpc auth threads — the vend-and-replay spine', () => {
+  test('a credential_required result requests a credential carrying the original call in ctx.echo', () => {
+    const selected = runProgram([credentialRequired('c1', 'https://mcp.example.com/mcp')])
+    const request = selected.find((s) => s.type === FACULTY_MESSAGE_KINDS.credential_request)
+    expect(request).toBeDefined()
+    const detail = request?.detail as {
+      id?: string
+      input?: { serverUrl?: string }
+      ctx?: { echo?: { id?: string; input?: Record<string, unknown> } }
+    }
+    expect(detail.id).toBe('c1-cred')
+    expect(detail.input?.serverUrl).toBe('https://mcp.example.com/mcp')
+    expect(detail.ctx?.echo).toEqual({
+      id: 'c1',
+      input: { op: 'rpc', url: 'https://mcp.example.com/mcp', auth: true, method: 'tools/list' },
+    })
+  })
+
+  test('the vended credential replays the call with the bearer merged in', () => {
+    const selected = runProgram([
+      vended('c2-cred', { id: 'c2', input: { op: 'rpc', url: 'https://mcp.example.com/mcp', auth: true } }),
+    ])
+    const replay = selected.find((s) => s.type === FACULTY_MESSAGE_KINDS.shell_request)
+    expect(replay).toBeDefined()
+    const detail = replay?.detail as { id?: string; input?: { authToken?: string; auth?: boolean; url?: string } }
+    expect(detail.id).toBe('c2')
+    expect(detail.input?.authToken).toBe('vended-1')
+    expect(detail.input?.auth).toBe(true)
+    expect(detail.input?.url).toBe('https://mcp.example.com/mcp')
+  })
+
+  test('an absent credential never replays — the caller keeps the credential_required error', () => {
+    const selected = runProgram([
+      {
+        type: FACULTY_MESSAGE_KINDS.credential_result,
+        detail: { id: 'c3-cred', ok: false, error: { code: 'error', message: 'no credential' } },
+      },
+    ])
+    expect(selected.some((s) => s.type === FACULTY_MESSAGE_KINDS.shell_request)).toBe(false)
+  })
+
+  test('a replayed call that fails again is not re-captured — the loop is bounded', () => {
+    // The replayed request carries the token; its credential_required-shaped
+    // failure (a 401 after vend) does not match the requestor's gate.
+    const selected = runProgram([credentialRequired('c4', 'https://mcp.example.com/mcp', { authToken: 'vended-1' })])
+    expect(selected.some((s) => s.type === FACULTY_MESSAGE_KINDS.credential_request)).toBe(false)
+  })
+})

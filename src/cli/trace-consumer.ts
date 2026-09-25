@@ -40,7 +40,7 @@ const SENSITIVE_KEY = /(^|_)(TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|API_?KEY|PR
 
 /** Object field names whose string values are always redacted. */
 const SENSITIVE_FIELD =
-  /^(authorization|proxy-authorization|cookie|set-cookie|x-api-key|api[_-]?key|access[_-]?token|refresh[_-]?token|secret|password|credential|token)s?$/i
+  /^(authorization|proxy-authorization|cookie|set-cookie|x-api-key|api[_-]?key|access[_-]?token|refresh[_-]?token|auth_?token|secret|password|credential|token)s?$/i
 
 /**
  * The redaction registry — secret VALUES. A key is in scope when it matches

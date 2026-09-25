@@ -138,6 +138,12 @@ export const validateCredentialRequestInput = ajv.compile(CredentialRequestInput
 export type SecurityRequestContext = {
   /** The resolved authorization-server `issuer` — binds the keychain read. */
   issuer?: string
+  /**
+   * The caller's out-of-band join payload (e.g. the original request for the
+   * replaying thread) — echoed verbatim on the vended `credential_result`.
+   * Never model-facing; never interpreted by this faculty.
+   */
+  echo?: JsonObject
 }
 
 export const SecurityRequestContextSchema: JSONSchemaType<SecurityRequestContext> = {
@@ -149,6 +155,7 @@ export const SecurityRequestContextSchema: JSONSchemaType<SecurityRequestContext
       nullable: true,
       description: 'the resolved authorization-server issuer binding',
     },
+    echo: { type: 'object', required: [], additionalProperties: true, nullable: true },
   },
   required: [],
   additionalProperties: false,

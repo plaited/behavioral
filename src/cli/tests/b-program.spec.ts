@@ -3,6 +3,9 @@ import { TRACE_MESSAGE_KINDS } from '../../behavioral/behavioral.constants.ts'
 import type { SelectionTrace, Trace } from '../../behavioral/behavioral.types.ts'
 import { FACULTY_MESSAGE_KINDS } from '../../faculties/faculties.constants.ts'
 import {
+  SecurityCancelEventSchema,
+  SecurityRequestEventSchema,
+  SecurityRequestResultEventSchema,
   ShellCancelEventSchema,
   ShellRequestEventSchema,
   ShellRequestResultEventSchema,
@@ -432,6 +435,74 @@ describe('bProgram — the runtime composition', () => {
     } finally {
       runtime.terminate()
       await server.close()
+    }
+  })
+
+  test('the credential seam ships with shell+security: an auth rpc op vends, then replays with the bearer', async () => {
+    // The JSON-RPC endpoint requires a bearer; the broker vends one.
+    const seenAuth: Array<string | undefined> = []
+    const rpc = Bun.serve({
+      port: 0,
+      fetch: async (request) => {
+        seenAuth.push(request.headers.get('authorization') ?? undefined)
+        if (!request.headers.has('authorization')) return new Response('unauthorized', { status: 401 })
+        const body = (await request.json()) as { id?: unknown }
+        return Response.json({ jsonrpc: '2.0', id: body.id, result: { echoed: true } })
+      },
+    })
+    const broker = Bun.serve({
+      port: 0,
+      fetch: () => Response.json({ token: 'broker-tok-1' }),
+    })
+    const brokerUrl = `http://localhost:${broker.port}/`
+    // Spawned children see STARTUP env only — the broker binding rides the
+    // security override's env-data (the shell/store override pattern).
+    const { runtime, traces } = startRuntime({
+      security: useFaculty({
+        command: ['bun', 'run', 'security/faculty.ts'],
+        name: 'security',
+        threads: [],
+        env: { MCP_BROKER_URL: brokerUrl, MCP_BROKER_BOOT_SECRET: 'boot-secret' },
+        requestSchema: SecurityRequestEventSchema,
+        cancelSchema: SecurityCancelEventSchema,
+        resultSchema: SecurityRequestResultEventSchema,
+      }),
+    })
+    try {
+      runtime.trigger({
+        type: FACULTY_MESSAGE_KINDS.shell_request,
+        detail: {
+          id: 'rpc-auth-1',
+          input: { op: 'rpc', url: `http://localhost:${rpc.port}/mcp`, method: 'tools/list', auth: true },
+        },
+      })
+      // The first attempt short-circuits as credential_required; the thread
+      // vends through the security faculty and replays with the token.
+      await waitForTraces(traces, (s) =>
+        selectionsOf(s).some(
+          (t) =>
+            t.selected.type === FACULTY_MESSAGE_KINDS.shell_request_result &&
+            (t.selected.detail as { id?: string } | undefined)?.id === 'rpc-auth-1' &&
+            (t.selected.detail as { ok?: boolean }).ok === true,
+        ),
+      )
+      const results = selectionsOf(traces).filter(
+        (t) =>
+          t.selected.type === FACULTY_MESSAGE_KINDS.shell_request_result &&
+          (t.selected.detail as { id?: string }).id === 'rpc-auth-1',
+      )
+      expect(results.length).toBe(2)
+      const first = results[0]?.selected.detail as { error?: { code?: string } } | undefined
+      expect(first?.error?.code).toBe('credential_required')
+      const final = results[1]?.selected.detail as { ok?: boolean; result?: { output?: { echoed?: unknown } } }
+      expect(final.ok).toBe(true)
+      expect(final.result?.output?.echoed).toBe(true)
+      // The security faculty vended from the broker; the remote saw the bearer.
+      expect(seenAuth[0]).toBe('Bearer broker-tok-1')
+    } finally {
+      runtime.terminate()
+      rpc.stop(true)
+      broker.stop(true)
     }
   })
 })
