@@ -12,6 +12,7 @@ const fakeRuntime = () => {
   const listeners: Array<(trace: Trace) => void> = []
   const calls = { started: 0, terminated: 0 }
   const runtime = {
+    identity: { instanceId: 'bp_serve_test', sessionId: 'bp_serve_test' },
     trigger: (event: BPEvent): void => {
       triggers.push(event)
     },

@@ -119,7 +119,16 @@ export const bProgram = ({
 
   // ── The engine, in-process ────────────────────────────────────────────────
 
-  const { addThread, step, trigger, useTrace } = behavioral()
+  const { addThread, step, trigger, useTrace, instanceId } = behavioral()
+  /**
+   * The identity handoff: the engine's self-minted per-process id, with the
+   * resolved session id. The composition supplies no host session id today,
+   * so the engine's `sessionId ?? instanceId` default makes the two equal —
+   * when a host session id reaches this composition it must flow into
+   * `behavioral({ sessionId })` AND into this pair (one home for the id
+   * handshake).
+   */
+  const identity = { instanceId, sessionId: instanceId }
 
   /** The in-process re-entry law: addThread + the trailing step. */
   const addThreads = (threads: Thread[]): void => {
@@ -295,6 +304,7 @@ export const bProgram = ({
     trigger,
     useTrace,
     start,
+    identity,
     terminate: (): void => {
       bindEmit(null)
       shell.terminate()

@@ -7,12 +7,15 @@ import { createJsonRpcServer, type JsonRpcMessage, type JsonRpcServer } from './
 import { loadConfig } from './load-config.ts'
 import { collectSecretValues, createTraceConsumer, traceLogSink } from './trace-consumer.ts'
 
+/** The engine identity a host hands to its clients — the hello's payload. */
+export type RuntimeIdentity = { instanceId: string; sessionId: string }
+
 /**
  * The host's runtime surface — a narrow view of {@link bProgram}'s handle.
  *
  * @public
  */
-export type HostRuntime = Pick<ReturnType<typeof bProgram>, 'trigger' | 'useTrace' | 'start' | 'terminate'>
+export type HostRuntime = Pick<ReturnType<typeof bProgram>, 'trigger' | 'useTrace' | 'start' | 'terminate' | 'identity'>
 
 /**
  * Map one inbound JSON-RPC message onto the engine — the ONE host-side

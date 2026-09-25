@@ -1,9 +1,11 @@
 import { join } from 'node:path'
+import type { JSONSchemaType } from 'ajv'
 import type { ServerWebSocket } from 'bun'
+import { ajv } from '../behavioral/behavioral.types.ts'
 import { bundleController, CONNECT_BEHAVIORAL_ROUTE } from '../controller/bundle-controller.ts'
 import { behavioralHome } from '../faculties/behavioral-home.ts'
 import type { JsonRpcMessage } from './json-rpc.ts'
-import { dispatchToRuntime, type HostRuntime, wireRuntimeEgress } from './serve.ts'
+import { dispatchToRuntime, type HostRuntime, type RuntimeIdentity, wireRuntimeEgress } from './serve.ts'
 
 /**
  * The instance socket — `<home>/instance.sock`, the attach lane.
@@ -30,6 +32,23 @@ export type SocketHost = {
   path: string
   close: () => Promise<void>
 }
+
+/**
+ * The hello's wire shape — the engine identity a client receives on connect.
+ * The one schema home for the hello boundary: the host validates before it
+ * sends (fail closed), and attaching clients validate on receipt.
+ *
+ * @public
+ */
+export const HelloDetailSchema: JSONSchemaType<RuntimeIdentity> = {
+  type: 'object',
+  properties: { instanceId: { type: 'string' }, sessionId: { type: 'string' } },
+  required: ['instanceId', 'sessionId'],
+  additionalProperties: false,
+}
+
+/** Compiled once — the host's egress gate for the hello; attach clients reuse it on receipt. */
+export const validateHelloDetail = ajv.compile(HelloDetailSchema) as (value: unknown) => boolean
 
 /**
  * Start the attach lane: a unix-socket `Bun.serve` over the shared host
@@ -77,6 +96,17 @@ export const createSocketHost = async ({
       idleTimeout: 255,
       open: (ws) => {
         clients.add(ws)
+        // Hello-with-id: one connection-scoped notification carrying the
+        // engine identity, before any trace traffic — an attacher learns the
+        // instance id immediately, even on a fresh idle instance. Not an
+        // engine event: nothing enters the engine, nothing triggers a
+        // super-step. A malformed identity fails closed (stderr + no hello):
+        // the host never sends an unvalidated frame at the boundary.
+        if (validateHelloDetail(runtime.identity)) {
+          ws.send(frame('hello', runtime.identity))
+        } else {
+          process.stderr.write(`instance socket: runtime identity failed its schema — no hello sent\n`)
+        }
       },
       message: (ws, message) => {
         const line = typeof message === 'string' ? message : new TextDecoder().decode(message)

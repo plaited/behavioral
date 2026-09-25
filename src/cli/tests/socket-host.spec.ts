@@ -7,11 +7,15 @@ import type { BPEvent, JsonObject, SelectionTrace, Trace } from '../../behaviora
 import type { ClientMessage } from '../../controller/controller.types.ts'
 import { createSocketHost, instanceSocketPath } from '../socket-host.ts'
 
+/** The identity the engine stamps on every trace — the hello's payload. */
+const identity = { instanceId: 'bp_instance_test', sessionId: 'sess_test' }
+
 /** The host's runtime surface, faked: records triggers, traces, and lifecycle calls. */
-const fakeRuntime = () => {
+const fakeRuntime = (withIdentity = identity) => {
   const triggers: BPEvent[] = []
   const listeners: Array<(trace: Trace) => void> = []
   const runtime = {
+    identity: withIdentity,
     trigger: (event: BPEvent): void => {
       triggers.push(event)
     },
@@ -107,6 +111,57 @@ afterAll(() => {
 })
 
 describe('createSocketHost', () => {
+  test('a new client is helloed with the engine identity before anything else', async () => {
+    const home = tempHome()
+    const fake = fakeRuntime()
+    const host = await createSocketHost({ runtime: fake.runtime, home })
+    const client = await attachClient(host.path)
+    const hello = await client.waitFor<{ method: string; params: unknown }>(
+      (frame) => (frame as { method?: string }).method === 'hello',
+      'hello notification',
+    )
+    expect(hello.params).toEqual(identity)
+    // Connection-scoped notification, not an engine event: nothing entered
+    // the engine, nothing triggered a super-step.
+    expect(fake.triggers).toEqual([])
+    client.close()
+    await host.close()
+  })
+
+  test('the hello is per-connection and stays first on the wire', async () => {
+    const home = tempHome()
+    const fake = fakeRuntime()
+    const host = await createSocketHost({ runtime: fake.runtime, home })
+    const first = await attachClient(host.path)
+    const second = await attachClient(host.path)
+    fake.emit(traceOf(TRACE_MESSAGE_KINDS.idle))
+    await first.waitFor((frame) => (frame as { method?: string }).method === 'trace', 'trace on client one')
+    await second.waitFor((frame) => (frame as { method?: string }).method === 'trace', 'trace on client two')
+    // Each client saw exactly one hello, and it preceded every trace frame.
+    for (const client of [first, second]) {
+      const hellos = client.frames.filter((frame) => (frame as { method?: string }).method === 'hello')
+      expect(hellos).toHaveLength(1)
+      const helloIndex = client.frames.findIndex((frame) => (frame as { method?: string }).method === 'hello')
+      const traceIndex = client.frames.findIndex((frame) => (frame as { method?: string }).method === 'trace')
+      expect(helloIndex).toBeLessThan(traceIndex)
+    }
+    first.close()
+    second.close()
+    await host.close()
+  })
+
+  test('a runtime without a well-formed identity helloes nobody', async () => {
+    const home = tempHome()
+    const fake = fakeRuntime({ instanceId: 'bp_instance_test' } as typeof identity)
+    const host = await createSocketHost({ runtime: fake.runtime, home })
+    const client = await attachClient(host.path)
+    await Bun.sleep(100)
+    const hellos = client.frames.filter((frame) => (frame as { method?: string }).method === 'hello')
+    expect(hellos).toEqual([])
+    client.close()
+    await host.close()
+  })
+
   test('a trigger request lands as an engine event and answers accepted', async () => {
     const home = tempHome()
     const fake = fakeRuntime()

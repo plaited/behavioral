@@ -403,5 +403,13 @@ export const behavioral = (options?: { sessionId?: string }) => {
     /** Hook to subscribe to internal state traces for monitoring/debugging. */
     useTrace,
     step: () => step(),
+    /**
+     * The per-process identity the engine self-mints and stamps on every
+     * trace. Exposed so a host can hand the identity to its clients (the
+     * attach hello) without sniffing the trace wire — which on an idle
+     * instance is silent. Session ids stay accept-only: never minted,
+     * never returned (the host layer owns session identity policy).
+     */
+    instanceId,
   })
 }

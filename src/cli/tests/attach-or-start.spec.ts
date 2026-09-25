@@ -109,6 +109,35 @@ describe('attachOrStart — the two-process lifecycle', () => {
     instance.kill('SIGTERM')
     await instance.exited
   }, 40_000)
+
+  test('an idle instance helloes the attacher — the notice is immediate, carries the right id, and prints once per attach', async () => {
+    const home = tempHome()
+    const instance = spawnLifecycleProcess('start', home)
+    await eventually(() => existsSync(instanceSocketPath(home)), 'instance socket')
+    const instanceId = (await Bun.file(join(home, 'spec-instance-id')).text()).trim()
+
+    // Attach WITHOUT sending any trigger: the echo runtime only emits traces
+    // on start (before the attacher exists) and on triggers, so a notice now
+    // can only come from the connection hello.
+    const attacher = spawnLifecycleProcess('attach', home)
+    const attacherOut = collect(attacher.stdout)
+    await eventually(() => attacherOut.text().includes('attached to running instance'), 'immediate attach notice')
+    expect(attacherOut.text()).toContain(`attached to running instance ${instanceId}`)
+    expect(attacherOut.text().match(/attached to running instance/g)).toHaveLength(1)
+
+    // A subsequent attach prints exactly once as well.
+    const second = spawnLifecycleProcess('attach', home)
+    const secondOut = collect(second.stdout)
+    await eventually(() => secondOut.text().includes('attached to running instance'), 'second attach notice')
+    expect(secondOut.text().match(/attached to running instance/g)).toHaveLength(1)
+
+    second.stdin.end()
+    await second.exited
+    attacher.stdin.end()
+    await attacher.exited
+    instance.kill('SIGTERM')
+    await instance.exited
+  }, 40_000)
 })
 
 /** A still-open readable whose buffered contents readline consumes. */
@@ -127,6 +156,7 @@ const echoRuntime = (): HostRuntime => {
   }
   const base = { instanceId, sessionId: instanceId }
   return {
+    identity: base,
     trigger: (event) =>
       emit({
         kind: TRACE_MESSAGE_KINDS.selection,

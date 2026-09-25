@@ -1,9 +1,10 @@
 import type { Trace } from '../behavioral/behavioral.types.ts'
+import { validateHelloDetail } from './socket-host.ts'
 import { createTui, TRACE_KIND_COLORS } from './tui.ts'
 
 /** How the attach loop ended. */
 export type AttachResult = {
-  /** The engine's self-minted instance id, learned from the trace wire. */
+  /** The engine's self-minted instance id, learned from the connection hello. */
   instanceId?: string
   reason: 'stdin-ended' | 'socket-closed'
 }
@@ -32,7 +33,7 @@ export const attachTui = async ({
   socketPath: string
   input?: NodeJS.ReadableStream
   write?: (text: string) => void
-  /** Called once, with the instance id from the first received trace. */
+  /** Called once, with the instance id from the connection hello. */
   onAttach?: (instanceId: string) => void
 }): Promise<AttachResult> => {
   const tui = createTui({ input, write })
@@ -68,12 +69,19 @@ export const attachTui = async ({
       } catch {
         return
       }
+      // The hello is the ONE home for the id handshake: the host sends it on
+      // connect, before any trace traffic, so even a fresh idle instance
+      // identifies itself immediately. Validated at the trust boundary.
+      if (frame.method === 'hello') {
+        if (validateHelloDetail(frame.params)) {
+          const { instanceId: id } = frame.params as { instanceId: string }
+          instanceId = id
+          onAttach?.(instanceId)
+        }
+        return
+      }
       if (frame.method !== 'trace') return
       const trace = frame.params as Trace
-      if (instanceId === undefined && typeof trace?.instanceId === 'string') {
-        instanceId = trace.instanceId
-        onAttach?.(instanceId)
-      }
       // MINIMAL: trace lines render as compact JSON; richer rendering rides
       // the ui_* producers slice (upgrade path: a per-kind line formatter).
       tui.emit(JSON.stringify(trace), TRACE_KIND_COLORS[trace.kind])

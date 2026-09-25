@@ -21,6 +21,7 @@ afterAll(() => {
 const fakeRuntime = (): HostRuntime => {
   const listeners = new Set<(trace: Trace) => void>()
   return {
+    identity: { instanceId: 'bp_gui_test', sessionId: 'bp_gui_test' },
     trigger: () => {},
     useTrace: (l) => {
       listeners.add(l)
