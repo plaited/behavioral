@@ -75,6 +75,8 @@ describe('behavioral init — the runner', () => {
   // The review's missing load-test: the generated config must not merely look
   // right — it must LOAD (module resolution from the home) and COMPOSE.
   test('init links the package into the home — the generated config loads and composes', async () => {
+    const previousTypesafe = process.env.TYPESAFE_API_KEY
+    const previousOpenai = process.env.OPENAI_API_KEY
     process.env.TYPESAFE_API_KEY = 'test'
     process.env.OPENAI_API_KEY = 'test'
     try {
@@ -90,8 +92,13 @@ describe('behavioral init — the runner', () => {
       const runtime = bProgram(config)
       runtime.terminate()
     } finally {
-      delete process.env.TYPESAFE_API_KEY
-      delete process.env.OPENAI_API_KEY
+      // Restore, never delete: the env is the caller's, not this spec's — a
+      // leaked deletion poisons later specs in the same process (the live
+      // TypeSafe integration reads the real key at load).
+      if (previousTypesafe === undefined) delete process.env.TYPESAFE_API_KEY
+      else process.env.TYPESAFE_API_KEY = previousTypesafe
+      if (previousOpenai === undefined) delete process.env.OPENAI_API_KEY
+      else process.env.OPENAI_API_KEY = previousOpenai
     }
   })
 

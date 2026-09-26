@@ -24,6 +24,8 @@ import { shellThreads } from '../faculties/shell/threads.ts'
 import {
   ADMISSION_EVENT_TYPES,
   admissionJudgmentThreads,
+  supervisionJudgmentThreads,
+  supervisionThreads,
   validateAdmissionVerdict,
 } from '../faculties/system-one/threads.ts'
 import { useFaculty } from '../faculties/use-faculty.ts'
@@ -95,6 +97,7 @@ export const bProgram = ({
   security: securityOverride,
   systemOne: systemOneOverride,
   systemTwo: systemTwoOverride,
+  supervision,
 }: {
   /** Allow-list: unset = all default faculties on; set = only the named faculties spawn. */
   faculties?: Faculty[]
@@ -120,6 +123,16 @@ export const bProgram = ({
    * absent — no process, no route.
    */
   systemTwo?: ReturnType<typeof useFaculty>
+  /**
+   * The runtime supervision config: the watch list (event types the counting
+   * breaker supervises) and an optional threshold (default 4096, under the
+   * ~8.6k cascade overflow). Mounts only with systemOne (the trip's judgment
+   * requires the Decisions lane) and only when the host names watched types —
+   * v1 watches what the composition is told to, no auto-discovery. Fail-
+   * visible: on judge unavailability the block holds and `supervision_halted`
+   * surfaces the unjudged halt.
+   */
+  supervision?: { watch: string[]; threshold?: number }
 }) => {
   const enabled = new Set<Faculty>(faculties === undefined ? ['shell', 'store', 'security'] : faculties)
   const has = (faculty: Faculty): boolean => enabled.has(faculty)
@@ -249,6 +262,14 @@ export const bProgram = ({
     // candidate's admission is blocked while its Decision runs; the verdict
     // events below are the judge's road back to the pump.
     facultyAddThreads(admissionJudgmentThreads)
+    // The supervision threads: the runtime circuit breaker (the counting
+    // supervisor) + its judgment (block-then-judge at runtime, the admission
+    // pattern rotated). Mounts with systemOne and only when the host supplies
+    // a watch list — the pack's second line of defense.
+    if (supervision !== undefined) {
+      facultyAddThreads(supervisionThreads(supervision))
+      facultyAddThreads(supervisionJudgmentThreads)
+    }
     route([FACULTY_MESSAGE_KINDS.system_one_request, FACULTY_MESSAGE_KINDS.system_one_cancel], {
       send: (event: BPEvent): void => systemOne.send(event),
       gate: (event: BPEvent): boolean => systemOne.invalidEventGate(event),

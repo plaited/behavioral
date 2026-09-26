@@ -17,7 +17,7 @@ import {
 } from '../../faculties/shell/remote-mcp.threads.ts'
 import { useSystemOne } from '../../faculties/system-one/config.ts'
 import { startDecisionsServer } from '../../faculties/system-one/tests/fixtures/decisions-server.ts'
-import { ADMISSION_EVENT_TYPES } from '../../faculties/system-one/threads.ts'
+import { ADMISSION_EVENT_TYPES, SUPERVISION_EVENT_TYPES } from '../../faculties/system-one/threads.ts'
 import { useSystemTwo } from '../../faculties/system-two/config.ts'
 import { ASSISTANT_TEXT, startOpenResponsesServer } from '../../faculties/system-two/tests/fixtures/model-server.ts'
 import { useFaculty } from '../../faculties/use-faculty.ts'
@@ -688,6 +688,76 @@ describe('bProgram — the runtime composition', () => {
           await server.close()
         }
       })
+    })
+  })
+
+  describe('runtime supervision (systemOne wired)', () => {
+    const watched = 'sup_watched'
+
+    test('the counted trip is judged through the real faculty: the lift releases the block, the program continues', async () => {
+      const server = await startDecisionsServer()
+      const { runtime, traces } = startRuntime({
+        systemOne: useSystemOne({ endpoint: { url: server.url, model: 'jev-latest' } }),
+        supervision: { watch: [watched], threshold: 4 },
+      })
+      try {
+        for (let i = 0; i < 4; i++) runtime.trigger({ type: watched, detail: {} })
+        // The trip surfaced — the breaker blocked the watched type mid-run.
+        await waitForTraces(traces, (s) => s.some((t) => t.selected.type === SUPERVISION_EVENT_TYPES.tripped))
+        // The judgment ran through the REAL faculty (the result trace proves
+        // the round-trip completed) — the state carries the loop's identity,
+        // the question is the supervision choice.
+        await waitForTraces(traces, (s) =>
+          s.some(
+            (t) =>
+              t.selected.type === 'system_one_request_result' &&
+              (t.selected.detail as { id?: string }).id === `${watched}-supervision`,
+          ),
+        )
+        const judged = server.requests.find((r) => (r.body.state as { lane?: string }).lane === 'supervision')
+        expect(judged).toBeDefined()
+        const judgedState = judged?.body.state as { type?: string } | undefined
+        expect(judgedState?.type).toBe(watched)
+        expect(Object.keys(judged?.body.questions ?? {})).toContain('supervision')
+        // The lift: the release fires, no halt, the block lifts — and the
+        // watched type selects again. The program continued.
+        await waitForTraces(traces, (s) => s.some((t) => t.selected.type === SUPERVISION_EVENT_TYPES.release))
+        expect(selectionsOf(traces).some((t) => t.selected.type === SUPERVISION_EVENT_TYPES.halted)).toBe(false)
+        runtime.trigger({ type: watched, detail: {} })
+        await waitForTraces(traces, (s) => s.filter((t) => t.selected.type === watched).length === 5)
+      } finally {
+        runtime.terminate()
+        await server.close()
+      }
+    })
+
+    test('fail-visible: an unavailable judge holds the block and surfaces the halt with the reason', async () => {
+      // The judge is unavailable — every call 429s and the provider exhausts
+      // its retries, so the result is the faculty's error branch. The block
+      // HOLDS and the halt is visible with the judge-failure reason — never
+      // silent continuation, never an invisible halt.
+      const server = await startDecisionsServer({ rateLimitFirst: 999 })
+      const { runtime, traces } = startRuntime({
+        systemOne: useSystemOne({ endpoint: { url: server.url, model: 'jev-latest' } }),
+        supervision: { watch: [watched], threshold: 4 },
+      })
+      try {
+        for (let i = 0; i < 4; i++) runtime.trigger({ type: watched, detail: {} })
+        await waitForTraces(traces, (s) => s.some((t) => t.selected.type === SUPERVISION_EVENT_TYPES.halted))
+        const halted = selectionsOf(traces).find((t) => t.selected.type === SUPERVISION_EVENT_TYPES.halted)
+        const haltedDetail = halted?.selected.detail as { type?: string; reason?: string } | undefined
+        expect(haltedDetail?.type).toBe(watched)
+        expect(typeof haltedDetail?.reason).toBe('string')
+        // The block HOLDS: no release ever fired, and a later watched event
+        // stays blocked — the count never advances past the threshold.
+        expect(selectionsOf(traces).some((t) => t.selected.type === SUPERVISION_EVENT_TYPES.release)).toBe(false)
+        runtime.trigger({ type: watched, detail: {} })
+        await new Promise((resolve) => setTimeout(resolve, 300))
+        expect(selectionsOf(traces).filter((t) => t.selected.type === watched).length).toBe(4)
+      } finally {
+        runtime.terminate()
+        await server.close()
+      }
     })
   })
 

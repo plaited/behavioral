@@ -318,11 +318,18 @@ export const admissionJudgmentThreads: Thread[] = [admissionIssue, admissionGate
  * rides a future event source if a named need arrives.
  */
 
-/** Supervision-owned event types: the trip surfaces; the release lifts a block. */
+/** Supervision-owned event types: the trip surfaces; the release lifts a block; the halt stands visible. */
 export const SUPERVISION_EVENT_TYPES = {
   tripped: 'supervision_tripped',
   release: 'supervision_release',
+  halted: 'supervision_halted',
 } as const
+
+/** The judge-request correlation suffix: `<watchedType>-supervision` ↔ the result's echoed id. */
+export const SUPERVISION_JUDGE_SUFFIX = '-supervision'
+
+/** The Decision question the supervision judgment asks (the `supervision` choice). */
+export const SUPERVISION_QUESTION = 'supervision'
 
 /** The default count threshold — under the ~8.6k cascade overflow, so the breaker fires mid-cascade. */
 export const SUPERVISION_DEFAULT_THRESHOLD = 4096
@@ -396,3 +403,214 @@ export const supervisionThreads = ({
       },
     ],
   }))
+
+// ── Supervision — the block-then-judge threads ─────────────────────────
+
+/**
+ * The supervision judgment threads — the admission pattern rotated to
+ * runtime. On a surfaced trip, `supervision-issue` asks the systemOne judge
+ * whether the blocked loop is legitimate; the verdict maps the
+ * judge-correlated result back to the supervisor's release/halt:
+ *
+ * - **lift** (an explicit `lift` choice) → `supervision_release { type }` —
+ *   the supervisor's hold rule matches, the block lifts, and the wrap back
+ *   to the counter IS the reset (the program continues).
+ * - **halt** (the `halt` choice, a malformed answer) →
+ *   `supervision_halted { type }` — the block holds; the halt is visible.
+ * - **judge unavailable** (the faculty's error branch: 429-exhausted,
+ *   timeout, crash) → `supervision_halted { type, reason }` — FAIL-VISIBLE,
+ *   locked: the block holds AND the unjudged halt surfaces with the
+ *   judge-failure reason. Never silent continuation (fail-open), never an
+ *   invisible halt (fail-closed without signal).
+ *
+ * The three listeners' gates are mutually exclusive (ok false / ok true with
+ * choice `lift` / ok true with anything else — the not-const division), so
+ * exactly one acts per judge result: no declining sibling, zero
+ * transform_errors on any branch — the audit surface stays clean.
+ */
+
+/**
+ * The Decision input the judgment issues: the loop's identity rides as state
+ * (the watched type, the count at trip, the threshold), the question is the
+ * lift/halt choice over the shared question schema. One home; the specs and
+ * the composition consume this shape, never a mirror.
+ */
+export type SupervisionDecisionInput = {
+  state: { lane: 'supervision'; type: string; count: number; threshold: number }
+  questions: { [SUPERVISION_QUESTION]: ChoiceQuestion }
+}
+
+export const SUPERVISION_INPUT_SCHEMA = {
+  type: 'object',
+  properties: {
+    state: {
+      type: 'object',
+      properties: {
+        lane: { type: 'string', const: 'supervision' },
+        type: { type: 'string', minLength: 1 },
+        count: { type: 'integer', minimum: 1 },
+        threshold: { type: 'integer', minimum: 1 },
+      },
+      required: ['lane', 'type', 'count', 'threshold'],
+      additionalProperties: false,
+    },
+    questions: {
+      type: 'object',
+      properties: { [SUPERVISION_QUESTION]: choiceQuestionSchema },
+      required: [SUPERVISION_QUESTION],
+      additionalProperties: false,
+    },
+  },
+  required: ['state', 'questions'],
+  additionalProperties: false,
+} as unknown as JSONSchemaType<SupervisionDecisionInput>
+
+/** The issued Decision input's boundary — the threads' jq must produce exactly this. */
+export const validateSupervisionInput = ajv.compile(SUPERVISION_INPUT_SCHEMA)
+
+/** The surfaced halt — the unjudged or judged halt, standing visible on the wire. */
+export type SupervisionHalted = {
+  /** The watched event type that stays blocked. */
+  type: string
+  /** Why the halt stands — the judge-failure detail, when the judge was unavailable. */
+  reason?: string
+}
+
+/** The halt detail's one home — consumers (host egress, recovery threads) derive from this, never hand-mirror. */
+export const SUPERVISION_HALTED_SCHEMA = {
+  type: 'object',
+  properties: {
+    type: { type: 'string', minLength: 1 },
+    reason: { type: 'string' },
+  },
+  required: ['type'],
+  additionalProperties: false,
+} as unknown as JSONSchemaType<SupervisionHalted>
+
+/** The halt detail's boundary — consumers validate surfaced halts against this home. */
+export const validateSupervisionHalted = ajv.compile(SUPERVISION_HALTED_SCHEMA)
+
+/** The lift-shaped result — the release condition: an explicit `lift` choice on the supervision question. */
+export const SUPERVISION_JUDGE_LIFT_SCHEMA = {
+  type: 'object',
+  properties: {
+    id: { type: 'string', pattern: '-supervision$' },
+    ok: { type: 'boolean', const: true },
+    result: {
+      type: 'object',
+      properties: {
+        answers: {
+          type: 'object',
+          properties: {
+            [SUPERVISION_QUESTION]: {
+              type: 'object',
+              properties: { choice: { type: 'string', const: 'lift' } },
+              required: ['choice'],
+            },
+          },
+          required: [SUPERVISION_QUESTION],
+        },
+      },
+      required: ['answers'],
+    },
+  },
+  required: ['id', 'ok', 'result'],
+  additionalProperties: true,
+} as const
+
+/** The judge-unavailable result — the faculty's error branch (429-exhausted, timeout, crash). */
+export const SUPERVISION_JUDGE_ERROR_SCHEMA = {
+  type: 'object',
+  properties: {
+    id: { type: 'string', pattern: '-supervision$' },
+    ok: { type: 'boolean', const: false },
+  },
+  required: ['id', 'ok'],
+  additionalProperties: true,
+} as const
+
+/**
+ * An answered-but-not-lift result — a `halt` choice, a malformed answer, or
+ * the answer missing entirely (the oneOf's non-object branch and the
+ * vacuous `not` cover the junk shapes): everything but an explicit lift
+ * halts. Mutually exclusive with the lift gate on `choice` and with the
+ * error gate on `ok` — the division is total, so no listener ever declines.
+ */
+export const SUPERVISION_JUDGE_NONLIFT_SCHEMA = {
+  type: 'object',
+  properties: {
+    id: { type: 'string', pattern: '-supervision$' },
+    ok: { type: 'boolean', const: true },
+    result: {
+      type: 'object',
+      properties: {
+        answers: {
+          type: 'object',
+          properties: {
+            [SUPERVISION_QUESTION]: {
+              oneOf: [
+                { type: 'object', properties: { choice: { not: { const: 'lift' } } } },
+                { not: { type: 'object' } },
+              ],
+            },
+          },
+        },
+      },
+    },
+  },
+  required: ['id', 'ok'],
+  additionalProperties: true,
+} as const
+
+/** supervision-issue — a surfaced trip issues the correlated `system_one_request` with the loop's identity as Decision input. */
+const supervisionIssue: Thread = {
+  label: 'system-one/supervision-issue',
+  rules: [
+    {
+      transform: [
+        {
+          type: SUPERVISION_EVENT_TYPES.tripped,
+          query: `. as $d | { id: ($d.type + "${SUPERVISION_JUDGE_SUFFIX}"), input: {
+    state: { lane: "supervision", type: $d.type, count: $d.count, threshold: $d.threshold },
+    questions: { ${SUPERVISION_QUESTION}: { type: "choice",
+      instructions: "Supervision judgment: the runtime circuit breaker has blocked the watched event type after state.count consecutive selections (the configured threshold is state.threshold). Decide whether this self-sustaining activity is legitimate work that should resume, or an anomaly that should stay halted.",
+      criteria: { lift: "The activity is legitimate — lift the block and let the program continue.", halt: "The activity is an anomaly — keep the block; the halt stands." } } } } }`,
+          target: FACULTY_MESSAGE_KINDS.system_one_request,
+          detailSchema: SUPERVISION_TRIPPED_SCHEMA,
+        },
+      ],
+    },
+  ],
+}
+
+/** supervision-verdict — the judge-correlated result maps to the outcome: an explicit lift releases; everything else halts, fail-visible. */
+const supervisionVerdict: Thread = {
+  label: 'system-one/supervision-verdict',
+  rules: [
+    {
+      transform: [
+        {
+          type: FACULTY_MESSAGE_KINDS.system_one_request_result,
+          query: `. as $d | { type: ($d.id | sub("${SUPERVISION_JUDGE_SUFFIX}$"; "")) }`,
+          target: SUPERVISION_EVENT_TYPES.release,
+          detailSchema: SUPERVISION_JUDGE_LIFT_SCHEMA,
+        },
+        {
+          type: FACULTY_MESSAGE_KINDS.system_one_request_result,
+          query: `. as $d | { type: ($d.id | sub("${SUPERVISION_JUDGE_SUFFIX}$"; "")), reason: ($d.error.message? // "judge unavailable") }`,
+          target: SUPERVISION_EVENT_TYPES.halted,
+          detailSchema: SUPERVISION_JUDGE_ERROR_SCHEMA,
+        },
+        {
+          type: FACULTY_MESSAGE_KINDS.system_one_request_result,
+          query: `. as $d | { type: ($d.id | sub("${SUPERVISION_JUDGE_SUFFIX}$"; "")) }`,
+          target: SUPERVISION_EVENT_TYPES.halted,
+          detailSchema: SUPERVISION_JUDGE_NONLIFT_SCHEMA,
+        },
+      ],
+    },
+  ],
+}
+
+/** The supervision judgment threads — mounts with systemOne alongside the breaker (the composition wires it). */
+export const supervisionJudgmentThreads: Thread[] = [supervisionIssue, supervisionVerdict]
