@@ -159,7 +159,9 @@ snapshots at boot, decided keys never re-adjudicate), and `ui-threads.ts` (the
 `ui_*` producer threads — the view-generation policy: the design.md scan →
 store tenant, the scale preflight, the generation lane → `ui_render`; mounted
 with shell + store + systemTwo, composition territory — no process, not a
-faculty).
+faculty), and `ui-capture.ts` (the autoresearch loop's capture side — the
+in-process raw run consumer + the frontier replay builder; the socket host
+wires its file sink under `<home>/captures`).
 **`src/utils/`** — shared pure utilities.
 **`src/faculties/<faculty>/threads.ts`** — faculty threads: `shell/threads.ts`
 (the ICL threads — skill/plugin scans, catalog/manifest schema gates, links dispatchers

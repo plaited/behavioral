@@ -6,6 +6,7 @@ import { bundleController, CONNECT_BEHAVIORAL_ROUTE } from '../controller/bundle
 import { behavioralHome } from '../faculties/behavioral-home.ts'
 import type { JsonRpcMessage } from './json-rpc.ts'
 import { dispatchToRuntime, type HostRuntime, type RuntimeIdentity, wireRuntimeEgress } from './serve.ts'
+import { createUiCapture, uiCaptureFileSink } from './ui-capture.ts'
 
 /**
  * The instance socket — `<home>/instance.sock`, the attach lane.
@@ -173,6 +174,14 @@ export const createSocketHost = async ({
       for (const ws of clients) ws.send(frame(method, params))
     },
   })
+
+  // The ui autoresearch loop's capture lane: a second useTrace consumer
+  // (in-process RAW — the eval ruling's canonical path; per-consumer catch,
+  // coexisting with the redacted lane untouched) writing ui-pipeline runs to
+  // `<home>/captures/ui-runs.jsonl` for the eval harness. MINIMAL: the socket
+  // host (the TUI/start path) is the wired deliverable; the serve host gains
+  // it when a named need arrives.
+  runtime.useTrace(createUiCapture({ sink: uiCaptureFileSink({ root: join(home, 'captures') }) }))
 
   return {
     path,

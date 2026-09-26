@@ -165,6 +165,21 @@ html references the properties, not literals. MINIMAL: the store is the v1
 home; the serving seam (a host stylesheet route or inlined `<style>`) is a
 named later iteration — the loop earns it.
 
+### The autoresearch loop
+
+The initial thread set is a **first hypothesis refined by measurement, not
+argument**. The capture lane: an in-process RAW `useTrace` consumer
+(`src/cli/ui-capture.ts`, mounted by the socket host — the TUI/start path)
+writes each ui-pipeline run — a `render` ingress through its `ui_render` — to
+`<home>/captures/ui-runs.jsonl` as `{ startedAt, threads, reentries, messages }`:
+the standing Thread set and the position-tagged once-thread re-entries ride
+`thread_added` for free. The replay pass is `frontier_request { op: 'replay' }`
+over a captured run (`uiReplayRequest`) — the divergence view: replay the full
+run for the end state, or pass a message-count prefix (e.g. up to just before
+the browser's scale reply) to re-derive the hold — where requests blocked and
+what the frontier looked like. The graders are consumer-authored; the loop
+wires the capture and the replay, nothing more.
+
 ## Wiring guidance
 
 - **Wiring a multi-page app**: one `Controller` per page, constructed in the

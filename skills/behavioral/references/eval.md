@@ -95,6 +95,14 @@ harness must capture `Thread[]` (via `thread_added`) and the messages to be
 able to branch-analyze later. For a plain agent (no behavioral layer) there
 are no threads and frontier analysis doesn't apply.
 
+One concrete consumer ships with the harness: the ui autoresearch loop
+(`src/cli/ui-capture.ts`) captures ui-pipeline runs exactly this way — the
+standing `Thread[]` plus position-tagged once-thread re-entries (the
+transform targets' requesters, needed for faithful prefix replay), flushed to
+`<home>/captures/ui-runs.jsonl`, with `uiReplayRequest` building the replay
+event over a run or a message prefix. See
+[controller.md](./controller.md)'s autoresearch section for the pipeline side.
+
 ## The redacted/raw split
 
 **Consumer position determines the view.** The engine never awaits or gates

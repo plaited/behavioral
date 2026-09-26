@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from 'bun:test'
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { TRACE_MESSAGE_KINDS } from '../../behavioral/behavioral.constants.ts'
@@ -251,6 +251,57 @@ describe('createSocketHost', () => {
     await client.waitFor((frame) => (frame as { id?: number }).id === 1, 'trigger response')
     client.close()
     await host.close()
+  })
+
+  test('the ui capture lane is wired: a ui run lands in <home>/captures', async () => {
+    const home = tempHome()
+    const fake = fakeRuntime()
+    const host = await createSocketHost({ runtime: fake.runtime, home })
+    try {
+      // A scripted ui pipeline: the render ingress, the scale check, the
+      // browser reply, and the render — the capture closes the run.
+      fake.emit({
+        ...selectionOf({ type: 'render', detail: {} }),
+        selected: { priority: 0, type: 'render', detail: {}, ingress: true },
+      })
+      fake.emit(
+        selectionOf({
+          type: 'ui_scale_check',
+          detail: { id: 'ui-scale-check', target: 'body', swap: 'innerHTML' },
+        }) as never,
+      )
+      fake.emit(
+        selectionOf({
+          type: 'ui_scale_check_result',
+          detail: { id: 'ui-scale-check', target: 'body', effectiveScale: 's3', timeStamp: 1 },
+        }) as never,
+      )
+      fake.emit(
+        selectionOf({
+          type: 'ui_render',
+          detail: { id: 'ui-render', target: 'body', html: '<p>x</p>', swap: 'innerHTML' },
+        }) as never,
+      )
+      const file = join(home, 'captures', 'ui-runs.jsonl')
+      const deadline = Date.now() + 5_000
+      while (!existsSync(file)) {
+        if (Date.now() > deadline) throw new Error('capture file never appeared')
+        await Bun.sleep(10)
+      }
+      const lines = readFileSync(file, 'utf8')
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line) as { messages: Array<{ selected: { type: string } }> })
+      expect(lines).toHaveLength(1)
+      expect(lines[0]!.messages.map((m) => m.selected.type)).toEqual([
+        'render',
+        'ui_scale_check',
+        'ui_scale_check_result',
+        'ui_render',
+      ])
+    } finally {
+      await host.close()
+    }
   })
 
   test('a plain HTTP request on the carrier is refused with 426', async () => {
