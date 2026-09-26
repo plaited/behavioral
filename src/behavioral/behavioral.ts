@@ -1,4 +1,4 @@
-import { ueid } from '../utils.ts'
+import { randomUUIDv7 } from 'bun'
 import { FRONTIER_STATUS, TRACE_MESSAGE_KINDS } from './behavioral.constants.ts'
 import {
   type AddThread,
@@ -87,6 +87,12 @@ const createSubject = (): SendTrace => {
  * and threads to run. If no events can be selected (either because all requests are blocked
  * or there are no requests), the program will pause until an event is admitted via `trigger`.
  *
+ * @param options - Optional factory options.
+ * @param options.sessionId - Host-supplied session identity stamped on every
+ *   trace alongside `instanceId`. The engine never mints or returns session
+ *   ids — the host layer owns session identity policy.
+ *   Defaults to the self-minted `instanceId` when omitted.
+ *
  * **Channel invariant:** a selected event carries `ingress: true` iff it was admitted
  * externally through `trigger`; everything internal (dispatch-bridge results, transform
  * targets, `threads.registered`) arrives as a thread request added through `useAddThread`.
@@ -97,8 +103,12 @@ const createSubject = (): SendTrace => {
  * absent = either). `trigger` is therefore external admission plus one super-step,
  * nothing else.
  */
-export const behavioral = () => {
-  const instanceId = ueid('bp_')
+export const behavioral = (options?: { sessionId?: string }) => {
+  // The trace-identity axis: a CSPRNG, monotonic (sortable) UUID v7 — not the
+  // correlation-id `ueid`, which leans on `Math.random`.
+  const instanceId = `bp_${randomUUIDv7()}`
+  /** @internal Host session identity — accepted at factory time, never minted. */
+  const sessionId = options?.sessionId ?? instanceId
   /**
    * @internal
    * Set of threads that have yielded and are waiting for event selection.
@@ -133,6 +143,7 @@ export const behavioral = () => {
         step: stepId,
         ingress,
         instanceId,
+        sessionId,
       })
       advanceRunningToPending(running, pending)
       selectNextEvent()
@@ -159,6 +170,7 @@ export const behavioral = () => {
       timestamp: Date.now(),
       step,
       instanceId,
+      sessionId,
       threads: [...pending].map(({ generator: _, ...rest }) => rest),
     })
 
@@ -168,6 +180,7 @@ export const behavioral = () => {
       timestamp: Date.now(),
       step,
       instanceId,
+      sessionId,
       ...frontier,
     })
 
@@ -185,6 +198,7 @@ export const behavioral = () => {
         timestamp: Date.now(),
         step,
         instanceId,
+        sessionId,
       })
     }
     if (frontier.status === FRONTIER_STATUS.idle) {
@@ -193,6 +207,7 @@ export const behavioral = () => {
         timestamp: Date.now(),
         step,
         instanceId,
+        sessionId,
       })
     }
   }
@@ -216,6 +231,7 @@ export const behavioral = () => {
           kind: TRACE_MESSAGE_KINDS.thread_added,
           timestamp: Date.now(),
           instanceId,
+          sessionId,
           thread: args,
         })
       } catch (err) {
@@ -223,6 +239,7 @@ export const behavioral = () => {
           kind: TRACE_MESSAGE_KINDS.add_thread_error,
           timestamp: Date.now(),
           instanceId,
+          sessionId,
           error: [err instanceof Error ? err.message : String(err)],
           space,
         })
@@ -232,6 +249,7 @@ export const behavioral = () => {
         kind: TRACE_MESSAGE_KINDS.add_thread_error,
         timestamp: Date.now(),
         instanceId,
+        sessionId,
         error: validateThread.errors ?? [],
         ...(typeof attemptedSpace === 'string' && { space: attemptedSpace }),
       })
@@ -258,6 +276,7 @@ export const behavioral = () => {
       pending,
       sendTrace,
       instanceId,
+      sessionId,
       step: stepId,
     })
     if (transformers.length) {
@@ -266,6 +285,7 @@ export const behavioral = () => {
         timestamp: Date.now(),
         step: stepId,
         instanceId,
+        sessionId,
         transformers,
       })
       for (const { query, target, thread, space } of transformers) {
@@ -284,6 +304,7 @@ export const behavioral = () => {
             timestamp: Date.now(),
             step: stepId,
             instanceId,
+            sessionId,
             transformer: { query, target, thread, space },
             reason: result.reason,
             ...(result.stderr !== undefined && { stderr: result.stderr }),
@@ -297,6 +318,7 @@ export const behavioral = () => {
       timestamp: Date.now(),
       step: stepId,
       instanceId,
+      sessionId,
       selected: selectedEvent,
     })
     /**
@@ -326,6 +348,7 @@ export const behavioral = () => {
         kind: TRACE_MESSAGE_KINDS.trigger_error,
         timestamp: Date.now(),
         instanceId,
+        sessionId,
         error: validateBPEvent.errors ?? [],
         ...(typeof attemptedSpace === 'string' ? { space: attemptedSpace } : {}),
       })
@@ -380,5 +403,13 @@ export const behavioral = () => {
     /** Hook to subscribe to internal state traces for monitoring/debugging. */
     useTrace,
     step: () => step(),
+    /**
+     * The per-process identity the engine self-mints and stamps on every
+     * trace. Exposed so a host can hand the identity to its clients (the
+     * attach hello) without sniffing the trace wire — which on an idle
+     * instance is silent. Session ids stay accept-only: never minted,
+     * never returned (the host layer owns session identity policy).
+     */
+    instanceId,
   })
 }

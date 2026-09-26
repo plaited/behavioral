@@ -25,6 +25,7 @@
  */
 
 import type { JSONSchemaType } from 'ajv'
+import type { JsonObject } from '../../behavioral/behavioral.types.ts'
 
 /** Output representation for a completed execution. */
 export type ShellFormat = 'paged' | 'json' | 'raw'
@@ -98,8 +99,32 @@ export type ShellShellOpInput = {
   maxCharacters?: number
 }
 
+/** The `'rpc'` op input — a generic remote JSON-RPC 2.0 call over HTTP POST. */
+export type ShellRpcOpInput = {
+  op: 'rpc'
+  /** The remote endpoint URL — one stateless POST per call. */
+  url: string
+  /** The JSON-RPC method name (transport-shaped; protocol semantics live in threads). */
+  method: string
+  /** The JSON-RPC params object, when the method takes one. */
+  params?: JsonObject
+  /**
+   * Declare the call needs a vended credential: without a token the op
+   * short-circuits as typed `credential_required` (the threads' vend-
+   * and-replay capture payload) — it never calls the remote unauthenticated.
+   * The token itself rides `authToken`, injected by the replaying thread.
+   */
+  auth?: boolean
+  /** The vended bearer token — set by the replaying thread, never model input. */
+  authToken?: string
+  /** Op-supplied headers (e.g. the remote-mcp threads' MCP-Protocol-Version stamp). */
+  headers?: Record<string, string>
+  /** Wall-clock deadline for the call. @default 30_000 */
+  timeoutMs?: number
+}
+
 /** The `shell_request` event's `detail.input` — one discriminated shape per op. */
-export type ShellCallInput = ShellRunOpInput | ShellShellOpInput
+export type ShellCallInput = ShellRunOpInput | ShellShellOpInput | ShellRpcOpInput
 
 // ---------------------------------------------------------------------------
 // Input boundary (shared knobs + per-op payloads; strict at every level)
@@ -139,13 +164,29 @@ export const ShellShellOpInputSchema = {
   additionalProperties: false,
 } as unknown as JSONSchemaType<ShellShellOpInput>
 
+export const ShellRpcOpInputSchema: JSONSchemaType<ShellRpcOpInput> = {
+  type: 'object',
+  properties: {
+    op: { type: 'string', const: 'rpc' },
+    url: { type: 'string', minLength: 1 },
+    method: { type: 'string', minLength: 1 },
+    params: { type: 'object', required: [], additionalProperties: true, nullable: true },
+    auth: { type: 'boolean', nullable: true },
+    authToken: { type: 'string', nullable: true },
+    headers: { type: 'object', required: [], additionalProperties: { type: 'string' }, nullable: true },
+    timeoutMs: { type: 'integer', minimum: 1, nullable: true },
+  },
+  required: ['op', 'url', 'method'],
+  additionalProperties: false,
+}
+
 /**
  * The op-discriminated input boundary — `anyOf` branches (strict AJV rejects
  * union `type` arrays), `additionalProperties: false` at every level so the
  * op shapes cannot bleed into each other.
  */
 export const ShellCallInputSchema = {
-  anyOf: [ShellRunOpInputSchema, ShellShellOpInputSchema],
+  anyOf: [ShellRunOpInputSchema, ShellShellOpInputSchema, ShellRpcOpInputSchema],
 } as unknown as JSONSchemaType<ShellCallInput>
 
 // ---------------------------------------------------------------------------
@@ -195,3 +236,47 @@ export type ShellError = {
   durationMs: number
   clamped?: string[]
 }
+
+// ---------------------------------------------------------------------------
+// The `rpc` op's result envelope — transport outcomes, not process outcomes
+// ---------------------------------------------------------------------------
+
+/** Terminal status of one rpc op — process-op statuses do not apply (no pid). */
+export type RpcStatus = 'canceled' | 'timeout' | 'error' | 'credential_required'
+
+/** The rpc success payload — the remote call's decoded `result` rides `output`. */
+export type RpcOpSuccess = {
+  output: JsonObject
+  /** Elapsed wall-clock time in milliseconds. */
+  durationMs: number
+  /** Over-ceiling options that were clamped, as `'<knob> <given> -> <applied>'`. */
+  clamped?: string[]
+}
+
+/**
+ * The rpc failure payload. `code` is the op's terminal status; a remote
+ * failure's own discriminant (HTTP status, JSON-RPC error code) rides
+ * `remoteCode` so retry policy can treat 5xx/timeouts differently from 4xx.
+ * `retryable` is that policy computed ONCE here — network failure, timeout,
+ * or `remoteCode >= 500` — so thread listeners divide on the schema field,
+ * never a jq numeric check.
+ */
+export type RpcOpError = {
+  code: RpcStatus
+  /** Failure detail — the HTTP reason, JSON-RPC error message, or abort text. */
+  message?: string
+  /** The remote failure's own code, when the call completed with an error response. */
+  remoteCode?: number | string
+  /** Whether retry policy applies: network failure, timeout, or a remote 5xx. */
+  retryable: boolean
+  durationMs: number
+  clamped?: string[]
+  /**
+   * The originating request, echoed only on `credential_required` — the
+   * vend-and-replay capture payload (the thread's join via `ctx.echo`).
+   */
+  request?: { op: 'rpc'; input: ShellRpcOpInput }
+}
+
+/** Every op runner's interior — one `code`-discriminated error branch over two payload families. */
+export type ShellOpResult = ShellSuccess | ShellError | RpcOpSuccess | RpcOpError

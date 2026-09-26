@@ -1,7 +1,7 @@
 # Frontier Analysis
 
 Reference for an agent assisting an engineer in wiring up the Behavioral
-behavioral-program verification tools. These tools answer two questions
+behavioral-program verification faculty. It answers two questions
 across **every reachable state** of a behavioral program, not just sampled
 runs: *can it deadlock?* and *can it spin forever without making progress?*
 
@@ -25,11 +25,14 @@ Schema, compiled at registration.
 
 ## The op surface
 
-The three ops carry the former tools' contracts: `replay` (re-run to a
-frontier), `explore` (enumerate reachable frontiers), `verify` (deadlock/
-livelock checks). Input/output shapes validate at the faculty's boundary;
-the wire payloads are loose JsonObject with their strict schema home in the
-frontier faculty.
+The ops are `replay` (re-run to a frontier), `explore` (enumerate reachable
+frontiers), and `verify` (deadlock/livelock checks), plus the `add_thread`
+admission op — verify a candidate `Thread` against the mounted thread set
+before it admits (`ok` iff the verification status is `'verified'`). Each
+op's input schema lives in the frontier faculty (`FrontierReplayInputSchema`
+et al., `src/faculties/frontier/faculty.ts`); the wire event shape itself —
+`frontier_request { id, op, input }` / `frontier_request_result { id, result }`
+— is homed in `src/faculties/faculties.types.ts`, the wire's one home.
 
 ## The `progress` spec
 
@@ -52,10 +55,10 @@ verifier gave up before proving anything.
 
 ## A common wiring mistake to avoid
 
-Calling `frontier-verify` (or `frontier-explore`) **without `maxDepth`** on a
+Running `verify` (or `explore`) **without `maxDepth`** on a
 program with unbounded state (e.g. a thread that requests an event with a
 counter `detail` that grows each loop) will not terminate — the state graph
-never closes. `maxDepth` is **required** on both tools for this reason. For
+never closes. `maxDepth` is **required** on both ops for this reason. For
 finite-state programs (all `once: true`, or loops with bounded `detail`) the
 graph closes via state-key dedup and the tool terminates before `maxDepth`.
 For anything else, set `maxDepth` and treat `truncated` as "needs a bound or
@@ -63,9 +66,7 @@ an abstraction," not a failure of the tool.
 
 ## See also
 
-- [behavioral](./behavioral.md) — the runtime whose `Trace` union these tools
+- [behavioral](./behavioral.md) — the runtime whose `Trace` union these ops
   filter on, and the `Thread` shape they take.
-- [frontier](../../behavioral-tools/references/frontier.md) — the tool surface:
-  I/O contracts, dispatch examples, gotchas.
 - [eval](./eval.md) — capturing a run's `Thread[]` + messages for later
   frontier analysis.

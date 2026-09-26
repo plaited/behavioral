@@ -48,11 +48,16 @@ import { ajv } from '../../behavioral/behavioral.types.ts'
 import { FACULTY_MESSAGE_KINDS } from '../faculties.constants.ts'
 import { type ShellRequestEvent, validateShellCancelEvent, validateShellRequestEvent } from '../faculties.types.ts'
 import { emit, wireInbound } from '../process-lane.ts'
+import { send as sendRpc } from './rpc.client.ts'
 import {
+  type RpcOpError,
+  type RpcOpSuccess,
   type ShellCallInput,
   ShellCallInputSchema,
   type ShellError,
+  type ShellOpResult,
   type ShellOptions,
+  type ShellRpcOpInput,
   type ShellStatus,
   type ShellSuccess,
 } from './types.ts'
@@ -128,14 +133,16 @@ const CLAMPED_KEYS = ['timeoutMs', 'maxLines', 'maxCharacters', 'limit'] as cons
 const clampOptions = (input: ShellCallInput): { options: ShellOptions; clamped: string[] } => {
   const clamped: string[] = []
   const options: ShellOptions = {
-    ...(input.format === undefined ? {} : { format: input.format }),
-    ...(input.offset === undefined ? {} : { offset: input.offset }),
-    ...(input.limit === undefined ? {} : { limit: input.limit }),
-    ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
-    ...(input.maxLines === undefined ? {} : { maxLines: input.maxLines }),
-    ...(input.maxCharacters === undefined ? {} : { maxCharacters: input.maxCharacters }),
-    ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
-    ...(input.env === undefined ? {} : { env: input.env }),
+    // `in` narrowing: the knob fields exist per op branch (the rpc op carries
+    // only `timeoutMs`), so each read is guarded by its own presence check.
+    ...('format' in input && input.format !== undefined ? { format: input.format } : {}),
+    ...('offset' in input && input.offset !== undefined ? { offset: input.offset } : {}),
+    ...('limit' in input && input.limit !== undefined ? { limit: input.limit } : {}),
+    ...('timeoutMs' in input && input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
+    ...('maxLines' in input && input.maxLines !== undefined ? { maxLines: input.maxLines } : {}),
+    ...('maxCharacters' in input && input.maxCharacters !== undefined ? { maxCharacters: input.maxCharacters } : {}),
+    ...('cwd' in input && input.cwd !== undefined ? { cwd: input.cwd } : {}),
+    ...('env' in input && input.env !== undefined ? { env: input.env } : {}),
     // The stdin field exists only on the 'shell' branch; the worker channels it.
     ...(input.op === 'shell' && input.stdin !== undefined ? { stdin: input.stdin } : {}),
   }
@@ -182,17 +189,28 @@ const channelPayload = async ({
 }
 
 // ---------------------------------------------------------------------------
+// Credential seam — the declarative auth gate (the threads vends)
+// ---------------------------------------------------------------------------
+
+/**
+ * The rpc op's credential gate: `auth: true` without a token short-circuits
+ * as typed `credential_required` — the op never calls the remote
+ * unauthenticated, and the vended token reaches it only through the
+ * replaying thread (`authToken` on the replayed input). The op itself never
+ * knows OAuth — the cross-faculty round-trip is the threads'
+ * (`shell/rpc-auth.threads.ts`), not this module's.
+ */
+const needsCredential = (input: ShellRpcOpInput): boolean => input.auth === true && input.authToken === undefined
+
+// ---------------------------------------------------------------------------
 // In-flight execution — enough state to stop it by correlation id
 // ---------------------------------------------------------------------------
 
 type StopReason = 'canceled' | 'timeout' | 'line_quota' | 'byte_quota'
 
-type Execution = {
-  /** Process-group leader pid. `detached` makes the group id equal this pid. */
-  pid: number
-  /** First stop signal wins, so a late cancel cannot relabel a timeout. */
-  stopReason: StopReason | null
-}
+type Execution =
+  | { kind: 'process'; pid: number; stopReason: StopReason | null }
+  | { kind: 'rpc'; controller: AbortController; stopReason: StopReason | null }
 
 /** Executions currently running, keyed by correlation id. */
 const active = new Map<string, Execution>()
@@ -223,11 +241,12 @@ const killGroup = ({ pid }: { pid: number }): void => {
   }, KILL_GRACE_MS)
 }
 
-/** Record why an execution stopped and signal its group. First writer wins. */
+/** Stop one execution: signal a process group, or abort an rpc fetch. First writer wins. */
 const stopExecution = ({ execution, reason }: { execution: Execution; reason: StopReason }): void => {
   if (execution.stopReason !== null) return
   execution.stopReason = reason
-  killGroup({ pid: execution.pid })
+  if (execution.kind === 'process') killGroup({ pid: execution.pid })
+  else execution.controller.abort()
 }
 
 // ---------------------------------------------------------------------------
@@ -292,6 +311,90 @@ const pumpLines = async ({
 const JSON_SNIPPET_CHARS = 200
 
 /**
+ * Run the `rpc` op — one generic remote JSON-RPC call, abortable by cancel
+ * or deadline through the fetch signal. The op is transport-shaped: it
+ * carries the envelope, nothing more (MCP semantics live in threads).
+ *
+ * @remarks
+ * Errors-as-data at both layers: the client never throws on transport or
+ * protocol failures, and a remote error payload surfaces as `code: 'error'
+ * + remoteCode` (the remote failure's own discriminant, for retry policy).
+ * A stop (cancel/timeout) wins over the outcome: the abort rejection is
+ * mapped to the stop's status, not mislabeled `error`.
+ */
+const runRpcOp = async ({
+  id,
+  input,
+  options,
+}: {
+  id: string
+  input: ShellRpcOpInput
+  options: ShellOptions
+}): Promise<RpcOpSuccess | RpcOpError> => {
+  const started = performance.now()
+  // The declarative auth gate: no vended token, no call — the typed
+  // credential_required result is the threads' capture payload.
+  if (needsCredential(input)) {
+    return {
+      code: 'credential_required',
+      durationMs: 0,
+      retryable: false,
+      message: `credential required for ${input.url}`,
+      request: { op: 'rpc', input },
+    }
+  }
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
+  const controller = new AbortController()
+  const execution: Execution = { kind: 'rpc', controller, stopReason: null }
+  active.set(id, execution)
+  const deadline = setTimeout(() => stopExecution({ execution, reason: 'timeout' }), timeoutMs)
+  try {
+    const outcome = await sendRpc({
+      url: input.url,
+      method: input.method,
+      ...(input.params === undefined ? {} : { params: input.params }),
+      // The replayed token rides the input (thread-injected); the op itself
+      // never knows OAuth.
+      getAuthToken: async () => input.authToken,
+      ...(input.headers === undefined ? {} : { headers: input.headers }),
+      signal: controller.signal,
+    })
+    const durationMs = Math.round(performance.now() - started)
+    // First stop wins over the decoded outcome — the abort rejection is not
+    // mislabeled a remote error.
+    if (execution.stopReason === 'canceled') return { code: 'canceled', durationMs, retryable: false }
+    if (execution.stopReason === 'timeout') return { code: 'timeout', durationMs, retryable: true }
+    if (outcome.ok) return { output: outcome.result, durationMs }
+    // The reactive auth path: a 401 challenge on an unauthenticated call maps
+    // to the typed vend-and-replay capture payload (the threads vends and
+    // replays). A 401 on a token'd call stays a remote error — bounded.
+    if (outcome.error.code === 401 && input.authToken === undefined) {
+      return {
+        code: 'credential_required',
+        durationMs,
+        retryable: false,
+        message: `credential required for ${input.url}`,
+        request: { op: 'rpc', input },
+      }
+    }
+    return {
+      code: 'error',
+      durationMs,
+      message: outcome.error.message,
+      remoteCode: outcome.error.code,
+      // The retry-vs-surface discriminant, computed once where the numeric
+      // comparison lives: network failure or a remote 5xx is retryable; a
+      // 4xx, a JSON-RPC error code, and a malformed response are not.
+      retryable:
+        outcome.error.code === 'network' || (typeof outcome.error.code === 'number' && outcome.error.code >= 500),
+    }
+  } finally {
+    clearTimeout(deadline)
+    active.delete(id)
+  }
+}
+
+/**
  * Run one op and return its bounded result.
  *
  * @remarks
@@ -309,7 +412,8 @@ const runOp = async ({
   id: string
   input: ShellCallInput
   options: ShellOptions
-}): Promise<ShellSuccess | ShellError> => {
+}): Promise<ShellOpResult> => {
+  if (input.op === 'rpc') return runRpcOp({ id, input, options })
   const started = performance.now()
   const format = options.format ?? 'paged'
   const offset = options.offset ?? DEFAULT_OFFSET
@@ -357,7 +461,7 @@ const runOp = async ({
   proc.stdin.write(input.op === 'run' ? input.script : SHELL_OP_WRAPPER)
   proc.stdin.end()
 
-  const execution: Execution = { pid: proc.pid, stopReason: null }
+  const execution: Execution = { kind: 'process', pid: proc.pid, stopReason: null }
   active.set(id, execution)
   const deadline = setTimeout(() => stopExecution({ execution, reason: 'timeout' }), timeoutMs)
 
@@ -513,17 +617,26 @@ const postResult = ({
   payload,
   error,
   space,
+  ctx,
 }: {
   id: string
-  payload?: ShellSuccess
-  error?: ShellError
+  payload?: ShellSuccess | RpcOpSuccess
+  error?: ShellError | RpcOpError
   space?: string
+  ctx?: JsonObject
 }): void => {
   emit({
     type: FACULTY_MESSAGE_KINDS.shell_request_result,
+    // The request's ctx echoes at detail level — the out-of-band join lane
+    // (thread orchestration state round-trips beside ok, never model-facing).
     detail: (error === undefined
-      ? { id, ok: true, result: (payload ?? {}) as unknown as JsonObject }
-      : { id, ok: false, error: error as unknown as JsonObject }) as JsonObject & { id: string },
+      ? { id, ok: true, result: (payload ?? {}) as unknown as JsonObject, ...(ctx === undefined ? {} : { ctx }) }
+      : {
+          id,
+          ok: false,
+          error: error as unknown as JsonObject,
+          ...(ctx === undefined ? {} : { ctx }),
+        }) as unknown as JsonObject & { id: string },
     ...(space === undefined ? {} : { space }),
   })
 }
@@ -557,7 +670,7 @@ const handleInbound = async (message: unknown): Promise<void> => {
   // defense in depth at the process boundary.
   if (!validateShellRequestEvent(message)) return
   const event = message as ShellRequestEvent
-  const { id, input } = event.detail
+  const { id, input, ctx } = event.detail
 
   // Input that fails the boundary is error data, not a throw: the id is
   // valid, so the caller learns why nothing ran.
@@ -567,6 +680,7 @@ const handleInbound = async (message: unknown): Promise<void> => {
       id,
       space: event.space,
       error: errorInterior({ message: `invalid input: ${ajv.errorsText(validate.errors)}` }),
+      ctx,
     })
     return
   }
@@ -580,15 +694,16 @@ const handleInbound = async (message: unknown): Promise<void> => {
     // The clamp report rides whichever branch ran.
     const withClamp = clamped.length === 0 ? interior : { ...interior, clamped }
     if ('code' in interior) {
-      postResult({ id, space: event.space, error: withClamp as ShellError })
+      postResult({ id, space: event.space, error: withClamp as ShellError, ctx })
     } else {
-      postResult({ id, space: event.space, payload: withClamp as ShellSuccess })
+      postResult({ id, space: event.space, payload: withClamp as ShellSuccess, ctx })
     }
   } catch (err) {
     postResult({
       id,
       space: event.space,
       error: errorInterior({ message: err instanceof Error ? err.message : String(err) }),
+      ctx,
     })
   }
 }

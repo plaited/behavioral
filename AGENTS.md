@@ -93,26 +93,41 @@ faculties), plus its `tests/`:
   `configSystemTwo(respond)` wires it, `useSystemTwo({ endpoints })` seeds the
   endpoint map
 - `system-one/` — TypeSafe/OpenRouter Decisions; `configSystemOne` +
-  `useSystemOne({ endpoint })`, with 429/529 retry
+  `useSystemOne({ endpoint })`, with 429/529 retry; `threads.ts` — the
+  admission judgment threads (the BP-native blocking judge over the Decisions
+  lane; the composition mounts it when systemOne is wired) and the supervision
+  threads (the runtime circuit breaker — the counting supervisor, its
+  block-then-judge verdict, and its recovery; `bProgram({ supervision })`
+  mounts the pack with systemOne when the host names watched types; a
+  root-mounted supervisor's block is global — one space's runaway loop halts
+  the watched type everywhere — while a space-stamped supervisor set
+  confines, expressible but not built)
 - `shell/` — bun-direct script execution — `run` op TS scripts via `bun run -`,
-  `shell` op Bun Shell commands through the wrapper; temp-file payloads over
-  ~100KB, deleted on every exit
+  `shell` op Bun Shell commands through the wrapper; `rpc` op generic remote
+  JSON-RPC (the remote-mcp layering is the threads, not the op);
+  temp-file payloads over ~100KB, deleted on every exit
 - `store/` — durable space-scoped persistence
-- `mcp/` — remote MCP connections/sessions/auth; `keychain-oauth-provider.ts`
-  is the MCP OAuth `BunKeychain` over `Bun.secrets` plus the issuer-binding v2
-  provider (faculty-only: nothing outside `mcp/` imports it)
+- `security/` — the cross-cutting credential/policy faculty:
+  `keychain-oauth-provider.ts` is the issuer-bound OAuth `BunKeychain` over
+  `Bun.secrets` (SDK-free plain types in `security/types.ts`); the faculty
+  vends `credential_request` → `credential_result` (broker env-data first,
+  keychain floor second) — consumers are shell (remote MCP), system-two, ATProto
 - `frontier/` — the in-process embed — imported and driven by the composition;
   standalone spawns are a compatibility entry
 Each faculty owns its event types + input boundary; results echo the request
 `space`; op runners errors-as-data.
 **`src/tools/`** — deleted (fleet 0): the ICL conversion retired the CLI tool
-fleet. mcp-client is the mcp faculty (`src/faculties/mcp/faculty.ts`);
+fleet. Remote MCP is remote-mcp threads over the shell faculty's
+generic `rpc` op (`src/faculties/shell/remote-mcp.threads.ts` — the retired
+`mcp` faculty's replacement; the official SDK dependency is gone);
 skill/plugin operations are the shell faculty's threads
-(`src/faculties/shell/threads.ts`) + recipes + store, taught by
-`skills/skill-conventions/`.
+(`src/faculties/shell/threads.ts` + `src/faculties/shell/plugin-threads.threads.ts` —
+the plugin-thread proposal path: a host proposal → worker import → engine-ThreadSchema
+validation → one `add_thread` candidate per validated export) + recipes + store,
+taught by `skills/skill-conventions/`.
 **`src/faculties.ts`** — the faculties public surface (package export `./faculties`): the
 `Faculty` union, the wire types + JSON schemas/validators (`faculties.types.ts`), the override thread
-threads (`shellThreads`, `mcpThreads`), their schemas/types, `useFaculty`, and the
+threads (`shellThreads`), their schemas/types, `useFaculty`, and the
 System One/Two config surface (`configSystemOne`/`useSystemOne`,
 `configSystemTwo`/`useSystemTwo`) — what a
 `config.ts` imports to compose. (`facultiesThreads`, the default root threads, is internal.) The runtime composition itself is `src/cli/b-program.ts`.
@@ -137,11 +152,29 @@ fleet (0 tools); turn/config commands land here as the composition rulings build
 JSON-RPC IPC host lives here too: `b-program.ts` (the runtime composition, `bProgram`),
 `json-rpc.ts` (the line codec), `serve.ts` (the `serve`
 entry — ingress messages → triggers, `ui_*` selections → client notifications, redacted
-traces out), `load-config.ts` (`<BEHAVIORAL_HOME>/config.ts`), and `trace-consumer.ts`.
+traces out), `load-config.ts` (`<BEHAVIORAL_HOME>/config.ts`), `trace-consumer.ts`, and
+`plugin-thread-registry.ts` (the plugin-thread admission registry under `<home>` —
+host-local, keyed (plugin, file, content hash, space): `bProgram` mounts admitted
+snapshots at boot, decided keys never re-adjudicate), and `ui-threads.ts` (the
+`ui_*` producer threads — the view-generation policy: the standing design.md
+scan → store tenant + artifact compile + render gate, plus the per-trigger
+pipeline factory `uiPipelineThreads` (six once-threads minted by b-program's
+pump on each `render` ingress — scale preflight, generation, `ui_render`,
+the scoped `ui_style` serving seam, every correlation id per-trigger); mounted with shell + store + systemTwo,
+composition territory — no process, not a faculty), and `ui-capture.ts` (the
+autoresearch loop's capture side — the in-process lineage-keyed raw run
+consumer + the frontier replay builder; the socket host wires its file sink
+under `<home>/captures`).
 **`src/utils/`** — shared pure utilities.
 **`src/faculties/<faculty>/threads.ts`** — faculty threads: `shell/threads.ts`
 (the ICL threads — skill/plugin scans, catalog/manifest schema gates, links dispatchers
-+ stored recipes) and `mcp/threads.ts` (the auth replay spine). Threads ship with
++ stored recipes), `shell/rpc-auth.threads.ts` (the credential vend-and-replay
+spine), `shell/remote-mcp.threads.ts` (the MCP layering over the rpc op),
+`shell/plugin-threads.threads.ts` (the plugin-thread proposal path — dispatcher,
+import join, candidate carry, add_thread dispatch), and
+`system-one/threads.ts` (the admission judgment threads + the supervision
+threads — the runtime circuit breaker, its judgment, and its recovery).
+Threads ship with
 their faculty; `bProgram` mounts the faculty's threads when the faculty and its required
 faculties are on — except `faculties.threads.ts`, the composition's **root guard
 threads**, always mounted regardless of the allow-list. The

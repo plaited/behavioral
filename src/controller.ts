@@ -7,7 +7,6 @@
  * - **Controller runtime**: {@link Controller} serves the browser controller bootstrap.
  * - **Wire contracts**: controller schemas validate server commands and browser-to-server messages.
  * - **Projection journal**: UI projection events materialize page-scoped reconnect state.
- * - **Rendering**: {@link createSSR} serializes templates with per-connection style deduplication.
  * - **Styling**: style, token, keyframe, host style, root style, and join helpers.
  *
  * @public

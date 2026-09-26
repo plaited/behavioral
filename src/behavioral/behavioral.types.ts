@@ -169,7 +169,7 @@ export type RegisteredTransformListener = TransformListener & {
  * - Interrupts cause thread termination
  *
  * @see {@link ThreadSchema} for the tuple that embeds idiom rules
- * @see {@link UseAddThread} for registering a thread from `Idioms[]` rules
+ * @see {@link AddThread} for registering a thread from `Idioms[]` rules
  */
 export type Idioms = {
   [IDIOMS.waitFor]?: BPListener[]
@@ -290,7 +290,14 @@ export type Thread = {
   rules: Idioms[]
 }
 
-const ThreadSchema: JSONSchemaType<Thread> = {
+/**
+ * The runtime schema mirror of {@link Thread} — the admission gate's home.
+ * Exported so wire consumers (the frontier's `add_thread` op) derive their
+ * input schemas from it instead of hand-mirroring the tuple shape.
+ *
+ * @internal
+ */
+export const ThreadSchema: JSONSchemaType<Thread> = {
   type: 'object',
   properties: {
     space: { type: 'string', nullable: true },
@@ -319,13 +326,38 @@ export type Threads = Thread[]
  * `TRACE_MESSAGE_KINDS` so narrowing by `kind` remains unambiguous in the
  * unified `Trace | T` stream.
  *
+ * The two id axes are separate and both live on the wire: `instanceId` is the
+ * per-process identity the engine self-mints; `sessionId` is the host's
+ * session identity (the host mints and manages session ids), defaulted
+ * to the `instanceId` when no host supplies one. The engine accepts a session
+ * id at factory time — it never mints one and never returns ids.
+ *
+ * @see {@link TraceBaseSchema} for the runtime (JSON-schema) mirror
  * @see {@link Trace} for the engine's closed trace union
  */
 type TraceBase = {
   kind: string
   timestamp: number
   instanceId: string
+  sessionId: string
 }
+
+/**
+ * Wire schema for the fields every trace carries — the runtime mirror of
+ * {@link TraceBase}. The one home for the trace wire's common shape: per-kind
+ * trace validators derive from this (spread the properties, extend `required`)
+ * instead of hand-mirroring the fields.
+ */
+export const TraceBaseSchema = {
+  type: 'object',
+  properties: {
+    kind: { type: 'string' },
+    timestamp: { type: 'number' },
+    instanceId: { type: 'string' },
+    sessionId: { type: 'string' },
+  },
+  required: ['kind', 'timestamp', 'instanceId', 'sessionId'],
+} as const
 
 // ---------------------------------------------------------------------------
 // Trace kinds

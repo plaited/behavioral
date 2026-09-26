@@ -8,34 +8,40 @@ those matching any `block` are filtered out, the highest-priority remaining
 candidate is selected, threads waiting/requesting/interrupted by it are
 resumed, and the next step runs. If no unblocked candidate exists the
 program halts until an event arrives via `trigger` (the external admission
-surface and the contentless internal kick).
+surface and one super-step).
 
 ## Public surface
 
 The engine lives in-repo at `src/behavioral/behavioral.ts` (with types in
 `behavioral.types.ts`, constants in `behavioral.constants.ts`, utils in
-`behavioral.utils.ts`). It is **not** a public package export — there is no
-root `@behavioral/sh` export (the package exports only `./tools`,
-`./controller`, `./utils`). Import it from its source path:
+`behavioral.utils.ts`). It is **not** one of the package's public exports —
+`@behavioral/sh` exports `.` (the `defineConfig` config helper, via
+`src/main.ts`), `./faculties` (the faculty wire and config surface),
+`./controller`, and `./utils`; none re-export the engine. Import it from its
+source path:
 
 ```ts
 import { behavioral } from '../../behavioral/behavioral.ts'
 import type {
+  AddThread,
   BPEvent,
   Disconnect,
   Thread,
   Trace,
-  UseAddThread,
   UseTrace,
 } from '../../behavioral/behavioral.types.ts'
 ```
 
-`behavioral()` returns a frozen API object with **three hooks** — no
+`behavioral()` returns a frozen API object with **five members** — no
 `useAddHandler`, no `sendTrace`, no generic type parameter:
 
 ```ts
-const { useAddThread, trigger, useTrace } = behavioral({ instanceId?: string })
+const { addThread, trigger, useTrace, step, instanceId } = behavioral({ sessionId?: string })
 ```
+
+The optional `sessionId` is host-supplied session identity stamped on every
+trace alongside the self-minted `instanceId` (the host layer owns session
+identity policy); absent it defaults to the `instanceId`.
 
 Threads are JSON objects: `{ label: string, rules: Idioms[], once?: true }`.
 Each idiom is one sync point with `request` (propose an event), `waitFor`
@@ -44,20 +50,21 @@ thread on an event), and/or `transform` (match, hand off to external
 reshaping, re-enter via a `target` event). `detailSchema` on listeners is
 JSON Schema (draft 2020-12), compiled at registration.
 
-## The three hooks
+## The API surface
 
-`const { useAddThread, trigger, useTrace } = behavioral()`
+`const { addThread, trigger, useTrace, step, instanceId } = behavioral()`
 
-| Hook | Signature | Use when |
-|------|-----------|----------|
-| `useAddThread(space?)` | `(args: Thread) => void` | Register a b-thread (`{ label, rules, once? }`). Optional `space` stamps all the thread's idioms. Inert — does not start a super-step. |
+| Member | Signature | Use when |
+|--------|-----------|----------|
+| `addThread(args)` | `(args: Thread) => void` | Register a b-thread (`{ label, rules, once?, space? }`). The thread's optional `space` field stamps all its idioms (applied at registration). Inert — does not start a super-step. |
 | `trigger(event)` | `(event: BPEvent) => void` | Inject an external event (the event carries `space`; absent = root). Triggered candidates carry `ingress: true`, have highest priority (0), and can be blocked. Initiates a super-step. |
-| `useTrace(listener)` | `Disconnect` | Observe internal state traces emitted after each event selection. Does not affect execution. |
+| `useTrace(listener)` | `(listener) => Disconnect` | Observe internal state traces emitted after each event selection. Does not affect execution. |
+| `step()` | `() => void` | Pump one super-step. The internal re-entry primitive — `addThread` alone is inert, so every re-entry pairs the thread addition with a `step()` pump. |
+| `instanceId` | `string` | The per-process identity the engine self-mints and stamps on every trace. Exposed so a host can hand the identity to its clients without sniffing the trace wire (silent on an idle instance). |
 
-### `useAddThread` — registering threads
+### `addThread` — registering threads
 
 ```ts
-const addThread = useAddThread()
 addThread({
   label: 'producer',
   rules: [{ request: { type: 'task' } }],
@@ -71,9 +78,10 @@ addThread({
 ```
 
 A thread is an object with `label`, `rules` (an array of `Idioms` sync points),
-and optional `once`. Without `once`, the thread loops its `rules` indefinitely;
-with `once: true`, it runs through the rules once and completes. The `label`
-identifies the thread in traces. Invalid thread arguments (failing
+and optional `once` and `space`. Without `once`, the thread loops its `rules`
+indefinitely; with `once: true`, it runs through the rules once and completes.
+The `label` identifies the thread in traces; the `space` stamps its idioms
+(absent = root — see Space matching below). Invalid thread arguments (failing
 `ThreadSchema`, or an un-compilable `detailSchema`) are surfaced as an
 `add_thread_error` trace, not a throw — the thread simply isn't added.
 
@@ -90,15 +98,16 @@ priority 0, stamped `ingress: true`. They are subject to `block` like any
 request. An event that fails `BPEvent` validation is rejected at the ingress
 boundary and surfaced as a `trigger_error` trace (not a throw), echoing the
 attempted `space` when present. `trigger` is how external systems (UI,
-network, timers) drive the program — and also how internal re-entry starts a
-super-step (the contentless kick; see the action channel).
+network, timers) drive the program — it is external admission plus one
+super-step, nothing else. Internal re-entry never uses `trigger`: it adds a
+request thread and pumps a super-step with `step()` (see the action channel).
 
 #### The channel invariant
 
 A selected event carries `ingress: true` **iff** it was admitted externally
-via `trigger`; everything internal arrives as a thread request added through
-`useAddThread` (the dispatch bridge, the transform daemon,
-`threads.registered`). Listeners opt into a channel with the optional
+via `trigger`; everything internal (satellite results, transform
+targets, admitted threads) arrives as a thread request added through
+`addThread`. Listeners opt into a channel with the optional
 `ingressMatch` field:
 
 | listener field | value | matches |
@@ -122,13 +131,31 @@ idioms — `waitFor`, `block`, `interrupt`, `transform` — share this one match
 seam, so both flags apply uniformly. `block` with `ingressMatch: true` is how
 backpressure on external events is expressed.
 
+#### Space matching
+
+Space scoping is **root authority** — visibility flows UP only. A thread's
+optional `space` stamp (absent = root) applies to all its idioms:
+
+| listener | candidate event | matches? |
+|----------|-----------------|----------|
+| root (unstamped) | any space | yes — a root listener sees every space |
+| space `s1` | `s1` | yes |
+| space `s1` | root or a sibling space | no — a stamped listener never escapes its space |
+
+A root thread can wait on, block, interrupt, and transform candidates in
+every space; a space-stamped thread is confined to its own — a thread
+governing several spaces is admitted per space explicitly, each mount
+stamped. Requests are emissions, not observations: a thread's request bids
+only in its own space (root requests bid in root). The `transform` target
+re-enters stamped with the **source event's** space — a root transformer's
+output stays in the space it observed.
+
 ### `useTrace` — observation and the action channel
 
 ```ts
 const disconnect = useTrace((msg: Trace) => {
-  // msg is the engine's closed Trace union — narrow by `kind`:
-  //   'pending_bids' | 'frontier' | 'selection' | 'deadlock'
-  //   'trigger_error' | 'add_thread_error' | 'interrupt' | 'transform'
+  // msg is the engine's closed Trace union — narrow by `kind`
+  // (12 kinds; the full table below).
 })
 ```
 
@@ -136,33 +163,27 @@ const disconnect = useTrace((msg: Trace) => {
 may be sync or async (`void | Promise<void>`); **the engine never awaits
 it.** Each listener return value is absorbed by `Promise.resolve(...)` with a
 rejection handler attached, so a rejecting promise never breaks the
-super-step. A listener that throws synchronously is caught and logged via
-`console.error('[behavioral] trace listener ...')` — listener failures are
-**log-only**, never published as traces.
+super-step. A listener failure (a sync throw or a rejecting promise) is
+caught and logged via `console.error('[behavioral] trace listener ...')` —
+listener failures are **log-only**, never published as traces, and the catch
+is per-consumer (one failing listener cannot suppress the others).
 
 #### The action-channel pattern (replaces `useAddHandler`)
 
 There is no `useAddHandler` hook. Side effects — tool dispatch, I/O, model
 calls — are performed by `useTrace` listeners that observe `selection`
 traces and act outside the super-step, then **re-enter the engine as a
-thread**. The kernel's dispatch bridge is the canonical implementation
-(`src/kernel/kernel.ts`):
+thread**. The canonical host is the composition (`src/cli/b-program.ts` —
+the runtime composition `bProgram`): its pump subscribes `useTrace`, routes
+selected events to their faculty lanes, and re-enters results through one
+seam:
 
 ```ts
-// The action channel: fire on selection, do async I/O, re-enter via a
-// once-thread + kick.
-const disconnect = useTrace((msg) => {
-  if (msg.kind !== 'selection') return
-  void bridge(msg.selected.type) // async I/O outside the super-step
-})
-
-// Re-entry is deferred past the current super-step so the bridge never
-// re-enters the engine synchronously from inside a listener.
-const reenter = (event: BPEvent): void => {
-  queueMicrotask(() => {
-    addThread(createReentryThread(event)) // label: `reentry:<type>`; once: true
-    trigger({ type: KICK_EVENT_TYPE, space }) // contentless kick
-  })
+// The in-process re-entry law: addThread alone is inert — every re-entry
+// pumps one super-step.
+const addThreads = (threads: Thread[]): void => {
+  for (const thread of threads) addThread(thread)
+  step()
 }
 ```
 
@@ -170,20 +191,18 @@ The contract:
 
 - The listener filters on `msg.kind === 'selection'` and reads
   `msg.selected.type` to decide what to do.
-- Async work happens **after** the listener returns — the engine continues the
-  super-step without waiting.
+- Async work happens **after** the listener returns — the engine never awaits
+  a listener, so the super-step continues without waiting.
 - Results re-enter by **adding a `once` thread that `request`s the event**,
-  then firing the contentless `KICK_EVENT_TYPE` kick. `useAddThread` is inert,
-  so the kick is what starts the super-step. The kick is priority 0, carries
-  no detail, and nothing may listen for/wait on/block/transform it — an
-  external actor triggering it is harmless by construction. The re-entry
-  event therefore arrives as a **request-origin** candidate (`ingress`
-  absent), which is what lets `ingressMatch: false` listeners match internal
-  results while `ingressMatch: true` listeners stay external-only.
-- Both calls are deferred with `queueMicrotask` so the action channel never
-  re-enters the engine synchronously from inside a `sendTrace` listener call.
-- Tool/I/O failures return as **data** (`isError: true` on the output) and
-  drive a `turn.end` or recovery trigger — they never throw into the space.
+  then pumping one super-step (the re-entry law above). The composition's
+  `useFaculty` pump funnels every satellite's result threads through the same
+  seam, and engine-internal code (the transform executor) calls the internal
+  `step()` directly. The re-entry event therefore arrives as a
+  **request-origin** candidate (`ingress` absent), which is what lets
+  `ingressMatch: false` listeners match internal results while
+  `ingressMatch: true` listeners stay external-only.
+- Faculty/I/O failures return as **data** on the result event and re-enter
+  through the same seam — they never throw into the space.
 - A listener throw is `console.error`'d and swallowed — it cannot corrupt the
   program.
 
@@ -208,7 +227,7 @@ addThread({
     transform: [{
       type: 'order',          // match this selected event
       detailSchema: { ... },  // optional JSON Schema guard
-      query: '.order',        // applied to selected.detail (e.g. a jq expression)
+      query: '.order',        // applied to selected.detail (a jq expression)
       target: 'ship',         // re-enter the engine with this event type
     }],
   }],
@@ -218,51 +237,62 @@ addThread({
 Shape (`TransformListener` in `behavioral.types.ts`): a `BPListener` plus
 `query` (string) and `target` (string). When a matching event is selected,
 the engine emits a `transform` trace carrying `transformers: { query, target,
-thread }[]` **immediately before** the `selection` trace, then resumes the
-thread (a transform match wakes the thread like a `waitFor` match). The
-engine does **no I/O** — it only publishes the contract. External code reads
-the `transform` trace, evaluates each `query` over `selected.detail`, and
-re-enters by adding a `once` thread that `request`s `{ type: target, detail }`
-(one per target when fanning out) and firing the contentless kick — never via
-`trigger`, so the target stays request-origin.
+thread, space? }[]` **immediately before** the `selection` trace, then resumes
+the thread (a transform match wakes the thread like a `waitFor` match) and
+applies the contract itself: each `query` is evaluated over `selected.detail`
+by the engine's internal jq subprocess (`src/behavioral/jq.worker.ts`, driven
+by the `evaluateTransform` bridge in `behavioral.utils.ts`), and the result
+re-enters as a `once` thread requesting `{ type: target, detail: result.value }`
+stamped with the **source event's** space (a stamped contract's space equals
+the event's — stamped confinement; a root transformer's output stays in the
+space it observed) — the target stays request-origin. The
+engine does no arbitrary I/O; its only external dependency is the jq binary.
 
-This is a two-phase loop: **prime** (the `transform` trace carries the
-contracts) then **execute** (the immediately following `selection` trace
-carries the payload). The reference implementation is
-`src/behavioral/tests/transform.spec.ts`. Honest caveat: today only that test
-loop consumes the trace — the kernel-side consumer is not yet wired, so there
-is no production host applying `query` → `target` yet. The trace contract is
-stable; the host is what's missing.
+Failures are errors-as-data: a contract that fails (jq error, no detail,
+empty or non-object output) never fires its target — the failure surfaces as
+a `transform_error` trace carrying the `transformer` and a machine-readable
+`reason`.
+
+The contract test is `src/behavioral/tests/transform.spec.ts`, and the
+production consumer is real: the remote-mcp threads
+(`src/faculties/shell/remote-mcp.threads.ts`) drives its entire
+discover/tools/call pipeline with transforms over the shell faculty's `rpc`
+op.
 
 ## The trace union
 
-`Trace` is a closed discriminated union (narrow by `kind`). The kinds:
+`Trace` is a closed discriminated union (narrow by `kind`) — the 12 kinds of
+`TRACE_MESSAGE_KINDS` (`src/behavioral/behavioral.constants.ts`):
 
 | `kind` | Carries | When |
 |--------|---------|------|
+| `step` | `step`, `ingress?` | A super-step began; `ingress: true` marks an externally initiated step |
 | `pending_bids` | `step`, `threads` (serialized pending set) | Before event selection each step |
 | `frontier` | `step`, `status`, `candidates`, `enabled` | After computing the frontier |
 | `selection` | `step`, `selected` (the chosen candidate) | When an event is selected |
+| `idle` | `step` | No candidates at all — the program is quiescent (not deadlocked); the settle signal |
 | `deadlock` | `step` | Candidates exist but all are blocked |
+| `thread_added` | `thread` (the full validated `Thread`) | `addThread` registered a thread — the provision record; replay = `thread_added` payloads + ingress events in order |
 | `interrupt` | `selected`, `threadLabel`, `step` | A thread was terminated by an interrupt |
-| `transform` | `step`, `transformers` | A transform listener matched; external code applies `query` → `target` |
-| `add_thread_error` | `error` (AJV errors), `space?` | `useAddThread` rejected invalid args / un-compilable `detailSchema` |
+| `transform` | `step`, `transformers` | A transform listener matched; the engine applies `query` → `target` in-engine |
+| `transform_error` | `step`, `transformer`, `reason`, `stderr?`, `exitCode?` | A transform contract failed (jq error, no detail, empty or non-object output); the target never fires |
+| `add_thread_error` | `error` (AJV errors), `space?` | `addThread` rejected invalid args / un-compilable `detailSchema` |
 | `trigger_error` | `error` (AJV errors), `space?` | `trigger` rejected an invalid `BPEvent` |
 
-The two error kinds are the engine's only failure surfaces, and both are
+The three error kinds are the engine's failure surfaces, and all are
 **traces, not throws** — invalid input is reported as data and the program
 keeps running. There is no `feedback_error` trace.
 
 ## A common wiring mistake to avoid
 
-Forgetting to start the super-step after adding threads. `useAddThread`
+Forgetting to start the super-step after adding threads. `addThread`
 registers a thread but does **not** start a super-step on its own; the
 program pauses until an event enters via `trigger`. A common symptom: threads
 are added, nothing happens. For an external event, trigger it; for internal
 re-entry (a result or a transform target), add the `once` request thread and
-fire the contentless kick. This inertness is deliberate: pure-requesting
-programs (tic-tac-toe, water) do not self-start at registration, so quiescence
-is preserved until someone admits an event.
+pump a super-step with `step()`. This inertness is deliberate:
+pure-requesting programs (tic-tac-toe, water) do not self-start at
+registration, so quiescence is preserved until someone admits an event.
 
 The second common mistake: expecting side effects to fire on `trigger`. The
 action channel fires on **selected** events — a triggered event that is
@@ -274,5 +304,5 @@ event wasn't filtered out.
 
 - [Frontier analysis](./frontier-analysis.md) — deadlock/livelock verification
   over the closed state graph of a behavioral program.
-- [Controller](./controller.md) — the browser-side message applier and the
-  stateless SSR html tools (one UI-layer reference).
+- [Controller](./controller.md) — the browser-side message applier over the
+  `ui_*` wire (the UI-layer reference).

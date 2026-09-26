@@ -135,7 +135,7 @@ export type ControllerConstructorArgs = {
    * Optional message carrier. When omitted the controller uses its built-in
    * WebSocket carrier (byte-for-byte the pre-seam behavior). When provided,
    * the controller sends/receives through it instead of opening a WebSocket —
-   * the injection point a non-WS carrier (e.g. Tauri IPC) plugs into.
+   * the injection point a non-WS carrier (e.g. native IPC) plugs into.
    */
   transport?: Transport
 }
@@ -253,6 +253,29 @@ export type ScaleCheckMessage = {
 }
 
 /**
+ * Schema for style messages applying scoped CSS to a render target's subtree.
+ *
+ * @remarks
+ * The `css` arrives fully composed — an `@scope` block whose scope root is
+ * the target's `b-target` attribute selector (`@scope ([b-target=…])`), with
+ * the custom properties on `:scope` so the target's subtree inherits them
+ * (Baseline 2026: Chrome/Edge 118+, Firefox 146+, Safari 26.4; older engines
+ * drop the block silently — plain degradation, same as no tenant). The
+ * controller applies the text VERBATIM into a per-target style element
+ * (idempotent replace, never stack); it composes nothing.
+ *
+ * @public
+ */
+export type StyleMessage = {
+  type: typeof CONTROLLER_INCOMING_MESSAGE_TYPES.ui_style
+  detail: {
+    id: string
+    target: string
+    css: string
+  }
+}
+
+/**
  * Discriminated union of all server-to-controller message kinds.
  * Consumers narrow by the `type` field.
  *
@@ -264,6 +287,7 @@ export type ServerMessage =
   | DispatchCustomEventMessage
   | NavigateMessage
   | ScaleCheckMessage
+  | StyleMessage
 
 // ---------------------------------------------------------------------------
 // Client → server messages
@@ -358,7 +382,7 @@ export type TransportEvent =
 
 /**
  * The controller's message carrier — the seam a non-WebSocket transport
- * (Tauri IPC, etc.) plugs into without touching controller logic.
+ * (native IPC, etc.) plugs into without touching controller logic.
  *
  * @remarks
  * The controller sends outgoing {@link ClientMessage}s via `send`, registers

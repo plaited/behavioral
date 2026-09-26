@@ -1,17 +1,20 @@
 import { describe, expect, test } from 'bun:test'
 
-import { ajv, validateBPEvent, validateThread, validateTransformEvaluation } from '../behavioral.types.ts'
+import {
+  ajv,
+  TraceBaseSchema,
+  validateBPEvent,
+  validateThread,
+  validateTransformEvaluation,
+} from '../behavioral.types.ts'
 
+// Derived from TraceBaseSchema — the one home for the trace wire's common
+// shape — extended per-kind with the discriminating `kind` and `step`.
 const compileTraceValidator = (kind: string) =>
   ajv.compile({
-    type: 'object',
-    properties: {
-      kind: { const: kind },
-      timestamp: { type: 'number' },
-      instanceId: { type: 'string' },
-      step: { type: 'integer' },
-    },
-    required: ['kind', 'timestamp', 'instanceId', 'step'],
+    ...TraceBaseSchema,
+    properties: { ...TraceBaseSchema.properties, kind: { const: kind }, step: { type: 'integer' } },
+    required: [...TraceBaseSchema.required, 'step'],
   })
 
 describe('behavioral schemas', () => {
@@ -65,12 +68,25 @@ describe('behavioral schemas', () => {
       kind: 'selection',
       timestamp: 3,
       instanceId: 'bp_test',
+      sessionId: 'sess_test',
       step: 3,
       selected: { type: 'event', detail: { value: 1 } },
     }
     expect(validate(trace)).toBe(true)
     const narrowed = trace as unknown as SelectionTraceLike
     expect(narrowed.selected.type).toBe('event')
+  })
+
+  test('Trace validators reject missing sessionId', () => {
+    expect(
+      compileTraceValidator('selection')({
+        kind: 'selection',
+        timestamp: 0,
+        instanceId: 'bp_test',
+        step: 0,
+        selected: { type: 'event' },
+      }),
+    ).toBe(false)
   })
 
   test('Trace validators reject unknown kinds and missing step', () => {

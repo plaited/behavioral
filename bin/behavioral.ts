@@ -21,6 +21,15 @@ export const runCli = makeCliRouter({
       await init(args)
     },
   },
+  // The bare command is attach-or-start: attach to a running instance over
+  // <home>/instance.sock, or start the foreground instance. --dev is a
+  // start-time flag: it configures the instance THIS process starts; an
+  // attaching process cannot flip a running instance. Lazy: --help and
+  // the subcommands must not load the composition graph until invoked.
+  default: async (args: string[]) => {
+    const { attachOrStart } = await import('../src/cli/attach-or-start.ts')
+    await attachOrStart({ dev: args.includes('--dev') })
+  },
 })
 
 await runCli(Bun.argv)

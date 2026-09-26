@@ -21,10 +21,16 @@ import { ajv, validateTransformEvaluation } from './behavioral.types.ts'
 /**
  * @internal
  * Creates a checker function to determine if a given BPListener matches a CandidateBid.
+ *
+ * Space matching is ROOT AUTHORITY: an unstamped (root) listener matches
+ * candidates in EVERY space — visibility flows UP only — while a
+ * space-stamped listener stays confined to its own space, never matching
+ * root events or siblings. A thread governing several spaces is admitted
+ * (or wired) per space explicitly, each mount stamped.
  */
 export const isListeningFor = ({ type, detail, space, ingress }: CandidateBid) => {
   return (listener: RegisteredBPListener | RegisteredTransformListener): boolean => {
-    const spaceMatches = listener.space ? space === listener.space : true
+    const spaceMatches = listener.space === undefined ? true : space === listener.space
     const schemaMatches = listener.detailSchema ? detailValidators.get(listener)!(detail) : true
     const detailMatches = listener.detailMatch === false ? !schemaMatches : schemaMatches
     const ingressMatches = listener.ingressMatch === undefined || listener.ingressMatch === (ingress === true)
@@ -119,6 +125,7 @@ export const resumePendingThreadsForSelectedEvent = ({
   selectedEvent,
   sendTrace,
   instanceId,
+  sessionId,
   step,
 }: {
   running: Set<RunningBid>
@@ -126,6 +133,7 @@ export const resumePendingThreadsForSelectedEvent = ({
   selectedEvent: CandidateBid
   sendTrace?: SendTrace
   instanceId: string
+  sessionId: string
   step: number
 }) => {
   const transformers: Transformer[] = []
@@ -135,7 +143,16 @@ export const resumePendingThreadsForSelectedEvent = ({
     const isWaitedFor = waitFor?.some(isListeningFor(selectedEvent))
     const isTransform = transform?.flatMap((listener) =>
       isListeningFor(selectedEvent)(listener)
-        ? { target: listener.target, query: listener.query, thread: label, space: listener.space }
+        ? // Direction/R: the target once-thread re-enters stamped with the
+          // SOURCE event's space — the root transformer's output stays in
+          // the space it observed. A stamped listener's space equals the
+          // event's space anyway (stamped confinement).
+          {
+            target: listener.target,
+            query: listener.query,
+            thread: label,
+            space: listener.space ?? selectedEvent.space,
+          }
         : [],
     )
     const hasPendingRequest = request && eventMatchesCandidate(request, selectedEvent)
@@ -147,6 +164,7 @@ export const resumePendingThreadsForSelectedEvent = ({
         timestamp: Date.now(),
         step,
         instanceId,
+        sessionId,
         selected: selectedEvent,
         threadLabel: label,
       })

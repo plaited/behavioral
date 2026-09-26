@@ -24,7 +24,8 @@ import { FACULTY_MESSAGE_KINDS } from './faculties.constants.ts'
 
 export type SystemTwoRequestEvent = {
   type: typeof FACULTY_MESSAGE_KINDS.system_two_request
-  detail: { id: string; input: JsonObject }
+  /** `ctx` is the optional out-of-band join lane (the you.com MCP `_meta` pattern): orchestration state riding beside `input`, echoed verbatim on the result — never a model-facing field. */
+  detail: { id: string; ctx?: JsonObject; input: JsonObject }
   space?: string
 }
 
@@ -61,7 +62,8 @@ export type SystemOneCancelEvent = {
 export type ShellRequestEvent = {
   type: typeof FACULTY_MESSAGE_KINDS.shell_request
   /** `label` is an optional trace annotation (logical names like 'skill-scan') — no routing weight. */
-  detail: { id: string; label?: string; input: JsonObject }
+  /** `ctx` is the optional out-of-band join lane (the you.com MCP `_meta` pattern): orchestration state riding beside `input`, echoed verbatim on the result — never a model-facing field. */
+  detail: { id: string; label?: string; ctx?: JsonObject; input: JsonObject }
   space?: string
 }
 
@@ -82,14 +84,16 @@ export type ShellCancelEvent = {
  * two-branch shape (modified-B envelope, ruled 2026-09-21): the `ok`
  * discriminant sits at detail level beside the correlation id; `result` and
  * `error` are XOR branches (oneOf on the ok const). Faculty statuses ride as
- * `error.code` (mcp's typed `authorization_required` included — first-class
- * preserved, its request echo rides inside `error`); success payloads ride
- * `result` verbatim. Uniform gate across every faculty: `select($d.ok)`.
+ * `error.code` (the shell rpc's typed `credential_required` included —
+ * first-class preserved, its request echo rides inside `error`); success
+ * payloads ride `result` verbatim. Uniform gate across every faculty: `select($d.ok)`.
  */
 export type WorkerResultOk = {
   id: string
   ok: true
   result: JsonObject
+  /** The request's `ctx`, echoed verbatim by faculties that pass it through (shell). */
+  ctx?: JsonObject
 }
 
 export type WorkerResultError = {
@@ -97,6 +101,8 @@ export type WorkerResultError = {
   ok: false
   /** The faculty failure payload — code (the faculty status enum), message, and any diagnostics. */
   error: { code: string; message?: string } & JsonObject
+  /** The request's `ctx`, echoed verbatim by faculties that pass it through (shell). */
+  ctx?: JsonObject
 }
 
 /** The `detail` of every `*_result` event — one shape across all five faculties. */
@@ -109,7 +115,7 @@ export type FacultyErrorEvent = {
 }
 
 /** Frontier operations — its own worker faculty, like the responses client. */
-export type FrontierOp = 'replay' | 'explore' | 'verify'
+export type FrontierOp = 'replay' | 'explore' | 'verify' | 'add_thread'
 
 export type FrontierRequestEvent = {
   type: typeof FACULTY_MESSAGE_KINDS.frontier_request
@@ -130,7 +136,8 @@ export type StoreOp = 'put' | 'get' | 'delete' | 'query'
 export type StoreRequestEvent = {
   type: typeof FACULTY_MESSAGE_KINDS.store_request
   /** `op` selects the store operation; the backing schema lives inside the worker — schema churn never becomes protocol churn. */
-  detail: { id: string; op: StoreOp; input: JsonObject }
+  /** `ctx` is the optional out-of-band join lane (the you.com MCP `_meta` pattern): orchestration state riding beside `input`, echoed verbatim on the result — never a model-facing field. */
+  detail: { id: string; op: StoreOp; ctx?: JsonObject; input: JsonObject }
   space?: string
 }
 
@@ -141,34 +148,24 @@ export type StoreRequestResultEvent = {
   space?: string
 }
 
-/** MCP operations — its own worker faculty, like frontier and store. */
-export type McpOp =
-  | 'discover'
-  | 'list-tools'
-  | 'call-tool'
-  | 'list-prompts'
-  | 'get-prompt'
-  | 'list-resources'
-  | 'read-resource'
-
-export type McpRequestEvent = {
-  type: typeof FACULTY_MESSAGE_KINDS.mcp_request
-  /** `op` selects the MCP client operation; the backing schema lives in `src/faculties/mcp/types.ts`. */
-  detail: { id: string; op: McpOp; input: JsonObject }
+/** Security operations — credential vending for remote servers (broker first, keychain floor second). */
+export type SecurityRequestEvent = {
+  type: typeof FACULTY_MESSAGE_KINDS.credential_request
+  /** `ctx` is the optional host-supplied binding (e.g. the resolved AS issuer) — out-of-band, never a model-facing input field. */
+  detail: { id: string; ctx?: JsonObject; input: JsonObject }
   space?: string
 }
 
-export type McpRequestResultEvent = {
-  type: typeof FACULTY_MESSAGE_KINDS.mcp_request_result
+export type SecurityRequestResultEvent = {
+  type: typeof FACULTY_MESSAGE_KINDS.credential_result
   detail: WorkerResultDetail
   space?: string
 }
 
-// Remote MCP calls can hang indefinitely (third-party servers) — the async
-// faculties keep their cancels (shell, response, mcp; frontier/store ops are
-// short-lived and have none).
-export type McpCancelEvent = {
-  type: typeof FACULTY_MESSAGE_KINDS.mcp_cancel
+// A vend is a quick broker/keychain read, but a down broker can hang — the
+// async faculties keep their cancels (shell, response, security).
+export type SecurityCancelEvent = {
+  type: typeof FACULTY_MESSAGE_KINDS.credential_cancel
   detail: { id: string }
   space?: string
 }
@@ -184,9 +181,9 @@ export type WorkerEvent =
   | ShellRequestEvent
   | ShellRequestResultEvent
   | ShellCancelEvent
-  | McpRequestEvent
-  | McpRequestResultEvent
-  | McpCancelEvent
+  | SecurityRequestEvent
+  | SecurityRequestResultEvent
+  | SecurityCancelEvent
   | FrontierRequestEvent
   | FrontierRequestResultEvent
   | StoreRequestEvent
@@ -203,6 +200,9 @@ const workerResultOkBranch = {
     id: { type: 'string', minLength: 1 },
     ok: { type: 'boolean', const: true },
     result: jsonObjectSchema,
+    // The out-of-band join lane — its strict shape is the requesting side's
+    // (the echo rides beside `ok`, the you.com MCP `_meta` pattern).
+    ctx: { type: 'object', required: [], additionalProperties: true, nullable: true },
   },
   required: ['id', 'ok', 'result'],
   additionalProperties: false,
@@ -223,6 +223,7 @@ const workerResultErrorBranch = {
       // Faculty diagnostics ride along (request echoes, exit codes, stderr…).
       additionalProperties: true,
     },
+    ctx: { type: 'object', required: [], additionalProperties: true, nullable: true },
   },
   required: ['id', 'ok', 'error'],
   additionalProperties: false,
@@ -247,7 +248,12 @@ export const SystemTwoRequestEventSchema: JSONSchemaType<SystemTwoRequestEvent> 
     type: { type: 'string', const: FACULTY_MESSAGE_KINDS.system_two_request },
     detail: {
       type: 'object',
-      properties: { id: { type: 'string', minLength: 1 }, input: jsonObjectSchema },
+      properties: {
+        id: { type: 'string', minLength: 1 },
+        // The out-of-band join lane — strict shape is the requesting side's.
+        ctx: { type: 'object', required: [], additionalProperties: true, nullable: true },
+        input: jsonObjectSchema,
+      },
       required: ['id', 'input'],
       additionalProperties: false,
     },
@@ -318,6 +324,8 @@ export const ShellRequestEventSchema: JSONSchemaType<ShellRequestEvent> = {
       properties: {
         id: { type: 'string', minLength: 1 },
         label: { type: 'string', nullable: true },
+        // The out-of-band join lane — strict shape is the requesting side's.
+        ctx: { type: 'object', required: [], additionalProperties: true, nullable: true },
         input: jsonObjectSchema,
       },
       required: ['id', 'input'],
@@ -347,29 +355,20 @@ export const ShellCancelEventSchema: JSONSchemaType<ShellCancelEvent> = {
   additionalProperties: false,
 }
 
-export const McpRequestEventSchema: JSONSchemaType<McpRequestEvent> = {
+export const SecurityRequestEventSchema: JSONSchemaType<SecurityRequestEvent> = {
   type: 'object',
   properties: {
-    type: { type: 'string', const: FACULTY_MESSAGE_KINDS.mcp_request },
+    type: { type: 'string', const: FACULTY_MESSAGE_KINDS.credential_request },
     detail: {
       type: 'object',
       properties: {
         id: { type: 'string', minLength: 1 },
-        op: {
-          type: 'string',
-          enum: [
-            'discover',
-            'list-tools',
-            'call-tool',
-            'list-prompts',
-            'get-prompt',
-            'list-resources',
-            'read-resource',
-          ],
-        },
+        // The host-supplied binding lane — its strict shape is the security
+        // faculty's boundary (SecurityRequestContextSchema), not the wire's.
+        ctx: { type: 'object', required: [], additionalProperties: true, nullable: true },
         input: jsonObjectSchema,
       },
-      required: ['id', 'op', 'input'],
+      required: ['id', 'input'],
       additionalProperties: false,
     },
     space: { type: 'string', nullable: true },
@@ -378,12 +377,12 @@ export const McpRequestEventSchema: JSONSchemaType<McpRequestEvent> = {
   additionalProperties: false,
 }
 
-export const McpRequestResultEventSchema = resultEventSchema(FACULTY_MESSAGE_KINDS.mcp_request_result)
+export const SecurityRequestResultEventSchema = resultEventSchema(FACULTY_MESSAGE_KINDS.credential_result)
 
-export const McpCancelEventSchema: JSONSchemaType<McpCancelEvent> = {
+export const SecurityCancelEventSchema: JSONSchemaType<SecurityCancelEvent> = {
   type: 'object',
   properties: {
-    type: { type: 'string', const: FACULTY_MESSAGE_KINDS.mcp_cancel },
+    type: { type: 'string', const: FACULTY_MESSAGE_KINDS.credential_cancel },
     detail: {
       type: 'object',
       properties: { id: { type: 'string', minLength: 1 } },
@@ -421,9 +420,9 @@ export const validateSystemOneCancelEvent = ajv.compile(SystemOneCancelEventSche
 export const validateShellRequestEvent = ajv.compile(ShellRequestEventSchema)
 export const validateShellRequestResultEvent = ajv.compile(ShellRequestResultEventSchema)
 export const validateShellCancelEvent = ajv.compile(ShellCancelEventSchema)
-export const validateMcpRequestEvent = ajv.compile(McpRequestEventSchema)
-export const validateMcpRequestResultEvent = ajv.compile(McpRequestResultEventSchema)
-export const validateMcpCancelEvent = ajv.compile(McpCancelEventSchema)
+export const validateSecurityRequestEvent = ajv.compile(SecurityRequestEventSchema)
+export const validateSecurityRequestResultEvent = ajv.compile(SecurityRequestResultEventSchema)
+export const validateSecurityCancelEvent = ajv.compile(SecurityCancelEventSchema)
 // No frontier cancel event: analyses are synchronous — nothing is in flight
 // to abort (the async faculties keep their cancels).
 export const FrontierRequestEventSchema: JSONSchemaType<FrontierRequestEvent> = {
@@ -434,7 +433,7 @@ export const FrontierRequestEventSchema: JSONSchemaType<FrontierRequestEvent> = 
       type: 'object',
       properties: {
         id: { type: 'string', minLength: 1 },
-        op: { type: 'string', enum: ['replay', 'explore', 'verify'] },
+        op: { type: 'string', enum: ['replay', 'explore', 'verify', 'add_thread'] },
         input: jsonObjectSchema,
       },
       required: ['id', 'op', 'input'],
@@ -458,6 +457,8 @@ export const StoreRequestEventSchema: JSONSchemaType<StoreRequestEvent> = {
       properties: {
         id: { type: 'string', minLength: 1 },
         op: { type: 'string', enum: ['put', 'get', 'delete', 'query'] },
+        // The out-of-band join lane — strict shape is the requesting side's.
+        ctx: { type: 'object', required: [], additionalProperties: true, nullable: true },
         input: jsonObjectSchema,
       },
       required: ['id', 'op', 'input'],

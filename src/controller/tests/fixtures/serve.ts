@@ -94,6 +94,7 @@ const TEST_PAGE_CONTENT: Record<string, string> = {
   'navigate-test': `<div b-target="main"><p>navigate target</p></div>`,
   'scale-check-test': `<section b-scale="s5"><article b-scale="s3"><div b-target="slot">content</div></article></section>`,
   'scale-check-parent-test': `<section b-scale="s5"><span b-target="slot" b-scale="s1">content</span></section>`,
+  'style-test': `<div b-target="main"><p id="styled">text</p></div>`,
 }
 
 // Inline scripts injected before the connect module, keyed by source tag.
@@ -373,6 +374,32 @@ export const startServer = (port = 0): FixtureServer => {
               JSON.stringify({
                 type: 'ui_scale_check',
                 detail: { id: 'sc2', target: 'slot', swap: 'outerHTML' },
+              }),
+            )
+            break
+          case 'style-test':
+            // The scoped style egress: the css arrives @scope-wrapped with
+            // the target's b-target selector as the scope root; the
+            // controller applies it verbatim. A SECOND message proves
+            // idempotency (replace, not stack).
+            ws.send(
+              JSON.stringify({
+                type: 'ui_style',
+                detail: {
+                  id: 'st1',
+                  target: 'main',
+                  css: '@scope ([b-target="main"]) {\n  :scope {\n    --design-colors-primary: rebeccapurple;\n  }\n}',
+                },
+              }),
+            )
+            ws.send(
+              JSON.stringify({
+                type: 'ui_style',
+                detail: {
+                  id: 'st2',
+                  target: 'main',
+                  css: '@scope ([b-target="main"]) {\n  :scope {\n    --design-colors-primary: rebeccapurple;\n  }\n}',
+                },
               }),
             )
             break

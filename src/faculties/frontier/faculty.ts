@@ -25,6 +25,7 @@
  */
 
 import type { JSONSchemaType } from 'ajv'
+import { randomUUIDv7 } from 'bun'
 import { FRONTIER_STATUS, TRACE_MESSAGE_KINDS } from '../../behavioral/behavioral.constants.ts'
 import type {
   BPEvent,
@@ -42,7 +43,7 @@ import type {
   Thread,
   Trace,
 } from '../../behavioral/behavioral.types.ts'
-import { ajv, BPEventSchema } from '../../behavioral/behavioral.types.ts'
+import { ajv, BPEventSchema, ThreadSchema } from '../../behavioral/behavioral.types.ts'
 import {
   advanceRunningToPending,
   computeFrontier,
@@ -51,7 +52,6 @@ import {
   resumePendingThreadsForSelectedEvent,
   useThread,
 } from '../../behavioral/behavioral.utils.ts'
-import { ueid } from '../../utils.ts'
 import { FACULTY_MESSAGE_KINDS } from '../faculties.constants.ts'
 import { type FrontierRequestEvent, validateFrontierRequestEvent } from '../faculties.types.ts'
 import { emit, wireInbound } from '../process-lane.ts'
@@ -67,14 +67,17 @@ const createFrontierTrace = ({
   frontier,
   step,
   instanceId,
+  sessionId,
 }: {
   frontier: Frontier
   step: number
   instanceId: string
+  sessionId: string
 }): FrontierTrace => ({
   kind: 'frontier',
   timestamp: Date.now(),
   instanceId,
+  sessionId,
   step,
   status: frontier.status,
   candidates: frontier.candidates.map((candidate) => ({
@@ -97,22 +100,34 @@ const createSelectionTrace = ({
   selected,
   step,
   instanceId,
+  sessionId,
 }: {
   selected: CandidateBid
   step: number
   instanceId: string
+  sessionId: string
 }): SelectionTrace => ({
   kind: TRACE_MESSAGE_KINDS.selection,
   timestamp: Date.now(),
   instanceId,
+  sessionId,
   step,
   selected,
 })
 
-const createDeadlockTrace = ({ step, instanceId }: { step: number; instanceId: string }): Trace => ({
+const createDeadlockTrace = ({
+  step,
+  instanceId,
+  sessionId,
+}: {
+  step: number
+  instanceId: string
+  sessionId: string
+}): Trace => ({
   kind: TRACE_MESSAGE_KINDS.deadlock,
   timestamp: Date.now(),
   instanceId,
+  sessionId,
   step,
 })
 
@@ -220,7 +235,9 @@ type DeadlockFinding = {
  *   checked for enablement at the corresponding step.
  * @param args.space - Optional space stamp applied to all thread rules.
  * @param args.instanceId - Instance id stamped on synthetic interrupt/transform
- *   traces emitted during resumption. Defaults to a minted `ueid('bp_')`.
+ *   traces emitted during resumption. Defaults to a minted `bp_${randomUUIDv7()}`.
+ * @param args.sessionId - Host session id stamped on the same traces alongside
+ *   `instanceId`. Defaults to the `instanceId` — the faculty never mints one.
  * @returns The replay result containing the pending set and final frontier.
  *
  * @throws If a selection event is not enabled at its replay step.
@@ -231,13 +248,16 @@ const replayToFrontierRaw = ({
   threads,
   messages = [],
   space,
-  instanceId = ueid('bp_'),
+  instanceId = `bp_${randomUUIDv7()}`,
+  sessionId,
 }: {
   threads: Thread[]
   messages?: Trace[]
   space?: string
   instanceId?: string
+  sessionId?: string
 }): ReplayToFrontierResult => {
+  const resolvedSessionId = sessionId ?? instanceId
   const pending = new Set<PendingBid>()
   const running = new Set<RunningBid>()
 
@@ -286,6 +306,7 @@ const replayToFrontierRaw = ({
       pending,
       selectedEvent: matched,
       instanceId,
+      sessionId: resolvedSessionId,
       step,
     })
     advanceRunningToPending(resumed, pending)
@@ -340,11 +361,13 @@ const getRequestSuccessors = ({
   selectionPolicy,
   step,
   instanceId,
+  sessionId,
 }: {
   frontier: Frontier
   selectionPolicy: 'all-enabled' | 'scheduler'
   step: number
   instanceId: string
+  sessionId: string
 }) => {
   if (frontier.status !== FRONTIER_STATUS.ready) {
     return []
@@ -355,7 +378,7 @@ const getRequestSuccessors = ({
       ? [...frontier.enabled].sort((left, right) => left.priority - right.priority).slice(0, 1)
       : frontier.enabled
 
-  return enabled.map((candidate) => createSelectionTrace({ selected: candidate, step, instanceId }))
+  return enabled.map((candidate) => createSelectionTrace({ selected: candidate, step, instanceId, sessionId }))
 }
 
 const getTriggerSuccessors = ({
@@ -366,6 +389,7 @@ const getTriggerSuccessors = ({
   triggers,
   space,
   instanceId,
+  sessionId,
 }: {
   pending: Set<PendingBid>
   messages: Trace[]
@@ -374,6 +398,7 @@ const getTriggerSuccessors = ({
   triggers: BPEvent[]
   space?: string
   instanceId: string
+  sessionId: string
 }) => {
   const successors: SelectionTrace[] = []
 
@@ -399,6 +424,7 @@ const getTriggerSuccessors = ({
       const selection = createSelectionTrace({
         step,
         instanceId,
+        sessionId,
         selected: {
           priority: 0,
           type: trigger.type,
@@ -414,6 +440,7 @@ const getTriggerSuccessors = ({
           messages: [...messages, selection],
           space,
           instanceId,
+          sessionId,
         })
         successors.push(selection)
       } catch {
@@ -708,8 +735,10 @@ type ExploreFrontiersArgs = {
   maxDepth?: number
   /** Space stamp applied to all thread rules. */
   space?: string
-  /** Instance id stamped on synthetic traces. Defaults to a minted `ueid('bp_')` — pass the analyzed kernel's id to make joins natural. */
+  /** Instance id stamped on synthetic traces. Defaults to a minted `bp_${randomUUIDv7()}` — pass the analyzed kernel's id to make joins natural. */
   instanceId?: string
+  /** Host session id stamped on synthetic traces alongside `instanceId`. Defaults to the `instanceId` — the faculty never mints one. */
+  sessionId?: string
 }
 
 /**
@@ -754,11 +783,14 @@ const exploreFrontiersRaw = ({
   selectionPolicy = 'all-enabled',
   maxDepth,
   space,
-  instanceId = ueid('bp_'),
+  instanceId = `bp_${randomUUIDv7()}`,
+  sessionId,
 }: ExploreFrontiersArgs): ExploreFrontiersResult => {
   if (strategy !== 'bfs' && strategy !== 'dfs') {
     throw new Error(`Unsupported frontier exploration strategy "${String(strategy)}".`)
   }
+
+  const resolvedSessionId = sessionId ?? instanceId
 
   const pending: WorkItem[] = [{ messages }]
   const visited = new Set<string>()
@@ -774,6 +806,7 @@ const exploreFrontiersRaw = ({
       messages: current.messages,
       space,
       instanceId,
+      sessionId: resolvedSessionId,
     })
 
     const stateKey = frontierStateKey({ pending: currentPending })
@@ -796,7 +829,7 @@ const exploreFrontiersRaw = ({
       successors: [],
     })
 
-    const frontierTrace = createFrontierTrace({ frontier, step, instanceId })
+    const frontierTrace = createFrontierTrace({ frontier, step, instanceId, sessionId: resolvedSessionId })
 
     traces.push({
       messages: [...current.messages, frontierTrace],
@@ -807,6 +840,7 @@ const exploreFrontiersRaw = ({
       selectionPolicy,
       step,
       instanceId,
+      sessionId: resolvedSessionId,
     })
     const triggerSuccessors = getTriggerSuccessors({
       pending: currentPending,
@@ -816,13 +850,18 @@ const exploreFrontiersRaw = ({
       triggers,
       space,
       instanceId,
+      sessionId: resolvedSessionId,
     })
     const successors = [...requestSuccessors, ...triggerSuccessors]
 
     if (frontier.status === FRONTIER_STATUS.deadlock && triggerSuccessors.length === 0) {
       findings.push({
         code: 'deadlock',
-        messages: [...current.messages, frontierTrace, createDeadlockTrace({ step, instanceId })],
+        messages: [
+          ...current.messages,
+          frontierTrace,
+          createDeadlockTrace({ step, instanceId, sessionId: resolvedSessionId }),
+        ],
       })
     }
 
@@ -958,6 +997,7 @@ export type FrontierReplayInput = {
   messages?: SelectionTrace[]
   space?: string
   instanceId?: string
+  sessionId?: string
 }
 
 export type FrontierReplayOutput = {
@@ -977,7 +1017,12 @@ export const FrontierReplayInputSchema = {
     instanceId: {
       type: 'string',
       nullable: true,
-      description: 'instance id stamped on synthetic traces; defaults to a minted ueid("bp_")',
+      description: 'instance id stamped on synthetic traces; defaults to a minted bp_ UUID v7',
+    },
+    sessionId: {
+      type: 'string',
+      nullable: true,
+      description: 'host session id stamped on synthetic traces; defaults to the instanceId',
     },
   },
   required: ['threads'],
@@ -1033,6 +1078,7 @@ export type FrontierExploreInput = {
   maxDepth: number
   space?: string
   instanceId?: string
+  sessionId?: string
 }
 
 export type FrontierExploreOutput = {
@@ -1080,7 +1126,12 @@ export const FrontierExploreInputSchema = {
     instanceId: {
       type: 'string',
       nullable: true,
-      description: 'instance id stamped on synthetic traces; defaults to a minted ueid("bp_")',
+      description: 'instance id stamped on synthetic traces; defaults to a minted bp_ UUID v7',
+    },
+    sessionId: {
+      type: 'string',
+      nullable: true,
+      description: 'host session id stamped on synthetic traces; defaults to the instanceId',
     },
   },
   required: ['threads', 'maxDepth'],
@@ -1110,6 +1161,7 @@ export type FrontierVerifyInput = {
   progress?: string[]
   space?: string
   instanceId?: string
+  sessionId?: string
 }
 
 export type FrontierVerifyOutput = {
@@ -1164,7 +1216,12 @@ export const FrontierVerifyInputSchema = {
     instanceId: {
       type: 'string',
       nullable: true,
-      description: 'instance id stamped on synthetic traces; defaults to a minted ueid("bp_")',
+      description: 'instance id stamped on synthetic traces; defaults to a minted bp_ UUID v7',
+    },
+    sessionId: {
+      type: 'string',
+      nullable: true,
+      description: 'host session id stamped on synthetic traces; defaults to the instanceId',
     },
   },
   required: ['threads', 'maxDepth'],
@@ -1182,6 +1239,84 @@ export const FrontierVerifyInputSchema = {
  * so it crosses the boundary verbatim. Any unexpected throw is caught into
  * `{ isError, message }` with a `failed` status (never throw into the model
  * channel).
+ */
+
+export type FrontierAddThreadInput = {
+  /** The single proposed thread — validated against the engine's own ThreadSchema home. */
+  thread: Thread
+  /** The currently mounted thread set the proposal is analyzed against. Defaults to none. */
+  threads?: Thread[]
+  /** The current trace state — a selection-trace prefix the analysis replays. Defaults to none. */
+  messages?: SelectionTrace[]
+  maxDepth: number
+  progress?: string[]
+  space?: string
+  instanceId?: string
+  sessionId?: string
+}
+
+export type FrontierAddThreadOutput = {
+  /** The verdict: true iff the proposal verified. The op does NOT admit — the composition owns the write. */
+  ok: boolean
+  /** The proposed thread, echoed verbatim. */
+  thread: Thread
+  status: 'verified' | 'failed' | 'truncated'
+  findings: FrontierVerifyOutput['findings']
+  livelocks: FrontierVerifyOutput['livelocks']
+  report: FrontierReport
+  isError?: boolean
+  message?: string
+}
+
+export const FrontierAddThreadInputSchema = {
+  type: 'object',
+  properties: {
+    thread: ThreadSchema,
+    threads: {
+      ...threadsJsonSchema,
+      nullable: true,
+      description: 'the currently mounted thread set to analyze against',
+    },
+    messages: { ...messagesJsonSchema, nullable: true },
+    maxDepth: {
+      type: 'integer',
+      minimum: 1,
+      description:
+        'Required. Exploration bound. Finite-state programs close their state graph and terminate before this. Never treat truncated as a pass.',
+    },
+    progress: {
+      type: 'array',
+      items: { type: 'string' },
+      nullable: true,
+      description: 'Event types that count as progress; cycles never selecting one are livelocks (status "failed").',
+    },
+    space: { type: 'string', nullable: true, description: 'space stamp applied to all thread rules' },
+    instanceId: {
+      type: 'string',
+      nullable: true,
+      description: 'instance id stamped on synthetic traces; defaults to a minted bp_ UUID v7',
+    },
+    sessionId: {
+      type: 'string',
+      nullable: true,
+      description: 'host session id stamped on synthetic traces; defaults to the instanceId',
+    },
+  },
+  required: ['thread', 'maxDepth'],
+  additionalProperties: false,
+  description:
+    'Validate a proposed thread for admission: schema-check the thread tuple (the engine ThreadSchema home), then structurally verify the proposal against the current thread set + trace state. Returns the verdict + analysis findings; does NOT admit — the composition owns the write.',
+} as unknown as JSONSchemaType<FrontierAddThreadInput>
+
+/**
+ * Validate a proposed thread for admission — the structural layer of dynamic
+ * thread addition.
+ *
+ * The `thread` tuple is schema-checked against the engine's own ThreadSchema
+ * (derived, not mirrored); then `verifyFrontiersRaw` analyzes the proposal
+ * joined to the current thread set over the trace prefix. The result is the
+ * verdict + findings as data — the frontier stays analysis-shaped and never
+ * writes to the engine; the composition admits on `ok`.
  */
 
 // ---------------------------------------------------------------------------
@@ -1207,6 +1342,7 @@ const postResult = ({ id, result, space }: { id: string; result: unknown; space?
 const validateReplayInput = ajv.compile(FrontierReplayInputSchema)
 const validateExploreInput = ajv.compile(FrontierExploreInputSchema)
 const validateVerifyInput = ajv.compile(FrontierVerifyInputSchema)
+const validateAddThreadInput = ajv.compile(FrontierAddThreadInputSchema)
 
 type ToolRunner = {
   validate: (input: unknown) => boolean
@@ -1218,9 +1354,9 @@ const OP_RUNNERS: Record<string, ToolRunner> = {
   replay: {
     validate: validateReplayInput,
     errors: () => ajv.errorsText(validateReplayInput.errors),
-    run: ({ threads, messages, space, instanceId }: FrontierReplayInput): FrontierReplayOutput => {
+    run: ({ threads, messages, space, instanceId, sessionId }: FrontierReplayInput): FrontierReplayOutput => {
       try {
-        const { pending, frontier } = replayToFrontierRaw({ threads, messages, space, instanceId })
+        const { pending, frontier } = replayToFrontierRaw({ threads, messages, space, instanceId, sessionId })
         return { frontier, stateKey: frontierStateKey({ pending }), pendingCount: pending.size }
       } catch (err) {
         return {
@@ -1245,6 +1381,7 @@ const OP_RUNNERS: Record<string, ToolRunner> = {
       maxDepth,
       space,
       instanceId,
+      sessionId,
     }: FrontierExploreInput): FrontierExploreOutput => {
       try {
         const { traces, findings, report, stateGraph } = exploreFrontiersRaw({
@@ -1256,6 +1393,7 @@ const OP_RUNNERS: Record<string, ToolRunner> = {
           maxDepth,
           space,
           instanceId,
+          sessionId,
         })
         return { traces, findings, report, stateGraph: serializeStateGraph(stateGraph) }
       } catch (err) {
@@ -1290,6 +1428,7 @@ const OP_RUNNERS: Record<string, ToolRunner> = {
       progress,
       space,
       instanceId,
+      sessionId,
     }: FrontierVerifyInput): FrontierVerifyOutput => {
       try {
         const { status, findings, report, livelocks } = verifyFrontiersRaw({
@@ -1302,6 +1441,7 @@ const OP_RUNNERS: Record<string, ToolRunner> = {
           progress,
           space,
           instanceId,
+          sessionId,
         })
         return { status, findings, report, livelocks }
       } catch (err) {
@@ -1311,6 +1451,51 @@ const OP_RUNNERS: Record<string, ToolRunner> = {
           report: {
             strategy: strategy ?? 'bfs',
             selectionPolicy: selectionPolicy ?? 'all-enabled',
+            visitedCount: 0,
+            findingCount: 0,
+            truncated: false,
+            maxDepth,
+          },
+          livelocks: [],
+          isError: true,
+          message: (err as Error).message,
+        }
+      }
+    },
+  },
+  add_thread: {
+    validate: validateAddThreadInput,
+    errors: () => ajv.errorsText(validateAddThreadInput.errors),
+    run: ({
+      thread,
+      threads,
+      messages,
+      maxDepth,
+      progress,
+      space,
+      instanceId,
+      sessionId,
+    }: FrontierAddThreadInput): FrontierAddThreadOutput => {
+      try {
+        const { status, findings, report, livelocks } = verifyFrontiersRaw({
+          threads: [...(threads ?? []), thread],
+          messages,
+          maxDepth,
+          progress,
+          space,
+          instanceId,
+          sessionId,
+        })
+        return { ok: status === 'verified', thread, status, findings, report, livelocks }
+      } catch (err) {
+        return {
+          ok: false,
+          thread,
+          status: 'failed' as const,
+          findings: [],
+          report: {
+            strategy: 'bfs' as const,
+            selectionPolicy: 'all-enabled' as const,
             visitedCount: 0,
             findingCount: 0,
             truncated: false,

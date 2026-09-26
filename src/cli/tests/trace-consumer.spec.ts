@@ -10,6 +10,7 @@ const selection = (detail: JsonObject, space?: string): SelectionTrace => ({
   kind: TRACE_MESSAGE_KINDS.selection,
   timestamp: 0,
   instanceId: 'i',
+  sessionId: 'i',
   step: 1,
   selected: { priority: 0, type: 'shell_request', detail, ...(space === undefined ? {} : { space }) },
 })

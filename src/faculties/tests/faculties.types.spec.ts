@@ -4,9 +4,9 @@ import {
   validateBehaviorErrorEvent,
   validateFrontierRequestEvent,
   validateFrontierRequestResultEvent,
-  validateMcpCancelEvent,
-  validateMcpRequestEvent,
-  validateMcpRequestResultEvent,
+  validateSecurityCancelEvent,
+  validateSecurityRequestEvent,
+  validateSecurityRequestResultEvent,
   validateShellCancelEvent,
   validateShellRequestEvent,
   validateShellRequestResultEvent,
@@ -183,6 +183,13 @@ describe('workers.types event vocabulary', () => {
       })
       expect(valid).toBe(true)
     })
+    test('accepts the add_thread operation — the admission path', () => {
+      const valid = validateFrontierRequestEvent({
+        type: FACULTY_MESSAGE_KINDS.frontier_request,
+        detail: { id: 'fr_1', op: 'add_thread', input: { thread: { label: 't', rules: [] }, maxDepth: 8 } },
+      })
+      expect(valid).toBe(true)
+    })
     test('rejects an unknown operation — frontier is its own worker, not a tool', () => {
       const valid = validateFrontierRequestEvent({
         type: FACULTY_MESSAGE_KINDS.frontier_request,
@@ -257,84 +264,31 @@ describe('workers.types event vocabulary', () => {
     })
   })
 
-  describe('mcp_request', () => {
-    test('accepts a well-formed call-tool request', () => {
-      const valid = validateMcpRequestEvent({
-        type: FACULTY_MESSAGE_KINDS.mcp_request,
-        detail: { id: 'm1', op: 'call-tool', input: { url: 'http://127.0.0.1:1/mcp', tool: 'echo', args: {} } },
+  describe('credential_request / credential_result / credential_cancel', () => {
+    test('accepts a well-formed credential request with the ctx join lane', () => {
+      const valid = validateSecurityRequestEvent({
+        type: FACULTY_MESSAGE_KINDS.credential_request,
+        detail: {
+          id: 'sec1',
+          input: { serverUrl: 'https://mcp.example.com/mcp' },
+          ctx: { issuer: 'https://as.example.com' },
+        },
       })
       expect(valid).toBe(true)
     })
-    test('accepts optional space', () => {
-      const valid = validateMcpRequestEvent({
-        type: FACULTY_MESSAGE_KINDS.mcp_request,
-        detail: { id: 'm1', op: 'list-tools', input: { url: 'http://127.0.0.1:1/mcp' } },
-        space: 'demo',
+    test('accepts a well-formed credential result', () => {
+      const valid = validateSecurityRequestResultEvent({
+        type: FACULTY_MESSAGE_KINDS.credential_result,
+        detail: { id: 'sec1', ok: true, result: { token: 't' } },
       })
       expect(valid).toBe(true)
     })
-    test('rejects an op outside the enum — the 7 ops are the whole surface', () => {
-      const valid = validateMcpRequestEvent({
-        type: FACULTY_MESSAGE_KINDS.mcp_request,
-        detail: { id: 'm1', op: 'purge', input: {} },
-      })
-      expect(valid).toBe(false)
-    })
-    test('rejects a detail without op', () => {
-      const valid = validateMcpRequestEvent({
-        type: FACULTY_MESSAGE_KINDS.mcp_request,
-        detail: { id: 'm1', input: {} },
-      })
-      expect(valid).toBe(false)
-    })
-    test('rejects a detail without input', () => {
-      const valid = validateMcpRequestEvent({
-        type: FACULTY_MESSAGE_KINDS.mcp_request,
-        detail: { id: 'm1', op: 'list-tools' },
-      })
-      expect(valid).toBe(false)
-    })
-    test('rejects ingress — routed events are synthesized, never ingress', () => {
-      const valid = validateMcpRequestEvent({
-        type: FACULTY_MESSAGE_KINDS.mcp_request,
-        detail: { id: 'm1', op: 'list-tools', input: { url: 'http://127.0.0.1:1/mcp' } },
-        ingress: 'ui_event',
-      })
-      expect(valid).toBe(false)
-    })
-  })
-
-  describe('mcp_request_result', () => {
-    test('accepts a well-formed result', () => {
-      const valid = validateMcpRequestResultEvent({
-        type: FACULTY_MESSAGE_KINDS.mcp_request_result,
-        detail: { id: 'm1', ok: true, result: { status: 'completed', durationMs: 12 } },
+    test('accepts a well-formed credential cancel', () => {
+      const valid = validateSecurityCancelEvent({
+        type: FACULTY_MESSAGE_KINDS.credential_cancel,
+        detail: { id: 'sec1' },
       })
       expect(valid).toBe(true)
-    })
-    test('rejects a non-object result payload', () => {
-      const valid = validateMcpRequestResultEvent({
-        type: FACULTY_MESSAGE_KINDS.mcp_request_result,
-        detail: { id: 'm1', result: 'not-an-object' },
-      })
-      expect(valid).toBe(false)
-    })
-  })
-
-  describe('mcp_cancel', () => {
-    test('accepts a well-formed cancel', () => {
-      const valid = validateMcpCancelEvent({
-        type: FACULTY_MESSAGE_KINDS.mcp_cancel,
-        detail: { id: 'm1' },
-      })
-      expect(valid).toBe(true)
-    })
-    test('rejects a cancel without id', () => {
-      const valid = validateMcpCancelEvent({
-        type: FACULTY_MESSAGE_KINDS.mcp_cancel,
-        detail: {},
-      })
-      expect(valid).toBe(false)
     })
   })
 

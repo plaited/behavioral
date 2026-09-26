@@ -1,48 +1,93 @@
 /**
- * `BunKeychainOAuthProvider` — a v2 {@link OAuthClientProvider} that persists
- * OAuth tokens and client information to the OS keychain (via
- * {@link BunKeychain}), implementing the agentskills.io / MCP v2 issuer-binding
- * and RFC 9207 `iss` validation shape.
+ * `BunKeychainOAuthProvider` — the security faculty's credential store: an
+ * issuer-binding OAuth provider that persists tokens and client information
+ * to the OS keychain (via {@link BunKeychain}), SDK-free (plain types from
+ * `security/types.ts` — the `@modelcontextprotocol/client` dependency is
+ * retired).
  *
  * @remarks
  * One provider per server-url, reused across process restarts: the keychain
  * persists, the connection doesn't, but a reconnect reads tokens back via
  * {@link BunKeychainOAuthProvider.tokens | tokens()}.
  *
- * Backs the non-interactive `client_credentials` and `refresh_token` grants.
- * The v2 SDK's `auth()` orchestrator (invoked by the transport on 401) does
- * RFC 9728 discovery and the token exchange via `prepareTokenRequest` +
- * `addClientAuthentication` + `clientInformation`; this provider supplies the
- * grant parameters and credentials and persists the issuer-stamped results.
+ * Backs the non-interactive `client_credentials` and `refresh_token` grants:
+ * this provider supplies the grant parameters and credentials
+ * ({@link BunKeychainOAuthProvider.prepareTokenRequest | prepareTokenRequest},
+ * {@link BunKeychainOAuthProvider.addClientAuthentication | addClientAuthentication},
+ * {@link BunKeychainOAuthProvider.clientInformation | clientInformation}) and
+ * persists the issuer-stamped results. The HTTP exchange itself is the grant
+ * orchestrator's (a later slice rides these hooks); MINIMAL: nothing here
+ * calls the token endpoint yet.
  *
  * Issuer-binding: `clientInformation(ctx)` and `tokens(ctx)` key persisted
- * blobs by the SDK-stamped `issuer`; a blob whose `issuer` does not match the
- * resolved authorization server is treated as absent (the SDK's
- * `discardIfIssuerMismatch` enforces this at the `auth()` layer). When
- * `ctx === undefined` (the resource-server `token()` read, pre-discovery),
- * the most-recently-saved blob for the server is returned, per the v2
- * adapter contract.
+ * blobs by the stamped `issuer`; a blob whose `issuer` does not match the
+ * resolved authorization server is treated as absent. When `ctx ===
+ * undefined` (the pre-discovery per-request read), the most-recently-saved
+ * blob for the server is returned.
  *
  * MINIMAL: `validateResourceURL` enforces origin (scheme+host+port) binding
  * between the MCP server URL and a requested `resource` (RFC 8707). Upgrade
- * path: full RFC 8707 + RFC 9207 `iss` validation lives in the SDK's `auth()`
- * (`validateAuthorizationResponseIssuer`); this hook covers the
- * resource-binding leg that `auth()` delegates to the provider.
+ * path: full RFC 8707 + RFC 9207 `iss` validation rides the grant
+ * orchestrator when it lands; this hook covers the resource-binding leg.
  *
  * @packageDocumentation
  */
 
 import type {
-  AddClientAuthentication,
+  ClientAuthMethod,
+  OAuthClientInformation,
   OAuthClientInformationContext,
-  OAuthClientInformationMixed,
   OAuthClientMetadata,
   OAuthDiscoveryState,
-  OAuthTokens,
   StoredOAuthClientInformation,
   StoredOAuthTokens,
-} from '@modelcontextprotocol/client'
-import { IssuerMismatchError, selectClientAuthMethod } from '@modelcontextprotocol/client'
+} from './types.ts'
+
+// ---------------------------------------------------------------------------
+// Plain client-auth selection (the SDK-free replacement for the SDK helper)
+// ---------------------------------------------------------------------------
+
+/**
+ * Selects the client-auth method for a token request: basic, then post, when
+ * a client secret is available and supported; `none` otherwise (public
+ * clients, or an AS that only offers `none`). Documented SDK priority order,
+ * reimplemented against plain types.
+ */
+export const selectClientAuthMethod = (
+  clientInformation: OAuthClientInformation,
+  supportedMethods: string[],
+): ClientAuthMethod => {
+  if (clientInformation.client_secret !== undefined) {
+    if (supportedMethods.includes('client_secret_basic')) return 'client_secret_basic'
+    if (supportedMethods.includes('client_secret_post')) return 'client_secret_post'
+  }
+  return 'none'
+}
+
+/**
+ * Thrown when an authorization-server issuer identifier fails validation —
+ * the mix-up-attack guard (RFC 8414 §3.3 metadata echo / RFC 9207 `iss`).
+ * Fatal for a grant flow, never retryable-by-credential-invalidation.
+ */
+export class IssuerMismatchError extends Error {
+  /** Which check failed — metadata echo or authorization-response `iss`. */
+  readonly kind: 'metadata' | 'authorization_response'
+  /** The issuer the client expected (from validated metadata / discovery input). */
+  readonly expected: string | undefined
+  /** The issuer value that was received. Attacker-controllable on the response path. */
+  readonly received: string | undefined
+
+  constructor(kind: 'metadata' | 'authorization_response', expected: string | undefined, received: string | undefined) {
+    // The values are JSON-encoded to neutralize log-injection.
+    super(
+      `issuer mismatch (${kind}): expected ${JSON.stringify(expected ?? null)}, received ${JSON.stringify(received ?? null)}`,
+    )
+    this.name = 'IssuerMismatchError'
+    this.kind = kind
+    this.expected = expected
+    this.received = received
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Config
@@ -71,7 +116,7 @@ export type KeychainOAuthProviderOptions = {
   clientAuthentication?: 'client_secret_basic' | 'client_secret_post' | 'none'
   /**
    * The authorization server's `issuer` these credentials are registered with.
-   * Stamped onto stored client information for SEP-2352 issuer-binding. May be
+   * Stamped onto stored client information for issuer-binding. May be
    * omitted when the issuer is only known after discovery.
    */
   expectedIssuer?: string
@@ -92,11 +137,67 @@ const hostOf = (url: string): string => {
 }
 
 // The keychain names within the service — exported so the keychain-floor
-// reader (the mcp worker) derives the same keys as the writer (the provider)
-// from one source.
+// reader (the security faculty) derives the same keys as the writer (this
+// provider) from one source.
 export const tokensKey = (serverUrl: string): string => `${hostOf(serverUrl)}:tokens`
 const clientInfoKey = (serverUrl: string): string => `${hostOf(serverUrl)}:clientinfo`
 const discoveryKey = (serverUrl: string): string => `${hostOf(serverUrl)}:discovery`
+
+/**
+ * The issuer-binding rule, shared by the provider reads and the keychain
+ * floor: a blob stamped for a different authorization server is not this
+ * AS's credential — absent, never vended to the wrong server. An unstamped
+ * (legacy) blob binds to whatever AS asks; no ctx issuer (the pre-discovery
+ * read) accepts the most-recently-saved blob.
+ */
+export const issuerMatches = (stored: string | undefined, requested: string | undefined): boolean => {
+  if (requested === undefined) return true
+  if (stored === undefined) return true
+  return stored === requested
+}
+
+// ---------------------------------------------------------------------------
+// The keychain floor — credential vending's last leg
+// ---------------------------------------------------------------------------
+
+/**
+ * The keychain floor of credential vending: read the token slot for a server
+ * and vend its `access_token`, fail-closed. A missing slot, a corrupt blob,
+ * an empty access token, or a blob bound to a different authorization server
+ * (`issuer`, when the caller supplies one from its resolved discovery) is an
+ * absent credential — never a throw.
+ *
+ * MINIMAL: token expiry is not detected (no `expires_in` bookkeeping, no
+ * refresh) — an expired token vends until the remote server rejects it.
+ * Upgrade path: expiry-aware reads + a refresh leg riding the provider's
+ * grant hooks when the grant orchestrator lands.
+ */
+export const vendKeychainToken = async ({
+  serverUrl,
+  keychain,
+  issuer,
+}: {
+  serverUrl: string
+  keychain: Keychain
+  /** The caller's resolved AS issuer — binds the read (undefined = most-recently-saved). */
+  issuer?: string
+}): Promise<string | undefined> => {
+  try {
+    const raw = await keychain.get(tokensKey(serverUrl))
+    if (raw === null) return undefined
+    const tokens = JSON.parse(raw) as { access_token?: unknown; issuer?: unknown }
+    const accessToken =
+      typeof tokens.access_token === 'string' && tokens.access_token !== '' ? tokens.access_token : undefined
+    if (accessToken === undefined) return undefined
+    const stamped = typeof tokens.issuer === 'string' && tokens.issuer !== '' ? tokens.issuer : undefined
+    // Issuer-binding: a blob bound to another AS must not be vended — the
+    // caller's resolved issuer is the only accepted binding.
+    if (!issuerMatches(stamped, issuer)) return undefined
+    return accessToken
+  } catch {
+    return undefined
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Provider
@@ -134,7 +235,7 @@ export class BunKeychainOAuthProvider {
     this.#keychain = options.keychain ?? BunKeychain()
   }
 
-  // -- OAuthClientProvider: non-interactive basics -------------------------
+  // -- grant-flow basics ----------------------------------------------------
 
   get redirectUrl(): undefined {
     return undefined
@@ -176,13 +277,13 @@ export class BunKeychainOAuthProvider {
   async clientInformation(ctx?: OAuthClientInformationContext): Promise<StoredOAuthClientInformation | undefined> {
     const cached = this.#cachedClientInfo ?? (await this.#loadClientInfo())
     // Issuer-binding: a persisted blob bound to a different AS is treated as
-    // absent — the SDK will re-stamp from the resolved issuer (or fall back to
-    // the statically-configured credentials below).
+    // absent — the grant flow re-stamps from the resolved issuer (or falls
+    // back to the statically-configured credentials below).
     if (cached && this.#issuerMatches(cached.issuer, ctx?.issuer)) {
       return cached
     }
     // No usable persisted info — return the statically-configured credentials
-    // (unstamped); the SDK stamps + saves them on first auth.
+    // (unstamped); the grant flow stamps + saves them on first auth.
     if (this.#clientId) {
       return {
         client_id: this.#clientId,
@@ -203,10 +304,13 @@ export class BunKeychainOAuthProvider {
 
   // -- tokens (issuer-keyed; most-recently-saved when ctx undefined) ------
 
-  async tokens(_ctx?: OAuthClientInformationContext): Promise<StoredOAuthTokens | undefined> {
-    if (this.#cachedTokens) return this.#cachedTokens
-    this.#cachedTokens = await this.#loadTokens()
-    return this.#cachedTokens
+  async tokens(ctx?: OAuthClientInformationContext): Promise<StoredOAuthTokens | undefined> {
+    const tokens = this.#cachedTokens ?? (await this.#loadTokens())
+    // Issuer-binding: a blob stamped with a different AS is not this AS's
+    // credential — absent, never vended to the wrong server.
+    if (tokens === undefined || !this.#issuerMatches(tokens.issuer, ctx?.issuer)) return undefined
+    this.#cachedTokens = tokens
+    return tokens
   }
 
   async saveTokens(tokens: StoredOAuthTokens, _ctx?: OAuthClientInformationContext): Promise<void> {
@@ -236,8 +340,8 @@ export class BunKeychainOAuthProvider {
   // -- token request ------------------------------------------------------
 
   /**
-   * Builds the grant-specific token-request body. The v2 SDK's `fetchToken`
-   * calls this (plus {@link addClientAuthentication}) to perform the exchange.
+   * Builds the grant-specific token-request body — the grant orchestrator
+   * pairs this with {@link addClientAuthentication} for the exchange.
    */
   prepareTokenRequest(scope?: string): URLSearchParams {
     const params = new URLSearchParams()
@@ -257,10 +361,15 @@ export class BunKeychainOAuthProvider {
 
   /**
    * Adds client credentials to a token request per the configured method.
-   * Mirrors the SDK's `selectClientAuthMethod` default ordering when no
-   * method is configured.
+   * Mirrors {@link selectClientAuthMethod}'s default ordering when no method
+   * is configured.
    */
-  addClientAuthentication: AddClientAuthentication = (headers, params, _url, _metadata) => {
+  addClientAuthentication = (
+    headers: Headers,
+    params: URLSearchParams,
+    _url?: string | URL,
+    _metadata?: unknown,
+  ): void => {
     const method = this.#resolvedAuthMethod()
     switch (method) {
       case 'client_secret_basic': {
@@ -336,12 +445,12 @@ export class BunKeychainOAuthProvider {
 
   #resolvedAuthMethod(): 'client_secret_basic' | 'client_secret_post' | 'none' {
     if (this.#clientAuthentication) return this.#clientAuthentication
-    // Default selection matches the SDK's selectClientAuthMethod priority.
+    // Default selection matches selectClientAuthMethod's priority.
     return selectClientAuthMethod(
       {
         client_id: this.#clientId,
         ...(this.#clientSecret ? { client_secret: this.#clientSecret } : {}),
-      } as OAuthClientInformationMixed,
+      },
       ['client_secret_basic', 'client_secret_post', 'none'],
     )
   }
@@ -351,10 +460,7 @@ export class BunKeychainOAuthProvider {
   }
 
   #issuerMatches(stored: string | undefined, requested: string | undefined): boolean {
-    // ctx === undefined (resource-server read) → accept the most-recently-saved.
-    if (requested === undefined) return true
-    if (stored === undefined) return true
-    return stored === requested
+    return issuerMatches(stored, requested)
   }
 
   async #loadTokens(): Promise<StoredOAuthTokens | undefined> {
@@ -378,10 +484,8 @@ export class BunKeychainOAuthProvider {
   }
 }
 
-export type { OAuthDiscoveryState, OAuthTokens, StoredOAuthClientInformation, StoredOAuthTokens }
-
 /**
- * OS-keychain abstraction for the MCP OAuth provider.
+ * OS-keychain abstraction for the security faculty's credential store.
  *
  * @remarks
  * `BunKeychain` wraps {@link Bun.secrets} (macOS Keychain / libsecret /
@@ -392,7 +496,6 @@ export type { OAuthDiscoveryState, OAuthTokens, StoredOAuthClientInformation, St
  *
  * All values are JSON strings; the provider serializes `StoredOAuthTokens` /
  * `StoredOAuthClientInformation` / `OAuthDiscoveryState` blobs before storing.
- *
  */
 
 /** A name/value secret store keyed by `name` within a fixed `service`. */
@@ -405,7 +508,11 @@ export type Keychain = {
   delete(name: string): Promise<boolean>
 }
 
-/** The fixed keychain service label — unique to the behavioral MCP client. */
+/**
+ * The fixed keychain service label — historical: named for the mcp faculty
+ * the store originated in. Retained so previously-stored credentials remain
+ * readable across the move.
+ */
 export const KEYCHAIN_SERVICE = 'behavioral.mcp'
 
 /**

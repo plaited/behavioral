@@ -26,6 +26,7 @@ type WireResult = {
   ok: boolean
   result?: unknown
   error?: Record<string, unknown>
+  ctx?: unknown
   space?: string
 }
 
@@ -38,8 +39,8 @@ const spawnStoreWorker = (dbPath = ':memory:') => {
     // Env vars cross Bun.spawn boundaries; worker-thread env-data does not.
     env: { [STORE_DB_PATH_KEY]: dbPath },
   })
-  const call = (id: string, op: StoreOp, input: unknown, space?: string): void => {
-    faculty.call({ id, op, input } as JsonObject, space)
+  const call = (id: string, op: StoreOp, input: unknown, space?: string, ctx?: JsonObject): void => {
+    faculty.call({ id, op, input, ...(ctx === undefined ? {} : { ctx }) } as JsonObject, space)
   }
   const resultFor = async (id: string): Promise<WireResult> => {
     const raw = await faculty.resultFor(id)
@@ -56,6 +57,33 @@ describe('store worker — event wire', () => {
       const { id, ok } = await store.resultFor('s1')
       expect(id).toBe('s1')
       expect(ok).toBe(true)
+    } finally {
+      store.terminate()
+    }
+  })
+
+  test('request ctx echoes on the result — the thread join lane', async () => {
+    const store = spawnStoreWorker()
+    try {
+      store.call('s1', 'put', { collection: 'c', key: 'k', value: {} }, undefined, {
+        echo: { leg: 'design', scale: 's3' },
+      })
+      const { ok, ctx } = await store.resultFor('s1')
+      expect(ok).toBe(true)
+      expect(ctx).toEqual({ echo: { leg: 'design', scale: 's3' } })
+    } finally {
+      store.terminate()
+    }
+  })
+
+  test('request ctx echoes on the error branch too', async () => {
+    const store = spawnStoreWorker()
+    try {
+      // get without a key — invalid input, the typed error result
+      store.call('s1', 'get', { collection: 'c' }, undefined, { echo: { leg: 'design' } })
+      const { ok, ctx } = await store.resultFor('s1')
+      expect(ok).toBe(false)
+      expect(ctx).toEqual({ echo: { leg: 'design' } })
     } finally {
       store.terminate()
     }

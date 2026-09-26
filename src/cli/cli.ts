@@ -69,10 +69,15 @@ type CliHandlerConfig<TInput, TOutput, TName extends string = string> = {
   run: (input: TInput, flags: CliFlags) => Promise<TOutput> | TOutput
 }
 
+/** Options the router's default (no-subcommand) entry receives. */
+export type CliDefaultEntry = (args: string[]) => Promise<void>
+
 type CliRouterConfig = {
   name: string
   description: string
   commands: Record<string, (args: string[]) => Promise<void>>
+  /** Runs for a bare invocation (no subcommand) — e.g. attach-or-start. */
+  default?: CliDefaultEntry
 }
 
 const buildUsage = ({ name, help }: { name: string; help: string }): string =>
@@ -314,7 +319,7 @@ export const defineScript = async <TInput, TOutput>({
 }
 
 export const makeCliRouter =
-  ({ name, description, commands }: CliRouterConfig) =>
+  ({ name, description, commands, default: commandsDefault }: CliRouterConfig) =>
   async (argv: string[]): Promise<void> => {
     const command = argv[2]
     const args = argv.slice(3)
@@ -334,6 +339,11 @@ export const makeCliRouter =
         process.exit(1)
       }
       process.exit(0)
+    }
+
+    if (!command && commandsDefault) {
+      await commandsDefault(args)
+      return
     }
 
     if (!command || command === '--help' || command === '-h') {

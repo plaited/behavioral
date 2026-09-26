@@ -98,7 +98,8 @@ const noulQuestionSchema = {
   additionalProperties: false,
 } as const
 
-const choiceQuestionSchema = {
+/** The choice question's schema — the admit/reject judgment derives its question shape from this one home. */
+export const choiceQuestionSchema = {
   type: 'object',
   properties: {
     type: { type: 'string', const: 'choice' },

@@ -34,6 +34,7 @@ import type {
   RenderMessage,
   ScaleCheckMessage,
   ServerMessage,
+  StyleMessage,
   Transport,
 } from './controller.types.ts'
 import {
@@ -399,6 +400,26 @@ export class Controller {
     if (replace) window.location.replace(url)
     else window.location.assign(url)
   }
+  /**
+   * Apply a scoped style: the css arrives fully composed (`@scope` block,
+   * scope root = the target's b-target selector) — this applies the text
+   * VERBATIM into one style element per target, idempotently replacing (a
+   * repeat message updates the same element, never stacks). The element is
+   * keyed by `data-b-style` (the target), adopted into `document.head` so it
+   * survives subtree swaps; the @scope root is what confines its reach.
+   */
+  #style({ target, css }: StyleMessage['detail']) {
+    let element: HTMLStyleElement | undefined
+    for (const candidate of Array.from(document.head.querySelectorAll<HTMLStyleElement>('style[data-b-style]'))) {
+      if (candidate.dataset.bStyle === target) element = candidate
+    }
+    if (element === undefined) {
+      element = document.createElement('style')
+      element.dataset.bStyle = target
+      document.head.append(element)
+    }
+    element.textContent = css
+  }
   #scaleCheck({ target, swap, id, match = '=' }: ScaleCheckMessage['detail']) {
     const nodelist = document.querySelectorAll(`[${B_TARGET}${match}"${target}"]`)
     const boundary = swapBoundary(swap)
@@ -451,6 +472,10 @@ export class Controller {
         case CONTROLLER_INCOMING_MESSAGE_TYPES.ui_scale_check: {
           this.#scaleCheck(detail)
           return
+        }
+        case CONTROLLER_INCOMING_MESSAGE_TYPES.ui_style: {
+          this.#style(detail)
+          break
         }
       }
       this.#send({

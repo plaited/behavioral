@@ -12,6 +12,7 @@ const fakeRuntime = () => {
   const listeners: Array<(trace: Trace) => void> = []
   const calls = { started: 0, terminated: 0 }
   const runtime = {
+    identity: { instanceId: 'bp_serve_test', sessionId: 'bp_serve_test' },
     trigger: (event: BPEvent): void => {
       triggers.push(event)
     },
@@ -36,6 +37,7 @@ const selectionOf = (selected: { type: string; detail?: JsonObject; space?: stri
   kind: TRACE_MESSAGE_KINDS.selection,
   timestamp: 0,
   instanceId: 'i',
+  sessionId: 'i',
   step: 1,
   selected: { priority: 0, ...selected },
 })
