@@ -439,13 +439,17 @@ describe('bProgram — the runtime composition', () => {
         // The other branch of the ruling: livelock = a cycle that never
         // selects a progress event. A self-sustaining cycle that DOES select
         // one — a faculty result kind, the derived `*_result` vocabulary —
-        // verifies and admits. (At runtime this thread self-sustains on its
-        // own result selections — allowed: every step is an externally
-        // observable result. The spin is expected in this bare composition;
-        // terminate ends it.)
+        // verifies and admits. The fixture is `once` by design: a LOOPING
+        // result-requester self-sustains at runtime (its own request is the
+        // candidate that selects, re-arming the thread inside one cascade —
+        // the engine's recursive super-step converts that admitted livelock
+        // into a stack overflow; the CI lesson). The `once` shape keeps the
+        // verdict path under test — the request still selects a progress
+        // event inside its cycle — without the runtime spin.
         runtime.trigger(
           addThreadRequest('lk2', {
             label: 'progress-looper',
+            once: true,
             rules: [{ request: { type: FACULTY_MESSAGE_KINDS.store_request_result } }],
           }),
         )
@@ -1257,6 +1261,12 @@ describe('bProgram — the runtime composition', () => {
       })
     })
 
+    // The registry tests boot multiple full compositions (scans + judged
+    // admissions per boot) — process-heavy choreography that exceeds bun's
+    // 5s default on slow runners (the CI lesson: green on CI with margin,
+    // 5.6s on a 4x-slow container). The explicit timeout buys the runner
+    // headroom; waitForTraces' own 8s deadline still fails fast on a
+    // genuine break.
     test('reject → the registry holds it out: no boot mount, no re-adjudication — the skip is visible', async () => {
       await withIsolatedHome(async (home, plugin) => {
         const dir = join(plugin, 'sh.behavioral/threads')
@@ -1319,7 +1329,7 @@ describe('bProgram — the runtime composition', () => {
           }
         }
       })
-    })
+    }, 20_000)
 
     test('a changed hash re-arms the proposal — the new thread code is a candidate again', async () => {
       await withIsolatedHome(async (home, plugin) => {
@@ -1375,6 +1385,6 @@ describe('bProgram — the runtime composition', () => {
           }
         }
       })
-    })
+    }, 20_000)
   })
 })

@@ -149,7 +149,13 @@ describe('shell rpc op', () => {
     const worker = spawnShellWorker()
     workers.push(worker)
     worker.call({ id: 'rpc4', input: { op: 'rpc', url: server.url, method: 'slow/x' } })
-    await Bun.sleep(100)
+    // The in-flight assertion races the worker's cold spawn on slow runners —
+    // poll to the server's arrival instead of a fixed sleep (the CI lesson).
+    const arrival = Date.now() + 5_000
+    while (seen < 1) {
+      if (Date.now() > arrival) break
+      await Bun.sleep(25)
+    }
     expect(seen).toBe(1)
     worker.post({ type: FACULTY_MESSAGE_KINDS.shell_cancel, detail: { id: 'rpc4' } })
     const raw = await worker.resultFor('rpc4')
