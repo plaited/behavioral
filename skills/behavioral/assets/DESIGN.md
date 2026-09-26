@@ -277,6 +277,9 @@ The dot tint derives from the primary token via `color-mix()`, so a theme edit p
 | Token | Hex | Role & Mapping | Contrast Ratio |
 |---|---|---|---|
 | `surface` | `#110D11` | Primary console background | 15.2:1 against text |
+| `surface-dim` | `#110D11` | Dimmed surface variant | — |
+| `surface-bright` | `#322A31` | Brightened surface variant | — |
+| `surface-container-lowest` | `#000000` | Lowest elevation layer | — |
 | `surface-container-low` | `#171217` | Inset panels, statusbars | — |
 | `surface-container` | `#1E181E` | Node cards, memory clusters | — |
 | `surface-container-high` | `#241D24` | Elevated telemetry modules | — |
@@ -284,7 +287,19 @@ The dot tint derives from the primary token via `color-mix()`, so a theme edit p
 | `primary` | `#E2BAE0` | Primary brand accent & active states | 6.2:1 on container |
 | `on-primary` | `#422644` | High-contrast text on primary fill | 6.2:1 (AA / AAA Large) |
 | `primary-container` | `#674868` | Secondary interactive fills | — |
+| `on-primary-container` | `#FFD7FD` | Text on primary containers | — |
+| `secondary` | `#D7BFD5` | Muted secondary accent | — |
+| `on-secondary` | `#4C3B4C` | Text on secondary fill | — |
+| `secondary-container` | `#473647` | Secondary container fills | — |
+| `on-secondary-container` | `#F4DBF1` | Text on secondary containers | — |
 | `tertiary` | `#FFC6CE` | Soft rose highlights, live AI spark | 7.4:1 on container |
+| `on-tertiary` | `#4F222C` | Text on tertiary fill | — |
+| `tertiary-container` | `#86505A` | Tertiary container fills | — |
+| `on-tertiary-container` | `#FFCFD5` | Text on tertiary containers | — |
+| `error` | `#FFB4AB` | Error accent | — |
+| `on-error` | `#690005` | Text on error fill | — |
+| `error-container` | `#93000A` | Error container fills | — |
+| `on-error-container` | `#FFDAD6` | Text on error containers | — |
 | `on-surface` | `#F0E1EC` | Primary console readable text | 15.2:1 (AAA Pass) |
 | `on-surface-variant` | `#B4A7B2` | Subdued telemetry labels, timestamps | 8.1:1 (AAA Pass) |
 | `outline` | `#7D727C` | Architectural borders | 4.8:1 (AA UI Pass) |
@@ -295,6 +310,9 @@ The dot tint derives from the primary token via `color-mix()`, so a theme edit p
 | Token | Hex | Role & Mapping | Contrast Ratio |
 |---|---|---|---|
 | `surface` | `#FCF8FC` | Primary workspace canvas | 16.1:1 against text |
+| `surface-dim` | `#DED7DD` | Dimmed surface variant | — |
+| `surface-bright` | `#FFFFFF` | Brightened surface variant | — |
+| `surface-container-lowest` | `#FFFFFF` | Lowest elevation layer | — |
 | `surface-container-low` | `#F7F1F6` | Lowered canvas regions | — |
 | `surface-container` | `#F2EDF0` | Node cards, container modules | — |
 | `surface-container-high` | `#EEE7EB` | Elevated inspector panels, omnibar | — |
@@ -302,7 +320,19 @@ The dot tint derives from the primary token via `color-mix()`, so a theme edit p
 | `primary` | `#755576` | Solid primary buttons & brand text | 5.8:1 (AA Pass) |
 | `on-primary` | `#FFFFFF` | Text on solid primary actions | 5.8:1 (AA Pass) |
 | `primary-container` | `#F7CEF5` | Muted chip and highlight backgrounds | — |
+| `on-primary-container` | `#2B112E` | Text on primary containers | — |
+| `secondary` | `#534152` | Muted secondary accent | — |
+| `on-secondary` | `#FFFFFF` | Text on secondary fill | — |
+| `secondary-container` | `#F4DBF1` | Secondary container fills | — |
+| `on-secondary-container` | `#251726` | Text on secondary containers | — |
 | `tertiary` | `#86505A` | Deep rose accent text and badges | 6.5:1 (AA Pass) |
+| `on-tertiary` | `#FFFFFF` | Text on tertiary fill | — |
+| `tertiary-container` | `#FFCFD5` | Tertiary container fills | — |
+| `on-tertiary-container` | `#350E17` | Text on tertiary containers | — |
+| `error` | `#BA1A1A` | Error accent | — |
+| `on-error` | `#FFFFFF` | Text on error fill | — |
+| `error-container` | `#FFDAD6` | Error container fills | — |
+| `on-error-container` | `#410002` | Text on error containers | — |
 | `on-surface` | `#1E151A` | Primary legible dark text | 16.1:1 (AAA Pass) |
 | `on-surface-variant` | `#564353` | Secondary labels & property names | 7.9:1 (AAA Pass) |
 | `outline` | `#9D8B9B` | Borders & card outlines | 4.6:1 (AA UI Pass) |
@@ -311,6 +341,13 @@ The dot tint derives from the primary token via `color-mix()`, so a theme edit p
 ### 4.3 Dual-Mode & Derived Values
 
 Frontmatter color tokens carry dual-mode values via CSS [`light-dark()`](https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Values/color_value/light-dark) — one token, one custom property, the browser resolves the mode. Derived adjustments (hover tints, texture dots, translucent variants) use [`color-mix()`](https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/Values/color_value/color-mix) over base tokens, never hardcoded rgba — a theme edit propagates to every derived value.
+
+### 4.4 Scale & Spacing Tokens
+
+| Group | Tokens |
+|---|---|
+| `rounded` | `sm` 4px · `md` 8px · `default` 12px · `lg` 16px · `xl` 24px · `full` 9999px |
+| `spacing` | `xs` 4px · `sm` 8px · `md` 16px · `lg` 24px · `xl` 32px · `xxl` 48px · `gutter` 16px · `margin` 20px |
 
 ---
 
