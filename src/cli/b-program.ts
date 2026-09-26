@@ -108,6 +108,7 @@ export const bProgram = ({
   systemOne: systemOneOverride,
   systemTwo: systemTwoOverride,
   supervision,
+  ui,
 }: {
   /** Allow-list: unset = all default faculties on; set = only the named faculties spawn. */
   faculties?: Faculty[]
@@ -143,6 +144,13 @@ export const bProgram = ({
    * surfaces the unjudged halt.
    */
   supervision?: { watch: string[]; threshold?: number }
+  /**
+   * The ui_* generation config seam: the provider label and model id the
+   * per-trigger pipelines compose with. Unset = the ui-threads conventions
+   * (`default` / `gpt-5.1`); whatever provider is named must exist in the
+   * systemTwo endpoint map.
+   */
+  ui?: { provider?: string; modelId?: string }
 }) => {
   const enabled = new Set<Faculty>(faculties === undefined ? ['shell', 'store', 'security'] : faculties)
   const has = (faculty: Faculty): boolean => enabled.has(faculty)
@@ -559,7 +567,14 @@ export const bProgram = ({
     // mint is the re-entry: addThreads pumps the super-step, so the minted
     // scale-issue request runs in the same wave as the ingress.
     if (uiMounted && candidate.type === UI_RENDER_TRIGGER_TYPE && candidate.ingress === true) {
-      addThreads(uiPipelineThreads({ id: `ui-${ueid()}`, detail: (candidate.detail ?? {}) as JsonObject }))
+      addThreads(
+        uiPipelineThreads({
+          id: `ui-${ueid()}`,
+          detail: (candidate.detail ?? {}) as JsonObject,
+          ...(ui?.provider === undefined ? {} : { provider: ui.provider }),
+          ...(ui?.modelId === undefined ? {} : { modelId: ui.modelId }),
+        }),
+      )
       return
     }
     const event = { type: candidate.type, detail: candidate.detail, space: candidate.space } as BPEvent

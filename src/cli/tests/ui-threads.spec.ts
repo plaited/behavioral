@@ -510,6 +510,39 @@ describe('ui threads — the per-trigger generation lane', () => {
     expect(content).toContain('a panel')
   })
 
+  test('named provider/modelId reach the composed systemTwo request — the config seam', () => {
+    const program = behavioral()
+    const selected: Selected[] = []
+    program.useTrace((trace: Trace) => {
+      if (trace.kind === TRACE_MESSAGE_KINDS.selection)
+        selected.push({
+          type: (trace as SelectionTrace).selected.type,
+          detail: (trace as SelectionTrace).selected.detail as Record<string, unknown> | undefined,
+        })
+    })
+    for (const thread of uiThreads) program.addThread(thread)
+    for (const thread of uiPipelineThreads({
+      id: 'ui-x9',
+      detail: { message: 'a panel' },
+      provider: 'named',
+      modelId: 'named-model',
+    }))
+      program.addThread(thread)
+    program.addThread({ label: 'producer/reply', once: true, rules: [{ request: scaleReply('ui-x9') }] })
+    program.addThread({
+      label: 'producer/tenant',
+      once: true,
+      rules: [{ request: tenantStoreResult('ui-x9', null) }],
+    })
+    program.trigger({ type: 'ui_pipeline_pump', detail: {} })
+    program.trigger({ type: 'ui_pipeline_pump', detail: {} })
+    const request = selected.find((s) => s.type === 'system_two_request')
+    expect(request).toBeDefined()
+    const input = request?.detail?.input as { provider?: string; modelId?: string } | undefined
+    expect(input?.provider).toBe('named')
+    expect(input?.modelId).toBe('named-model')
+  })
+
   test('a null tenant composes the plain request — no vocabulary, no prose, the content still rides', () => {
     const { selected } = pipelineRun('ui-x1', { message: 'a panel' }, [
       scaleReply('ui-x1'),
@@ -887,6 +920,57 @@ describe('ui threads — the composition mount', () => {
       rmSync(home, { recursive: true, force: true })
     }
   }, 15_000)
+
+  test('the composition config seam: named ui provider/modelId reach the recorded model call', async () => {
+    const home = tempHome()
+    try {
+      const server = await startOpenResponsesServer()
+      const traces: Trace[] = []
+      const runtime = bProgram({
+        shell: shellWithHome(home),
+        store: storeWithHome(home),
+        systemTwo: useSystemTwo({ endpoints: { named: { url: server.url } } }),
+        ui: { provider: 'named', modelId: 'named-model' },
+      })
+      runtime.useTrace((trace) => {
+        traces.push(trace)
+      })
+      const out: string[] = []
+      const host = createHost({
+        runtime,
+        input: new Response('').body as unknown as ReadableStream<Uint8Array>,
+        write: (line) => out.push(line),
+        home,
+      })
+      await host.rpc.done
+      try {
+        dispatchToRuntime(runtime, {
+          method: 'ui_event',
+          params: { event: { type: 'render', detail: { message: 'a panel' } }, timeStamp: 1 },
+        })
+        await waitForTraces(traces, (s) => s.some((t) => t.selected.type === 'ui_scale_check'))
+        const checkId = (
+          selectionsOf(traces).find((t) => t.selected.type === 'ui_scale_check')?.selected.detail as
+            | { id?: string }
+            | undefined
+        )?.id
+        dispatchToRuntime(runtime, {
+          method: 'ui_scale_check_result',
+          params: { id: checkId, target: 'body', effectiveScale: 's3', timeStamp: 2 },
+        })
+        await waitForTraces(traces, (s) => s.some((t) => t.selected.type === 'ui_render'))
+        // The named values reached the recorded call — provider label AND
+        // model id, threaded through the pump's mint.
+        const body = server.requests.at(-1)?.body as { model?: string } | undefined
+        expect(body?.model).toBe('named-model')
+      } finally {
+        runtime.terminate()
+        await server.close()
+      }
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  }, 10_000)
 
   test('absent systemTwo a render ingress mints no pipeline — the pump guard holds', async () => {
     const home = tempHome()

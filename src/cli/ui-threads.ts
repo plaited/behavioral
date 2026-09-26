@@ -31,9 +31,7 @@
  *   (ui_snapshot rehydration, ui_form_submit) rides later iterations;
  * - the user message renders the trigger detail as compact JSON — a
  *   structured content contract (named fields → message parts) rides the
- *   loop's data;
- * - the generation provider/modelId are the fixed conventions below — the
- *   composition config seam is the loop's next slice.
+ *   loop's data.
  *
  * @packageDocumentation
  */
@@ -368,13 +366,14 @@ export const UI_GENERATE_SCHEMA = {
 } as const
 
 /**
- * The generation endpoint's provider label — the host's endpoint map must
- * carry it (`useSystemTwo({ endpoints: { default: … } })`). MINIMAL: the
- * composition config seam is the loop's next slice; v1 is the convention.
+ * The DEFAULT generation endpoint's provider label — the composition config
+ * seam's fallback (`bProgram({ ui: { provider, modelId } })` overrides both;
+ * the host's endpoint map must carry whatever label is configured:
+ * `useSystemTwo({ endpoints: { <provider>: … } })`).
  */
 export const UI_GENERATION_PROVIDER = 'default'
 
-/** The generation model id. MINIMAL: same ceiling as {@link UI_GENERATION_PROVIDER}. */
+/** The default generation model id — the config seam's fallback. */
 export const UI_GENERATION_MODEL_ID = 'gpt-5.1'
 
 /** The generation composition contract — the plain lane (no tenant). */
@@ -415,8 +414,22 @@ const GENERATION_INSTRUCTIONS =
  * — inert JSON literals to jq's parser (the shell threads' script-splicing
  * precedent), never string interpolation of raw content.
  */
-export const uiPipelineThreads = ({ id, detail }: { id: string; detail: JsonObject }): Thread[] => {
+export const uiPipelineThreads = ({
+  id,
+  detail,
+  provider,
+  modelId,
+}: {
+  id: string
+  detail: JsonObject
+  /** The generation endpoint's provider label — defaults to {@link UI_GENERATION_PROVIDER}. */
+  provider?: string
+  /** The generation model id — defaults to {@link UI_GENERATION_MODEL_ID}. */
+  modelId?: string
+}): Thread[] => {
   const target = typeof detail.target === 'string' && detail.target.length > 0 ? detail.target : UI_RENDER_TARGET
+  const generationProvider = provider ?? UI_GENERATION_PROVIDER
+  const generationModelId = modelId ?? UI_GENERATION_MODEL_ID
   const scaleId = `${id}-scale`
   const tenantId = `${id}-tenant`
   const genId = `${id}-gen`
@@ -530,8 +543,8 @@ export const uiPipelineThreads = ({ id, detail }: { id: string; detail: JsonObje
               `    id: "${genId}",` +
               `    ctx: { scale: $e.ctx.scale, target: $e.ctx.target, pipeline: "${id}" },` +
               `    input: {` +
-              `      provider: "${UI_GENERATION_PROVIDER}",` +
-              `      modelId: "${UI_GENERATION_MODEL_ID}",` +
+              `      provider: "${generationProvider}",` +
+              `      modelId: "${generationModelId}",` +
               `      instructions: (` +
               `        "${GENERATION_INSTRUCTIONS}"` +
               `        + (if ($vocab | length) > 0 then "\\n\\nReference these CSS custom properties by name — never literal values: " + ($vocab | join(", ")) else "" end)` +

@@ -161,6 +161,10 @@ conforming `ui_render`. The scale fact and target ride the request's `ctx`
 verbatim on results — the join lane the pipeline state round-trips through).
 The user message composes from the trigger's own detail (`View request: …`)
 — the view the user actually asked for, not a host-supplied fixed string.
+The generation endpoint is a config seam: `bProgram({ ui: { provider,
+modelId } })` names the provider label and model id the pipelines compose
+with (unset = the `default`/`gpt-5.1` conventions; a named provider must
+carry an entry in the systemTwo endpoint map).
 
 The model composes only the **html fragment**; the id, target, and swap are
 host-stamped (the model is never trusted with the envelope). The composed
