@@ -267,7 +267,12 @@ describe('bProgram — the runtime composition', () => {
     test('a valid proposal is admitted: the verdict returns and the thread_added provision fires', async () => {
       const { runtime, traces } = startRuntime()
       try {
-        runtime.trigger(addThreadRequest('at1', { label: 'greeter', rules: [{ request: { type: 'ping' } }] }))
+        // A once-thread: under the livelock ruling, a looping requester is a
+        // rejected proposal (its cycle never selects a progress event), so the
+        // minimal valid-proposal fixture is the terminating shape.
+        runtime.trigger(
+          addThreadRequest('at1', { label: 'greeter', once: true, rules: [{ request: { type: 'ping' } }] }),
+        )
         await waitForTraces(traces, (s) =>
           s.some(
             (t) =>
@@ -319,18 +324,255 @@ describe('bProgram — the runtime composition', () => {
     test('an admitted thread goes live: its request is a candidate in the next super-step', async () => {
       const { runtime, traces } = startRuntime()
       try {
-        runtime.trigger(addThreadRequest('at3', { label: 'greeter', rules: [{ request: { type: 'ping' } }] }))
+        // A loop on EXTERNAL releases — the legitimate looping shape under the
+        // livelock ruling. Its internal state graph has no self-sustaining
+        // cycle (`work` is never internally selected), so it verifies and
+        // admits; each external release then advances it one round trip.
+        runtime.trigger(
+          addThreadRequest('at3', {
+            label: 'worker',
+            rules: [{ waitFor: [{ type: 'work' }] }, { request: { type: 'done' } }],
+          }),
+        )
+        await waitForTraces(traces, (s) =>
+          s.some(
+            (t) =>
+              (t.selected.detail as { id?: string } | undefined)?.id === 'at3' &&
+              t.selected.type === FACULTY_MESSAGE_KINDS.frontier_request_result,
+          ),
+        )
+        const at3Detail = resultDetailFor(traces, 'at3')
+        expect(at3Detail?.result?.ok).toBe(true)
         // The candidate→live transition: admission re-enters (addThread + step),
-        // so the greeter's request selects — the thread participates in the
-        // program, not just the trace log. And it keeps participating: a
-        // looping (non-once) greeter re-requests ping each super-step.
-        await waitForTraces(traces, (s) => s.some((t) => t.selected.type === 'ping'))
-        const pingSelections = selectionsOf(traces).filter((t) => t.selected.type === 'ping')
-        expect(pingSelections.length).toBeGreaterThanOrEqual(2)
+        // and the thread participates — released by an external trigger, it
+        // selects its request, then keeps participating: the loop wraps and
+        // the next release selects `done` again.
+        runtime.trigger({ type: 'work' })
+        await waitForTraces(traces, (s) => s.some((t) => t.selected.type === 'done'))
+        const doneSelections = selectionsOf(traces).filter((t) => t.selected.type === 'done')
+        expect(doneSelections.length).toBe(1)
+        runtime.trigger({ type: 'work' })
+        await waitForTraces(traces, (s) => selectionsOf(s).filter((t) => t.selected.type === 'done').length >= 2)
       } finally {
         runtime.terminate()
       }
     })
+
+    test('a self-sustaining request loop never admits — the verdict carries the livelock finding', async () => {
+      const { runtime, traces } = startRuntime()
+      try {
+        // The pilot ruling (2026-09-25): livelock detection is part of adding
+        // threads. A thread that re-requests its own next event forever — its
+        // cycle never selects a progress event — is rejected at admission,
+        // fail-closed. This is the exact shape that overflowed the recursive
+        // cascade (~8.6k selections): the guard keeps it out before it runs.
+        runtime.trigger(addThreadRequest('lk1', { label: 'looper', rules: [{ request: { type: 'spin' } }] }))
+        await waitForTraces(traces, (s) =>
+          s.some(
+            (t) =>
+              (t.selected.detail as { id?: string } | undefined)?.id === 'lk1' &&
+              t.selected.type === FACULTY_MESSAGE_KINDS.frontier_request_result,
+          ),
+        )
+        const detail = resultDetailFor(traces, 'lk1')
+        // The verdict is data: the op ran (the envelope's ok), but the cycle is
+        // a livelock — the verdict leg failed, not verified. The pump's
+        // conforming check (envelope ok AND result ok) holds the line.
+        expect(detail?.ok).toBe(true)
+        expect(detail?.result?.ok).toBe(false)
+        // The finding names the cycle — the requester reads the why from the verdict.
+        const livelocks = (detail?.result as { livelocks?: { code?: string }[] } | undefined)?.livelocks
+        expect(livelocks?.length).toBeGreaterThan(0)
+        expect(livelocks?.[0]?.code).toBe('livelock')
+        // Fail-closed: it never admits and never goes live — no provision, no spin.
+        expect(
+          traces.some(
+            (t) =>
+              t.kind === TRACE_MESSAGE_KINDS.thread_added &&
+              (t as { thread?: { label?: string } }).thread?.label === 'looper',
+          ),
+        ).toBe(false)
+        expect(selectionsOf(traces).some((t) => t.selected.type === 'spin')).toBe(false)
+      } finally {
+        runtime.terminate()
+      }
+    })
+    test('a proposal whose cycle internally selects a progress event still admits — the guard is progress-relative', async () => {
+      const { runtime, traces } = startRuntime()
+      try {
+        // The other branch of the ruling: livelock = a cycle that never
+        // selects a progress event. A self-sustaining cycle that DOES select
+        // one — a faculty result kind, the derived `*_result` vocabulary —
+        // verifies and admits. (At runtime this thread self-sustains on its
+        // own result selections — allowed: every step is an externally
+        // observable result. The spin is expected in this bare composition;
+        // terminate ends it.)
+        runtime.trigger(
+          addThreadRequest('lk2', {
+            label: 'progress-looper',
+            rules: [{ request: { type: FACULTY_MESSAGE_KINDS.store_request_result } }],
+          }),
+        )
+        await waitForTraces(traces, (s) =>
+          s.some(
+            (t) =>
+              (t.selected.detail as { id?: string } | undefined)?.id === 'lk2' &&
+              t.selected.type === FACULTY_MESSAGE_KINDS.frontier_request_result,
+          ),
+        )
+        const detail = resultDetailFor(traces, 'lk2')
+        expect(detail?.result?.ok).toBe(true)
+        const added = traces.find(
+          (t) =>
+            t.kind === TRACE_MESSAGE_KINDS.thread_added &&
+            (t as { thread?: { label?: string } }).thread?.label === 'progress-looper',
+        )
+        expect(added).toBeDefined()
+      } finally {
+        runtime.terminate()
+      }
+    })
+
+    test('a proposal without maxDepth admits via the composition default budget', async () => {
+      const { runtime, traces } = startRuntime()
+      try {
+        // The op schema requires maxDepth, but the composition owns the budget
+        // (the ruling): a proposal that omits it is enriched with the default
+        // (20k) at the route seam — the analysis runs instead of failing the
+        // op's input validation.
+        runtime.trigger({
+          type: FACULTY_MESSAGE_KINDS.frontier_request,
+          detail: {
+            id: 'md1',
+            op: 'add_thread',
+            input: { thread: { label: 'deferred-budget', once: true, rules: [{ request: { type: 'ping' } }] } },
+          },
+        })
+        await waitForTraces(traces, (s) =>
+          s.some(
+            (t) =>
+              (t.selected.detail as { id?: string } | undefined)?.id === 'md1' &&
+              t.selected.type === FACULTY_MESSAGE_KINDS.frontier_request_result,
+          ),
+        )
+        const detail = resultDetailFor(traces, 'md1')
+        expect(detail?.result?.ok).toBe(true)
+        expect(
+          traces.some(
+            (t) =>
+              t.kind === TRACE_MESSAGE_KINDS.thread_added &&
+              (t as { thread?: { label?: string } }).thread?.label === 'deferred-budget',
+          ),
+        ).toBe(true)
+      } finally {
+        runtime.terminate()
+      }
+    })
+
+    test('a requester-supplied maxDepth flows through: a truncated analysis rejects — fail-closed', async () => {
+      const { runtime, traces } = startRuntime()
+      try {
+        // The pilot-confirmed tradeoff: the override is honored (the edge-case
+        // escape hatch), and truncated never passes — a proposal whose state
+        // space cannot be explored within the supplied budget is rejected.
+        // The two-rule thread needs more than one exploration level.
+        runtime.trigger(
+          addThreadRequest(
+            'md2',
+            {
+              label: 'two-step',
+              once: true,
+              rules: [{ request: { type: 'step_one' } }, { request: { type: 'step_two' } }],
+            },
+            { maxDepth: 1 },
+          ),
+        )
+        await waitForTraces(traces, (s) =>
+          s.some(
+            (t) =>
+              (t.selected.detail as { id?: string } | undefined)?.id === 'md2' &&
+              t.selected.type === FACULTY_MESSAGE_KINDS.frontier_request_result,
+          ),
+        )
+        const detail = resultDetailFor(traces, 'md2')
+        expect(detail?.result?.ok).toBe(false)
+        expect((detail?.result as { status?: string } | undefined)?.status).toBe('truncated')
+        expect(
+          traces.some(
+            (t) =>
+              t.kind === TRACE_MESSAGE_KINDS.thread_added &&
+              (t as { thread?: { label?: string } }).thread?.label === 'two-step',
+          ),
+        ).toBe(false)
+      } finally {
+        runtime.terminate()
+      }
+    })
+
+    test('the structural admission is BP-native: a conforming verdict maps to a thread_admission selection which admits', async () => {
+      const { runtime, traces } = startRuntime()
+      try {
+        // The review is threads (the ruling's shape): the verdict selection is
+        // mapped — transform and request — to a thread_admission event, and
+        // the pump's admitted leg writes on that SELECTION, not on the raw
+        // verdict. Admission is observable in the engine's own traces.
+        runtime.trigger(
+          addThreadRequest('rv1', { label: 'native-greeter', once: true, rules: [{ request: { type: 'ping' } }] }),
+        )
+        await waitForTraces(traces, (s) =>
+          s.some(
+            (t) =>
+              t.selected.type === ADMISSION_EVENT_TYPES.admitted && (t.selected.detail as { id?: string }).id === 'rv1',
+          ),
+        )
+        // The admission is a real event selection — the verdict precedes it.
+        const selections = selectionsOf(traces)
+        const verdictIndex = selections.findIndex(
+          (t) =>
+            t.selected.type === FACULTY_MESSAGE_KINDS.frontier_request_result &&
+            (t.selected.detail as { id?: string }).id === 'rv1',
+        )
+        const admittedIndex = selections.findIndex(
+          (t) =>
+            t.selected.type === ADMISSION_EVENT_TYPES.admitted && (t.selected.detail as { id?: string }).id === 'rv1',
+        )
+        expect(admittedIndex).toBeGreaterThan(verdictIndex)
+        // The admitted leg writes on the selection — the provision fires.
+        expect(
+          traces.some(
+            (t) =>
+              t.kind === TRACE_MESSAGE_KINDS.thread_added &&
+              (t as { thread?: { label?: string } }).thread?.label === 'native-greeter',
+          ),
+        ).toBe(true)
+      } finally {
+        runtime.terminate()
+      }
+    })
+
+    test('the structural rejection is BP-native: a livelocked proposal maps to a thread_admission_rejected selection', async () => {
+      const { runtime, traces } = startRuntime()
+      try {
+        runtime.trigger(addThreadRequest('rv2', { label: 'native-looper', rules: [{ request: { type: 'spin' } }] }))
+        // The rejection is a selection stamped with the candidate id — visible
+        // in the traces, the requester reads the why from the verdict.
+        await waitForTraces(traces, (s) =>
+          s.some(
+            (t) =>
+              t.selected.type === ADMISSION_EVENT_TYPES.rejected && (t.selected.detail as { id?: string }).id === 'rv2',
+          ),
+        )
+        expect(
+          selectionsOf(traces).some(
+            (t) =>
+              t.selected.type === ADMISSION_EVENT_TYPES.admitted && (t.selected.detail as { id?: string }).id === 'rv2',
+          ),
+        ).toBe(false)
+      } finally {
+        runtime.terminate()
+      }
+    })
+
     describe('add_thread — the admission judgment (systemOne wired)', () => {
       test('the judged path: the Decision approves, the block lifts, the candidate admits and goes live', async () => {
         const server = await startDecisionsServer()
@@ -393,7 +635,13 @@ describe('bProgram — the runtime composition', () => {
           systemOne: useSystemOne({ endpoint: { url: server.url, model: 'jev-latest' } }),
         })
         try {
-          runtime.trigger(addThreadRequest('aj2', { label: 'suspicious', rules: [{ request: { type: 'evil' } }] }))
+          // `once` — under the livelock ruling a looping requester is rejected
+          // at the STRUCTURAL layer before the judgment ever runs, so the
+          // judgment-rejection test needs a structurally-verifiable candidate:
+          // the semantic layer is what must hold the line here.
+          runtime.trigger(
+            addThreadRequest('aj2', { label: 'suspicious', once: true, rules: [{ request: { type: 'evil' } }] }),
+          )
           // The rejection is visible, stamped with the candidate id…
           await waitForTraces(traces, (s) =>
             s.some(

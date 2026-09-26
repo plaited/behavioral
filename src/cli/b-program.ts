@@ -16,6 +16,7 @@ import {
   validateFrontierRequestEvent,
 } from '../faculties/faculties.types.ts'
 import { handleFrontierMessage } from '../faculties/frontier/faculty.ts'
+import { admissionAnalysisInput, admissionReviewThreads } from '../faculties/frontier/threads.ts'
 import { bindEmit } from '../faculties/process-lane.ts'
 import { remoteMcpThreads } from '../faculties/shell/remote-mcp.threads.ts'
 import { rpcAuthThreads } from '../faculties/shell/rpc-auth.threads.ts'
@@ -230,7 +231,14 @@ export const bProgram = ({
       gate: (event: BPEvent): boolean => shell.invalidEventGate(event),
     })
   }
-  if (systemOne !== undefined) {
+  if (systemOne === undefined) {
+    // The structural admission review pack — the BP-native reviewer
+    // (mode-exclusive with the judgment pack below): the verdict maps to
+    // thread_admission / thread_admission_rejected selections, and the
+    // outcome legs in the pump own the write. Without judgment, this pack IS
+    // the admission gate — livelocked proposals reject visibly, as events.
+    facultyAddThreads(admissionReviewThreads)
+  } else {
     // The faculty's request/cancel/result guard derives from the same schemas
     // useFaculty compiled — a malformed system_one event is blocked (visible
     // in the frontier traces), not silently dropped.
@@ -278,6 +286,16 @@ export const bProgram = ({
           detail.id,
           validateThread(detail.input?.thread) ? (detail.input as { thread: Thread }).thread : null,
         )
+        // Livelock detection is part of adding threads (the ruling): the
+        // analysis input rides the composition's policy — the progress spec
+        // and the clamped exploration budget — never the requester's claim.
+        // A self-sustaining loop proposal comes back a failed verdict and
+        // never reaches the write.
+        frontier.send({
+          ...event,
+          detail: { ...detail, input: admissionAnalysisInput(detail.input as JsonObject) },
+        })
+        return
       }
       frontier.send(event)
     },
@@ -334,12 +352,7 @@ export const bProgram = ({
       if (typeof id === 'string' && pendingAdmissions.has(id)) {
         const thread = pendingAdmissions.get(id)
         if (detail?.ok === true && thread && detail.result?.ok === true) {
-          if (systemOne === undefined) {
-            // The structural-only path: no judge, no block — the candidate
-            // admits directly under the re-entry law.
-            pendingAdmissions.delete(id)
-            addThreads([thread])
-          } else {
+          if (systemOne !== undefined) {
             // The judged path: the verdict is the candidate record — emit it
             // to the admission judgment threads (which blocks the admission
             // while the Decision runs). The entry survives until the judged
@@ -361,6 +374,10 @@ export const bProgram = ({
               },
             ])
           }
+          // The structural path is BP-native (the ruling's shape): the
+          // review pack's verdict threads map THIS selection to
+          // thread_admission / thread_admission_rejected — the outcome legs
+          // above own the write. The id stays registered until the outcome.
         } else {
           // The rejection is data — the requester reads the why from the
           // verdict trace.
