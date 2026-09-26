@@ -4,7 +4,7 @@
  * manifest-scan recipe through the tools worker (`bun run -` on stdin), and
  * a transform threads the result into the store as the PLUGINS manifest
  * tenant. The recipe itself runs for real against fixture plugin trees
- * (plugin.json + mcp.json §11.3 posture, skills/ + threads/ discovery).
+ * (plugin.json + mcp.json §11.3 posture, skills/ + sh.behavioral/threads/ discovery).
  */
 import { describe, expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
@@ -151,8 +151,13 @@ describe('plugin scan recipe — manifest validation (real run)', () => {
       )
       mkdirSync(join(goodDir, 'skills/alpha'), { recursive: true })
       writeFileSync(join(goodDir, 'skills/alpha/SKILL.md'), '---\nname: alpha\ndescription: d\n---\nbody')
+      // behavioral-specific threads live under the reverse-domain namespace
+      // dir (agent-plugins §8.2): sh.behavioral/threads/ is discovered…
+      mkdirSync(join(goodDir, 'sh.behavioral/threads'), { recursive: true })
+      writeFileSync(join(goodDir, 'sh.behavioral/threads/t.ts'), 'export const t = 1')
+      // …and the pre-1.0 top-level threads/ location is NOT (breaks outright)
       mkdirSync(join(goodDir, 'threads'), { recursive: true })
-      writeFileSync(join(goodDir, 'threads/t.ts'), 'export const t = 1')
+      writeFileSync(join(goodDir, 'threads/legacy.ts'), 'export const legacy = 1')
 
       // a fatal plugin: wrong $schema — rejected, no components discovered
       const fatalDir = join(home, '.agents/plugins/broken')

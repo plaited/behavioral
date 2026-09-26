@@ -279,8 +279,10 @@ export const PLUGIN_MANIFESTS_SCHEMA = {
  * Scans `<cwd>/.agents/plugins/` (project) and `<HOME>/.agents/plugins/`
  * (user); for each plugin dir: read + parse plugin.json → fatal validation
  * (a fatal plugin is skipped with a scan-level warning, others load) →
- * mcp.json two-stage validation with failure isolation → skills/ + threads/
- * discovery. Output is one JSON object on stdout:
+ * mcp.json two-stage validation with failure isolation → skills/ +
+ * `sh.behavioral/threads/` discovery (the reverse-domain namespace dir,
+ * agent-plugins §8.2 — behavioral-specific threads are a client extension).
+ * Output is one JSON object on stdout:
  * `{ plugins: [manifest…], warnings: [scan-level…] }`, sorted by name.
  */
 export const PLUGIN_SCAN_SCRIPT = `
@@ -547,7 +549,7 @@ const scanPlugin = async (pluginJsonPath) => {
   }
   const mcps = await loadMcpJson(path.join(pluginRoot, 'mcp.json'), schemaVersion(PLUGIN_SCHEMA_URL), warnings)
   const skills = await discoverSkills(path.join(pluginRoot, 'skills'))
-  const threads = await discoverThreads(path.join(pluginRoot, 'threads'))
+  const threads = await discoverThreads(path.join(pluginRoot, 'sh.behavioral/threads'))
   const manifest = { name: pluginResult.name, mcps, skills, threads, warnings }
   if (pluginResult.version !== undefined) manifest.version = pluginResult.version
   return { manifest }
