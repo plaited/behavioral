@@ -25,6 +25,7 @@ import {
   ADMISSION_EVENT_TYPES,
   admissionJudgmentThreads,
   supervisionJudgmentThreads,
+  supervisionRecoveryThreads,
   supervisionThreads,
   validateAdmissionVerdict,
 } from '../faculties/system-one/threads.ts'
@@ -264,11 +265,13 @@ export const bProgram = ({
     facultyAddThreads(admissionJudgmentThreads)
     // The supervision threads: the runtime circuit breaker (the counting
     // supervisor) + its judgment (block-then-judge at runtime, the admission
-    // pattern rotated). Mounts with systemOne and only when the host supplies
+    // pattern rotated) + its recovery (the bounded judge-retry and the
+    // override ingress). Mounts with systemOne and only when the host supplies
     // a watch list — the pack's second line of defense.
     if (supervision !== undefined) {
       facultyAddThreads(supervisionThreads(supervision))
       facultyAddThreads(supervisionJudgmentThreads)
+      facultyAddThreads(supervisionRecoveryThreads(supervision))
     }
     route([FACULTY_MESSAGE_KINDS.system_one_request, FACULTY_MESSAGE_KINDS.system_one_cancel], {
       send: (event: BPEvent): void => systemOne.send(event),

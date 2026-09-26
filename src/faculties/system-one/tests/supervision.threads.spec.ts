@@ -7,7 +7,9 @@ import { spawnFaculty } from '../../tests/faculty-harness.ts'
 import {
   SUPERVISION_DEFAULT_THRESHOLD,
   SUPERVISION_EVENT_TYPES,
+  SUPERVISION_MAX_REISSUES,
   supervisionJudgmentThreads,
+  supervisionRecoveryThreads,
   supervisionThreads,
   validateSupervisionHalted,
   validateSupervisionInput,
@@ -239,6 +241,118 @@ describe('supervision threads — block-then-judge', () => {
     program.trigger({ type: 'pump3', detail: {} })
     expect(count(selected, 'leaky')).toBe(8)
     expect(transformErrors).toHaveLength(0)
+  })
+})
+
+describe('supervision threads — recovery', () => {
+  /** The full pack — breaker + judgment + recovery — as the composition mounts it. */
+  const mountPack = (
+    program: ReturnType<typeof behavioral>,
+    watch: string[],
+    threshold: number,
+    maxReissues?: number,
+  ): void => {
+    mountAll(program, supervisionThreads({ watch, threshold }))
+    mountAll(program, supervisionJudgmentThreads)
+    mountAll(
+      program,
+      supervisionRecoveryThreads({ watch, threshold, ...(maxReissues === undefined ? {} : { maxReissues }) }),
+    )
+  }
+
+  const judgeRequestCount = (selected: Selected[], watchedType: string): number =>
+    selected.filter(
+      (s) =>
+        s.type === FACULTY_MESSAGE_KINDS.system_one_request &&
+        (s.detail?.id as string) === `${watchedType}-supervision`,
+    ).length
+
+  test('judge-retry: an unjudged halt re-issues the Decision — a later lift lifts the block', () => {
+    const { program, selected, transformErrors } = liveProgram()
+    mountPack(program, ['leaky'], 8)
+    mountAll(program, [loopThread('leaky')])
+    program.trigger({ type: 'pump', detail: {} })
+    expect(count(selected, 'leaky')).toBe(8)
+    expect(judgeRequestCount(selected, 'leaky')).toBe(1)
+
+    // The judge is unavailable — the halt surfaces with the reason.
+    feed(program, judgeErrorResult('leaky', 'HTTP 429 — rate limited'), 'pump2')
+    expect(count(selected, SUPERVISION_EVENT_TYPES.halted)).toBe(1)
+
+    // The retry thread re-issued the SAME Decision (the attempt rode the
+    // thread's generator state — bounded, re-armed on release).
+    expect(judgeRequestCount(selected, 'leaky')).toBe(2)
+
+    // The re-ask succeeds: the lift releases the block, the loop resumes,
+    // and the fresh counter trips again — recovery proven end-to-end.
+    feed(program, judgeChoiceResult('leaky', 'lift'), 'pump3')
+    expect(selected.some((s) => s.type === SUPERVISION_EVENT_TYPES.release)).toBe(true)
+    expect(count(selected, 'leaky')).toBe(16)
+    expect(count(selected, SUPERVISION_EVENT_TYPES.tripped)).toBe(2)
+    expect(transformErrors).toHaveLength(0)
+  })
+
+  test('judge-retry is bounded: repeated judge failures exhaust the re-issues — the halt stands', () => {
+    const { program, selected } = liveProgram()
+    mountPack(program, ['leaky'], 8, 2)
+    mountAll(program, [loopThread('leaky')])
+    program.trigger({ type: 'pump', detail: {} })
+
+    // Every judgment fails: the initial issue plus exactly MAX_REISSUES
+    // re-issues — then the standing halt gets no further re-ask. (Only the
+    // results correlated to actually-issued requests are fed; a spurious
+    // uncorrelated result could not exist on the wire.)
+    for (let i = 0; i < 1 + SUPERVISION_MAX_REISSUES; i++)
+      feed(program, judgeErrorResult('leaky', `failure ${i}`), `pump${i + 2}`)
+    expect(count(selected, SUPERVISION_EVENT_TYPES.halted)).toBe(1 + SUPERVISION_MAX_REISSUES)
+    expect(judgeRequestCount(selected, 'leaky')).toBe(1 + SUPERVISION_MAX_REISSUES)
+    expect(selected.some((s) => s.type === SUPERVISION_EVENT_TYPES.release)).toBe(false)
+    // The block holds — the loop stays dead.
+    mountAll(program, [{ label: 'probe-blocked', once: true, rules: [{ request: { type: 'leaky', detail: {} } }] }])
+    program.trigger({ type: 'pump-final', detail: {} })
+    expect(count(selected, 'leaky')).toBe(8)
+  })
+
+  test('a judged halt (no reason) never re-issues — the judge spoke', () => {
+    const { program, selected } = liveProgram()
+    mountPack(program, ['leaky'], 8)
+    mountAll(program, [loopThread('leaky')])
+    program.trigger({ type: 'pump', detail: {} })
+
+    feed(program, judgeChoiceResult('leaky', 'halt'), 'pump2')
+    expect(count(selected, SUPERVISION_EVENT_TYPES.halted)).toBe(1)
+    expect(judgeRequestCount(selected, 'leaky')).toBe(1)
+    expect(selected.some((s) => s.type === SUPERVISION_EVENT_TYPES.release)).toBe(false)
+  })
+
+  test('override: the host ingress lifts the block immediately — the human decision path', () => {
+    const { program, selected, transformErrors } = liveProgram()
+    mountPack(program, ['leaky'], 8)
+    mountAll(program, [loopThread('leaky')])
+    program.trigger({ type: 'pump', detail: {} })
+    feed(program, judgeErrorResult('leaky', 'judge down'), 'pump2')
+    expect(count(selected, SUPERVISION_EVENT_TYPES.halted)).toBe(1)
+
+    // The host supplies the override ingress — the block lifts immediately,
+    // the program continues (the loop resumes and re-trips on a fresh count).
+    feed(program, { type: SUPERVISION_EVENT_TYPES.override, detail: { type: 'leaky' } }, 'pump3')
+    expect(selected.some((s) => s.type === SUPERVISION_EVENT_TYPES.release)).toBe(true)
+    expect(count(selected, 'leaky')).toBe(16)
+    expect(transformErrors).toHaveLength(0)
+  })
+
+  test('a malformed override never matches — the boundary is the schema', () => {
+    const { program, selected } = liveProgram()
+    mountPack(program, ['leaky'], 8)
+    mountAll(program, [loopThread('leaky')])
+    program.trigger({ type: 'pump', detail: {} })
+    feed(program, judgeErrorResult('leaky', 'judge down'), 'pump2')
+
+    // Junk detail: the override listener's gate never matches, no release —
+    // the override boundary is the AJV schema at the listener.
+    feed(program, { type: SUPERVISION_EVENT_TYPES.override, detail: { type: 42 } }, 'pump3')
+    expect(selected.some((s) => s.type === SUPERVISION_EVENT_TYPES.release)).toBe(false)
+    expect(count(selected, 'leaky')).toBe(8)
   })
 })
 

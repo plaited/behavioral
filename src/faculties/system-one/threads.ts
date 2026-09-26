@@ -318,11 +318,12 @@ export const admissionJudgmentThreads: Thread[] = [admissionIssue, admissionGate
  * rides a future event source if a named need arrives.
  */
 
-/** Supervision-owned event types: the trip surfaces; the release lifts a block; the halt stands visible. */
+/** Supervision-owned event types: the trip surfaces; the release lifts a block; the halt stands visible; the override is the host's lift. */
 export const SUPERVISION_EVENT_TYPES = {
   tripped: 'supervision_tripped',
   release: 'supervision_release',
   halted: 'supervision_halted',
+  override: 'supervision_override',
 } as const
 
 /** The judge-request correlation suffix: `<watchedType>-supervision` ↔ the result's echoed id. */
@@ -562,6 +563,15 @@ export const SUPERVISION_JUDGE_NONLIFT_SCHEMA = {
   additionalProperties: true,
 } as const
 
+/** The supervision question's jq — one home for the judgment's shape (the issue thread and the retry re-issue share it). */
+const SUPERVISION_QUESTION_JQ = `{ ${SUPERVISION_QUESTION}: { type: "choice",
+      instructions: "Supervision judgment: the runtime circuit breaker has blocked the watched event type after state.count consecutive selections (the configured threshold is state.threshold). Decide whether this self-sustaining activity is legitimate work that should resume, or an anomaly that should stay halted.",
+      criteria: { lift: "The activity is legitimate — lift the block and let the program continue.", halt: "The activity is an anomaly — keep the block; the halt stands." } } }`
+
+/** The Decision request body's jq — the id derives from `$d.type` in both callers (the trip's and the halt's detail field is the watched type). */
+const supervisionRequestJq = (stateJq: string) =>
+  `{ id: ($d.type + "${SUPERVISION_JUDGE_SUFFIX}"), input: { state: ${stateJq}, questions: ${SUPERVISION_QUESTION_JQ} } }`
+
 /** supervision-issue — a surfaced trip issues the correlated `system_one_request` with the loop's identity as Decision input. */
 const supervisionIssue: Thread = {
   label: 'system-one/supervision-issue',
@@ -570,11 +580,7 @@ const supervisionIssue: Thread = {
       transform: [
         {
           type: SUPERVISION_EVENT_TYPES.tripped,
-          query: `. as $d | { id: ($d.type + "${SUPERVISION_JUDGE_SUFFIX}"), input: {
-    state: { lane: "supervision", type: $d.type, count: $d.count, threshold: $d.threshold },
-    questions: { ${SUPERVISION_QUESTION}: { type: "choice",
-      instructions: "Supervision judgment: the runtime circuit breaker has blocked the watched event type after state.count consecutive selections (the configured threshold is state.threshold). Decide whether this self-sustaining activity is legitimate work that should resume, or an anomaly that should stay halted.",
-      criteria: { lift: "The activity is legitimate — lift the block and let the program continue.", halt: "The activity is an anomaly — keep the block; the halt stands." } } } } }`,
+          query: `. as $d | ${supervisionRequestJq('{ lane: "supervision", type: $d.type, count: $d.count, threshold: $d.threshold }')}`,
           target: FACULTY_MESSAGE_KINDS.system_one_request,
           detailSchema: SUPERVISION_TRIPPED_SCHEMA,
         },
@@ -614,3 +620,119 @@ const supervisionVerdict: Thread = {
 
 /** The supervision judgment threads — mounts with systemOne alongside the breaker (the composition wires it). */
 export const supervisionJudgmentThreads: Thread[] = [supervisionIssue, supervisionVerdict]
+
+// ── Supervision — the recovery threads ─────────────────────────────────
+
+/**
+ * The supervision recovery threads — thread-orchestrated recovery for a
+ * standing halt:
+ *
+ * - **`supervision-judge-retry`** — an UNJUDGED halt (a reason rides the
+ *   detail — the judge was unavailable) re-issues the same Decision. The
+ *   attempt count rides the thread's rule position, the generator state —
+ *   the same idiom as the supervisor's counter: `maxReissues` re-issue
+ *   rules, then the thread parks on the next release and the halt stands
+ *   (bounded — no timer exists, so the provider's own 429/529 transport
+ *   retry with `retry-after` backoff is the backoff; the thread bounds the
+ *   re-asks). A release — a later lift or an override — re-arms the budget.
+ *   A JUDGED halt (no reason — the judge answered `halt`) never re-issues:
+ *   the judge spoke.
+ * - **`supervision-override`** — the host/TUI ingress
+ *   (`supervision_override { type }`) lifts the block for the named type —
+ *   the human decision path. The listener's detailSchema is the trust
+ *   boundary: a malformed override never matches, the block holds.
+ */
+
+/** The bounded re-issues for an unjudged halt — past the bound, the halt stands. */
+export const SUPERVISION_MAX_REISSUES = 2
+
+/** The host's override ingress — the human lift for one watched type. */
+export type SupervisionOverride = {
+  /** The watched event type whose block lifts. */
+  type: string
+}
+
+/** The override detail's one home — the ingress boundary is the listener's gate. */
+export const SUPERVISION_OVERRIDE_SCHEMA = {
+  type: 'object',
+  properties: { type: { type: 'string', minLength: 1 } },
+  required: ['type'],
+  additionalProperties: false,
+} as unknown as JSONSchemaType<SupervisionOverride>
+
+/** The override detail's boundary — hosts validate ingress before triggering. */
+export const validateSupervisionOverride = ajv.compile(SUPERVISION_OVERRIDE_SCHEMA)
+
+/**
+ * Build the supervision recovery threads — the bounded judge-retry and the
+ * override ingress. The watch list scopes both (only watched types re-ask,
+ * only watched releases re-arm); the threshold rebuilds the re-issued
+ * Decision's state (the count at a standing trip is the threshold, by
+ * construction — no selections advance while the type is blocked).
+ */
+export const supervisionRecoveryThreads = ({
+  watch,
+  threshold = SUPERVISION_DEFAULT_THRESHOLD,
+  maxReissues = SUPERVISION_MAX_REISSUES,
+}: {
+  watch: string[]
+  threshold?: number
+  maxReissues?: number
+}): Thread[] => [
+  {
+    label: 'system-one/supervision-judge-retry',
+    rules: [
+      // The attempt count rides the rule position: each unjudged halt
+      // consumes one re-issue; past the bound, the parking rule below holds
+      // until a release re-arms the budget.
+      ...Array.from({ length: maxReissues }, () => ({
+        transform: [
+          {
+            type: SUPERVISION_EVENT_TYPES.halted,
+            query: `. as $d | ${supervisionRequestJq(`{ lane: "supervision", type: $d.type, count: ${threshold}, threshold: ${threshold} }`)}`,
+            target: FACULTY_MESSAGE_KINDS.system_one_request,
+            // An UNJUDGED halt for a watched type — the reason's presence is
+            // the judge-unavailable mark (a judged halt carries no prose).
+            detailSchema: {
+              type: 'object',
+              properties: {
+                type: { type: 'string', enum: watch },
+                reason: { type: 'string', minLength: 1 },
+              },
+              required: ['type', 'reason'],
+              additionalProperties: false,
+            },
+          },
+        ],
+      })),
+      // The re-arm: a release (a lift or an override) wraps the budget.
+      {
+        waitFor: [
+          {
+            type: SUPERVISION_EVENT_TYPES.release,
+            detailSchema: {
+              type: 'object',
+              properties: { type: { type: 'string', enum: watch } },
+              required: ['type'],
+            },
+          },
+        ],
+      },
+    ],
+  },
+  {
+    label: 'system-one/supervision-override',
+    rules: [
+      {
+        transform: [
+          {
+            type: SUPERVISION_EVENT_TYPES.override,
+            query: `. as $d | { type: $d.type }`,
+            target: SUPERVISION_EVENT_TYPES.release,
+            detailSchema: SUPERVISION_OVERRIDE_SCHEMA,
+          },
+        ],
+      },
+    ],
+  },
+]

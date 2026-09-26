@@ -759,6 +759,58 @@ describe('bProgram — the runtime composition', () => {
         await server.close()
       }
     })
+    test('judge-retry recovers an unjudged halt: the re-issue succeeds, the block lifts', async () => {
+      // The fixture 429s exactly the first judgment's four transport attempts
+      // (the provider's bounded retry exhausts), so decision 1 fails as an
+      // unjudged halt — the recovery thread re-issues the same Decision, and
+      // decision 2's calls succeed. The block lifts; the program continues.
+      const server = await startDecisionsServer({ rateLimitFirst: 4 })
+      const { runtime, traces } = startRuntime({
+        systemOne: useSystemOne({ endpoint: { url: server.url, model: 'jev-latest' } }),
+        supervision: { watch: [watched], threshold: 4 },
+      })
+      try {
+        for (let i = 0; i < 4; i++) runtime.trigger({ type: watched, detail: {} })
+        // The unjudged halt surfaces with the judge-failure reason.
+        await waitForTraces(traces, (s) => s.some((t) => t.selected.type === SUPERVISION_EVENT_TYPES.halted))
+        const halted = selectionsOf(traces).find((t) => t.selected.type === SUPERVISION_EVENT_TYPES.halted)
+        const haltedDetail = halted?.selected.detail as { type?: string; reason?: string } | undefined
+        expect(haltedDetail?.type).toBe(watched)
+        expect(typeof haltedDetail?.reason).toBe('string')
+        // The recovery: the re-issued judgment succeeded — the release
+        // fires and the watched type selects again.
+        await waitForTraces(traces, (s) => s.some((t) => t.selected.type === SUPERVISION_EVENT_TYPES.release))
+        runtime.trigger({ type: watched, detail: {} })
+        await waitForTraces(traces, (s) => s.filter((t) => t.selected.type === watched).length === 5)
+      } finally {
+        runtime.terminate()
+        await server.close()
+      }
+    })
+
+    test('override: the host ingress lifts a standing halt — the human decision path', async () => {
+      // The judge is permanently unavailable — the halt stands. The host
+      // overrides: the ingress lifts the block for the halted type and the
+      // watched type selects again.
+      const server = await startDecisionsServer({ rateLimitFirst: 999 })
+      const { runtime, traces } = startRuntime({
+        systemOne: useSystemOne({ endpoint: { url: server.url, model: 'jev-latest' } }),
+        supervision: { watch: [watched], threshold: 4 },
+      })
+      try {
+        for (let i = 0; i < 4; i++) runtime.trigger({ type: watched, detail: {} })
+        await waitForTraces(traces, (s) => s.some((t) => t.selected.type === SUPERVISION_EVENT_TYPES.halted))
+        expect(selectionsOf(traces).some((t) => t.selected.type === SUPERVISION_EVENT_TYPES.release)).toBe(false)
+
+        runtime.trigger({ type: SUPERVISION_EVENT_TYPES.override, detail: { type: watched } })
+        await waitForTraces(traces, (s) => s.some((t) => t.selected.type === SUPERVISION_EVENT_TYPES.release))
+        runtime.trigger({ type: watched, detail: {} })
+        await waitForTraces(traces, (s) => s.filter((t) => t.selected.type === watched).length === 5)
+      } finally {
+        runtime.terminate()
+        await server.close()
+      }
+    })
   })
 
   test('terminate kills overridden faculties too — the composition owns every process it invokes', async () => {
