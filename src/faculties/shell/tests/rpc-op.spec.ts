@@ -16,7 +16,13 @@ type WireResult = {
   ok: boolean
   ctx?: unknown
   result?: { output?: JsonObject; durationMs?: number }
-  error?: { code?: string; message?: string; remoteCode?: number | string; request?: { input?: { url?: string } } }
+  error?: {
+    code?: string
+    message?: string
+    remoteCode?: number | string
+    retryable?: boolean
+    request?: { input?: { url?: string } }
+  }
   space?: string
 }
 
@@ -93,6 +99,8 @@ describe('shell rpc op', () => {
     expect(result.error?.code).toBe('error')
     expect(result.error?.message).toBe('nope')
     expect(result.error?.remoteCode).toBe(-32601)
+    // A JSON-RPC error payload completed the call — not a transport failure.
+    expect(result.error?.retryable).toBe(false)
   })
 
   test('an HTTP non-OK response is error data', async () => {
@@ -106,6 +114,28 @@ describe('shell rpc op', () => {
     expect(result.ok).toBe(false)
     expect(result.error?.code).toBe('error')
     expect(result.error?.remoteCode).toBe(503)
+  })
+
+  test('the error detail carries retryable — computed where the numeric comparison lives', async () => {
+    // The op owns the retry-vs-surface discriminant so the thread siblings
+    // can divide on a schema field (a const), not a jq numeric check. A
+    // remote 5xx is retryable; a 4xx is not — both branches through the real
+    // process boundary.
+    const down = rpcServer(() => new Response('down', { status: 503 }))
+    const bad = rpcServer(() => new Response('bad', { status: 400 }))
+    servers.push(down, bad)
+    const worker = spawnShellWorker()
+    workers.push(worker)
+    worker.call({ id: 'r503', input: { op: 'rpc', url: down.url, method: 'x' } })
+    worker.call({ id: 'r400', input: { op: 'rpc', url: bad.url, method: 'x' } })
+    const first = wire(await worker.resultFor('r503'))
+    const second = wire(await worker.resultFor('r400'))
+    expect(first.ok).toBe(false)
+    expect(first.error?.remoteCode).toBe(503)
+    expect(first.error?.retryable).toBe(true)
+    expect(second.ok).toBe(false)
+    expect(second.error?.remoteCode).toBe(400)
+    expect(second.error?.retryable).toBe(false)
   })
 
   test('shell_cancel aborts the in-flight fetch — the result is canceled data', async () => {
@@ -126,6 +156,8 @@ describe('shell rpc op', () => {
     const result = wire(raw)
     expect(result.ok).toBe(false)
     expect(result.error?.code).toBe('canceled')
+    // A deliberate stop is never retried by policy.
+    expect(result.error?.retryable).toBe(false)
   })
 
   test('the deadline terminates a hung call — the result is timeout data', async () => {
@@ -141,6 +173,8 @@ describe('shell rpc op', () => {
     const result = wire(raw)
     expect(result.ok).toBe(false)
     expect(result.error?.code).toBe('timeout')
+    // A deadline stop is a transport-class failure — retry policy applies.
+    expect(result.error?.retryable).toBe(true)
   })
 
   test('input that fails the rpc boundary is error data with the id intact', async () => {

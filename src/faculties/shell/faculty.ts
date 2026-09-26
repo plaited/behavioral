@@ -338,6 +338,7 @@ const runRpcOp = async ({
     return {
       code: 'credential_required',
       durationMs: 0,
+      retryable: false,
       message: `credential required for ${input.url}`,
       request: { op: 'rpc', input },
     }
@@ -361,8 +362,8 @@ const runRpcOp = async ({
     const durationMs = Math.round(performance.now() - started)
     // First stop wins over the decoded outcome — the abort rejection is not
     // mislabeled a remote error.
-    if (execution.stopReason === 'canceled') return { code: 'canceled', durationMs }
-    if (execution.stopReason === 'timeout') return { code: 'timeout', durationMs }
+    if (execution.stopReason === 'canceled') return { code: 'canceled', durationMs, retryable: false }
+    if (execution.stopReason === 'timeout') return { code: 'timeout', durationMs, retryable: true }
     if (outcome.ok) return { output: outcome.result, durationMs }
     // The reactive auth path: a 401 challenge on an unauthenticated call maps
     // to the typed vend-and-replay capture payload (the threads vends and
@@ -371,6 +372,7 @@ const runRpcOp = async ({
       return {
         code: 'credential_required',
         durationMs,
+        retryable: false,
         message: `credential required for ${input.url}`,
         request: { op: 'rpc', input },
       }
@@ -380,6 +382,11 @@ const runRpcOp = async ({
       durationMs,
       message: outcome.error.message,
       remoteCode: outcome.error.code,
+      // The retry-vs-surface discriminant, computed once where the numeric
+      // comparison lives: network failure or a remote 5xx is retryable; a
+      // 4xx, a JSON-RPC error code, and a malformed response are not.
+      retryable:
+        outcome.error.code === 'network' || (typeof outcome.error.code === 'number' && outcome.error.code >= 500),
     }
   } finally {
     clearTimeout(deadline)

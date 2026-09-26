@@ -158,40 +158,99 @@ export const REMOTE_MCP_INPUT_REQUIRED_RESULT_SCHEMA = {
 
 // ── Shared jq fragments ──────────────────────────────────────────────────────
 
-/** Retryable remote failure: deadline, network, or a generic 5xx (data, not policy). */
-const RETRYABLE_REMOTE =
-  '(($d.error.code == "timeout") or ($d.error.remoteCode == "network") or (($d.error.remoteCode | tonumber? // 0) >= 500))'
+// (The retry-vs-surface division is schema-expressible now — the op computes
+// `retryable` once where the numeric comparison lives, so no shared jq
+// fragment is needed. The gates below carry the whole division.)
 
 /**
- * The gate the failure-path transforms share: a FAILURE-shaped shell result
- * with the join lane (`ctx.echo`) present — `ok` const false, `error`
- * required, the echo object required, and optionally the leg pinned. A
- * matched listener whose jq declines is an empty-output transform_error
- * trace, so the gate must match only what the jq handles: successes (the
- * common case — every clean op) and foreign-leg failures never even match.
- * (`retryable` — remoteCode numeric ≥ 500 — is not schema-expressible, so the
- * retry/surface siblings still divide that call in jq; one genuine-failure
- * decline remains, by design.)
+ * The retry gate: a FAILURE-shaped shell result the retry listener acts on —
+ * `ok` const false, the join lane (`ctx.echo`) present with the attempt
+ * stamped, and the op-computed `retryable: true` under the attempt cap.
+ * `credential_required` never matches (the seam stamps it `retryable: false`
+ * and owns it); successes never match. The schema is the whole match — the
+ * jq never declines, so no genuine failure emits a transform_error.
  */
-const rpcFailureGate = (legs?: string[]) =>
+const rpcRetryGate = {
+  type: 'object',
+  properties: {
+    id: { type: 'string', minLength: 1 },
+    ok: { type: 'boolean', const: false },
+    error: {
+      type: 'object',
+      required: ['retryable'],
+      properties: { retryable: { type: 'boolean', const: true } },
+    },
+    ctx: {
+      type: 'object',
+      required: ['echo'],
+      properties: {
+        echo: {
+          type: 'object',
+          required: ['attempt'],
+          properties: { attempt: { type: 'integer', maximum: REMOTE_MCP_MAX_ATTEMPTS - 1 } },
+        },
+      },
+    },
+  },
+  required: ['id', 'ok', 'error', 'ctx'],
+} as const
+
+/**
+ * The surface gate (per leg): a FAILURE-shaped shell result the surface
+ * listeners act on — non-retryable (any attempt), or retryable with the
+ * attempt at the cap (only the retry thread's own advance stamps that).
+ * `credential_required` never matches: the vend-and-replay seam owns those.
+ * Together with the retry gate the division is total — a genuine failure
+ * matches exactly one side, so no listener ever declines into an
+ * empty-output transform_error trace.
+ */
+const rpcSurfaceGate = (legs: string[]) =>
   ({
     type: 'object',
     properties: {
       id: { type: 'string', minLength: 1 },
       ok: { type: 'boolean', const: false },
-      error: { type: 'object' },
+      error: {
+        type: 'object',
+        required: ['code'],
+        properties: { code: { type: 'string', not: { const: 'credential_required' } } },
+      },
       ctx: {
         type: 'object',
         required: ['echo'],
         properties: {
           echo: {
             type: 'object',
-            ...(legs === undefined ? {} : { properties: { leg: { enum: legs } }, required: ['leg'] }),
+            required: ['leg'],
+            properties: { leg: { enum: legs }, attempt: { type: 'integer' } },
           },
         },
       },
     },
     required: ['id', 'ok', 'error', 'ctx'],
+    anyOf: [
+      {
+        type: 'object',
+        properties: {
+          error: { type: 'object', required: ['retryable'], properties: { retryable: { const: false } } },
+        },
+      },
+      {
+        type: 'object',
+        properties: {
+          ctx: {
+            type: 'object',
+            properties: {
+              echo: {
+                type: 'object',
+                required: ['attempt'],
+                properties: { attempt: { type: 'integer', minimum: REMOTE_MCP_MAX_ATTEMPTS } },
+              },
+            },
+          },
+        },
+      },
+    ],
   }) as const
 
 // ── Threads ──────────────────────────────────────────────────────────────────
@@ -429,9 +488,11 @@ const roundCap: Thread = {
 
 /**
  * retry — a retryable remote failure re-requests the op with the attempt
- * advanced (the leg decides the rebuild). Bounded: at the cap the failure
- * surfaces instead. The credential seam's `credential_required` failures are
- * excluded — the vend-and-replay owns those.
+ * advanced (the leg decides the rebuild). Bounded: the gate caps the
+ * attempt, and the surface listeners catch the exhausted failure. The
+ * credential seam's `credential_required` failures are excluded at the
+ * gate — the vend-and-replay owns those. The schema is the whole match;
+ * the jq only rebuilds.
  */
 const retry: Thread = {
   label: 'remote-mcp/retry',
@@ -440,9 +501,9 @@ const retry: Thread = {
       transform: [
         {
           type: FACULTY_MESSAGE_KINDS.shell_request_result,
-          query: `. as $d | select($d.ok == false and ($d.error.code != "credential_required") and ($d.ctx.echo != null) and (($d.ctx.echo.attempt // 0) < ${REMOTE_MCP_MAX_ATTEMPTS}) and ${RETRYABLE_REMOTE}) | { id: $d.id, label: "${REMOTE_MCP_LABEL}", ctx: { echo: ($d.ctx.echo + { attempt: (($d.ctx.echo.attempt // 0) + 1) }) }, input: (if $d.ctx.echo.leg == "call" then { op: "rpc", url: $d.ctx.echo.url, method: "tools/call", headers: ${STAMP_HEADERS}, params: { name: $d.ctx.echo.tool, arguments: ($d.ctx.echo.args // {}), _meta: ${STAMP_META} } } elif $d.ctx.echo.leg == "tools" then { op: "rpc", url: $d.ctx.echo.url, method: "tools/list", headers: ${STAMP_HEADERS}, params: ${STAMP_META} } else { op: "rpc", url: $d.ctx.echo.url, method: "server/discover", headers: ${STAMP_HEADERS}, params: ${STAMP_META} } end) }`,
+          query: `. as $d | { id: $d.id, label: "${REMOTE_MCP_LABEL}", ctx: { echo: ($d.ctx.echo + { attempt: ($d.ctx.echo.attempt + 1) }) }, input: (if $d.ctx.echo.leg == "call" then { op: "rpc", url: $d.ctx.echo.url, method: "tools/call", headers: ${STAMP_HEADERS}, params: { name: $d.ctx.echo.tool, arguments: ($d.ctx.echo.args // {}), _meta: ${STAMP_META} } } elif $d.ctx.echo.leg == "tools" then { op: "rpc", url: $d.ctx.echo.url, method: "tools/list", headers: ${STAMP_HEADERS}, params: ${STAMP_META} } else { op: "rpc", url: $d.ctx.echo.url, method: "server/discover", headers: ${STAMP_HEADERS}, params: ${STAMP_META} } end) }`,
           target: FACULTY_MESSAGE_KINDS.shell_request,
-          detailSchema: rpcFailureGate(),
+          detailSchema: rpcRetryGate,
         },
       ],
     },
@@ -457,9 +518,9 @@ const callFailure: Thread = {
       transform: [
         {
           type: FACULTY_MESSAGE_KINDS.shell_request_result,
-          query: `. as $d | select($d.ok == false and $d.ctx.echo.leg == "call" and ($d.error.code != "credential_required") and ((${RETRYABLE_REMOTE} and (($d.ctx.echo.attempt // 0) < ${REMOTE_MCP_MAX_ATTEMPTS})) | not)) | { id: $d.ctx.echo.source, ok: false, error: { code: $d.error.code, message: $d.error.message, remoteCode: $d.error.remoteCode } }`,
+          query: `. as $d | { id: $d.ctx.echo.source, ok: false, error: { code: $d.error.code, message: $d.error.message, remoteCode: $d.error.remoteCode } }`,
           target: REMOTE_MCP_EVENT_TYPES.callResult,
-          detailSchema: rpcFailureGate(['call']),
+          detailSchema: rpcSurfaceGate(['call']),
         },
       ],
     },
@@ -474,9 +535,9 @@ const discoverFailure: Thread = {
       transform: [
         {
           type: FACULTY_MESSAGE_KINDS.shell_request_result,
-          query: `. as $d | select($d.ok == false and (($d.ctx.echo.leg == "discover") or ($d.ctx.echo.leg == "tools")) and ($d.error.code != "credential_required") and ((${RETRYABLE_REMOTE} and (($d.ctx.echo.attempt // 0) < ${REMOTE_MCP_MAX_ATTEMPTS})) | not)) | { id: $d.ctx.echo.source, ok: false, error: { code: $d.error.code, message: $d.error.message, remoteCode: $d.error.remoteCode } }`,
+          query: `. as $d | { id: $d.ctx.echo.source, ok: false, error: { code: $d.error.code, message: $d.error.message, remoteCode: $d.error.remoteCode } }`,
           target: REMOTE_MCP_EVENT_TYPES.discovered,
-          detailSchema: rpcFailureGate(['discover', 'tools']),
+          detailSchema: rpcSurfaceGate(['discover', 'tools']),
         },
       ],
     },

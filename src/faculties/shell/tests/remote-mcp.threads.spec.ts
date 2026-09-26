@@ -263,7 +263,7 @@ describe('remote-mcp threads — retry', () => {
           id: 'c4-call',
           ok: false,
           ctx: { echo: { source: 'c4', url: URL, tool: 'x', args: {}, leg: 'call', round: 0, attempt: 0 } },
-          error: { code: 'error', remoteCode: 503, message: 'HTTP 503', durationMs: 2 },
+          error: { code: 'error', remoteCode: 503, message: 'HTTP 503', durationMs: 2, retryable: true },
         },
       },
     ])
@@ -287,7 +287,7 @@ describe('remote-mcp threads — retry', () => {
           id: 'c5-call',
           ok: false,
           ctx: { echo: { source: 'c5', url: URL, tool: 'x', args: {}, leg: 'call', round: 0, attempt: 2 } },
-          error: { code: 'error', remoteCode: 503, message: 'HTTP 503', durationMs: 2 },
+          error: { code: 'error', remoteCode: 503, message: 'HTTP 503', durationMs: 2, retryable: true },
         },
       },
     ])
@@ -307,7 +307,7 @@ describe('remote-mcp threads — retry', () => {
           id: 'c6-call',
           ok: false,
           ctx: { echo: { source: 'c6', url: URL, tool: 'x', args: {}, leg: 'call', round: 0, attempt: 0 } },
-          error: { code: 'error', remoteCode: 400, message: 'bad request', durationMs: 2 },
+          error: { code: 'error', remoteCode: 400, message: 'bad request', durationMs: 2, retryable: false },
         },
       },
     ])
@@ -359,11 +359,17 @@ describe('remote-mcp threads — retry', () => {
 })
 
 describe('remote-mcp threads — trace cleanliness', () => {
-  /** Mount the threads and drive one producer event, collecting transform_error traces. */
-  const traceErrorsFor = (event: BPEvent): Trace[] => {
+  /** Mount the threads and drive one producer event, collecting selections and transform_error traces. */
+  const traceRunFor = (event: BPEvent): { selected: Selected[]; transformErrors: Trace[] } => {
     const program = behavioral()
+    const selected: Selected[] = []
     const transformErrors: Trace[] = []
     program.useTrace((trace: Trace) => {
+      if (trace.kind === TRACE_MESSAGE_KINDS.selection)
+        selected.push({
+          type: (trace as SelectionTrace).selected.type,
+          detail: (trace as SelectionTrace).selected.detail as Record<string, unknown> | undefined,
+        })
       if (trace.kind === TRACE_MESSAGE_KINDS.transform_error) transformErrors.push(trace)
     })
     for (const thread of remoteMcpThreads) program.addThread(thread)
@@ -371,7 +377,7 @@ describe('remote-mcp threads — trace cleanliness', () => {
     program.trigger({ type: 'rmcp_pump', detail: {} })
     program.trigger({ type: 'rmcp_pump', detail: {} })
     program.trigger({ type: 'rmcp_pump', detail: {} })
-    return transformErrors
+    return { selected, transformErrors }
   }
 
   test('a successful call result is trace-clean — the failure listeners never match successes', () => {
@@ -380,7 +386,7 @@ describe('remote-mcp threads — trace cleanliness', () => {
     // leg, a call-shaped output — is the common case, and a matched listener
     // whose jq declines is an empty-output transform_error, stray noise on
     // every clean op (8 fired on every composition boot before this pin).
-    const errors = traceErrorsFor(
+    const { transformErrors: errors } = traceRunFor(
       rpcResult(
         'tc1-call',
         'tc1',
@@ -400,7 +406,7 @@ describe('remote-mcp threads — trace cleanliness', () => {
     // vend never even matches, so its decline is not an empty-output
     // transform_error. (The surface outcome itself is pinned above: no
     // remote-mcp result fires.)
-    const errors = traceErrorsFor({
+    const { transformErrors: errors } = traceRunFor({
       type: FACULTY_MESSAGE_KINDS.credential_result,
       detail: {
         id: 'direct-2-cred',
@@ -410,5 +416,28 @@ describe('remote-mcp threads — trace cleanliness', () => {
       },
     })
     expect(errors).toHaveLength(0)
+  })
+
+  test('a genuine retryable failure is trace-clean — the siblings divide on the schema field', () => {
+    // A real 503 at attempt 0 (the op stamps `retryable: true` — the rpc op
+    // spec pins the computation): the retry listener ACTS and the surface
+    // listeners never even match. The division rides the schema field (a
+    // const), not a jq numeric check, so no declining sibling emits a
+    // transform_error per genuine failure.
+    const { selected, transformErrors } = traceRunFor({
+      type: FACULTY_MESSAGE_KINDS.shell_request_result,
+      detail: {
+        id: 'tc3-call',
+        ok: false,
+        ctx: { echo: { source: 'tc3', url: URL, tool: 'echo', args: {}, leg: 'call', round: 0, attempt: 0 } },
+        error: { code: 'error', remoteCode: 503, message: 'HTTP 503', durationMs: 2, retryable: true },
+      },
+    })
+    expect(transformErrors).toHaveLength(0)
+    const retry = selected.find((s) => s.type === FACULTY_MESSAGE_KINDS.shell_request)
+    expect(retry).toBeDefined()
+    const detail = retry?.detail as { id?: string; ctx?: { echo?: { attempt?: number } } }
+    expect(detail.id).toBe('tc3-call')
+    expect(detail.ctx?.echo?.attempt).toBe(1)
   })
 })

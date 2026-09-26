@@ -257,6 +257,9 @@ export type RpcOpSuccess = {
  * The rpc failure payload. `code` is the op's terminal status; a remote
  * failure's own discriminant (HTTP status, JSON-RPC error code) rides
  * `remoteCode` so retry policy can treat 5xx/timeouts differently from 4xx.
+ * `retryable` is that policy computed ONCE here — network failure, timeout,
+ * or `remoteCode >= 500` — so thread listeners divide on the schema field,
+ * never a jq numeric check.
  */
 export type RpcOpError = {
   code: RpcStatus
@@ -264,6 +267,8 @@ export type RpcOpError = {
   message?: string
   /** The remote failure's own code, when the call completed with an error response. */
   remoteCode?: number | string
+  /** Whether retry policy applies: network failure, timeout, or a remote 5xx. */
+  retryable: boolean
   durationMs: number
   clamped?: string[]
   /**
