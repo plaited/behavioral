@@ -1,181 +1,186 @@
-# Eval
+# Eval — the capture-side data contract
 
-Reference for an agent assisting an engineer in wiring up behavioral's
-behavioral-program **eval capture** primitives. These tools answer: *how do I
-capture an agent run (with or without a behavioral coordination layer) into a
-trace I can later grade, and — for behavioral agents — how do I analyze the
-branching structure of that run?*
+Reference for an agent building a **behavioral eval harness**. This is a
+shape guide for the DATA the harness handles — the trace stream, its event
+shapes, the correlation axes, and the redacted/raw split. It is prescriptive
+on what a capture layer sees, not on harness code: behavioral supplies the
+capture primitives and the wire shapes; the harness is consumer-authored.
 
-This is the eval-shaped use of the trace primitives. (The iterative
-hill-climb use of the same primitives — capture, analyze, mutate, repeat —
-lives in the agenthub project.)
+(The iterative hill-climb use of the same primitives — capture, analyze,
+mutate, repeat — lives in the agenthub project.)
 
 ## Public surface
 
 The capture primitive is `useTrace`, returned by `behavioral()` (in-repo at
-`src/behavioral/behavioral.ts` — not a public package export; there is no
-root `@behavioral/sh` export). The engine returns three hooks:
-`{ useAddThread, trigger, useTrace }`.
+`src/behavioral/behavioral.ts` — the engine is not one of the package's
+exports; `@behavioral/sh` exports `.`, `./faculties`, `./controller`, and
+`./utils`, none of which re-export it):
 
 ```ts
 import { behavioral } from '../../behavioral/behavioral.ts'
-import type { Trace, UseTrace } from '../../behavioral/behavioral.types.ts'
+import type { Trace } from '../../behavioral/behavioral.types.ts'
+
+const { addThread, trigger, useTrace, step, instanceId } = behavioral()
 ```
 
-`useTrace` subscribes a listener receiving the engine's **closed** `Trace`
-union (`selection`, `frontier`, `pending_bids`, `deadlock`, `trigger_error`,
-`add_thread_error`, `interrupt`, `transform` — narrow by `kind`). There is
-no generic type parameter on `behavioral()` and no `sendTrace` hook — the
-`Trace` union is closed; you cannot inject custom trace kinds into the
-engine's stream. Agent-lifecycle events (tool calls, messages) are captured
-by the consumer's own side-channel (the agent SDK's subscription),
-correlated with engine traces by timestamp.
+The `Trace` union is **closed** — there is no `sendTrace` hook and no generic
+type parameter, so you cannot inject custom trace kinds into the engine's
+stream. Agent-lifecycle events (tool calls, messages) are captured by the
+consumer's own side-channel (the agent SDK's subscription), written to the
+same sink — do **not** correlate them by timestamp alone; see the identity
+axis below.
 
-For divergence analysis over a captured run, also use the
-[frontier-analysis](./frontier-analysis.md) tools (`frontier-explore`,
-`frontier-verify`, `frontier-replay`) over the captured `Thread[]` + messages.
+## The data stream: capture-side projections
 
-## When to use which
+`Trace` is a closed discriminated union — 12 kinds. [behavioral.md
+](./behavioral.md) owns the full kind table; a harness only needs to know
+which kinds to key on and what each carries:
 
-| Need | Use |
-|------|-----|
-| Observe a behavioral program's own execution (logging/debugging) | `behavioral()` + `useTrace`. Listener receives the closed `Trace` union. |
-| Capture a behavioral agent's run *plus* agent-lifecycle events for grading | `behavioral()` + `useTrace` (engine traces) **and** the agent SDK's own subscription (agent events), correlated by timestamp. The engine's `Trace` union is closed — there is no `sendTrace` to inject agent events into it. |
-| Grade a linear run over an outcome | Post-hoc grader over the captured trace. behavioral supplies **no grading code** — the consumer's grader reads the trace and emits a result. |
-| Analyze reachable branches of a behavioral agent's run (divergence) | `frontier-explore` / `frontier-verify` over captured `Thread[]` + messages. See [frontier-analysis](./frontier-analysis.md). |
+| Key on | What it tells the grader | Carries |
+|--------|--------------------------|---------|
+| `selection` | **What happened** — the chosen candidate | `step`, `selected` |
+| `thread_added` | **The provision record** — the full validated `Thread` at registration | `thread` |
+| `idle` | **Quiescence** — the settle signal; no further selections until a trigger | `step` |
+| `transform` | **Reshape activity** — the contract the engine applied | `step`, `transformers` |
+| `transform_error` | Reshape failure — the target never fired | `step`, `transformer`, `reason` |
+| `deadlock` | **Health metric** — candidates existed but all were blocked | `step` |
 
-The first row is the base case: behavioral as a logging/observation utility
-for its own execution. The second extends it with agent events. The third and
-fourth are what you do with the captured trace *after* the run — behavioral's
-role ends at capture (and, for divergence, at analysis).
+The remaining kinds (`step`, `pending_bids`, `frontier`, `interrupt`,
+`add_thread_error`, `trigger_error`) are per-step scaffolding and the
+error surfaces — capture them (they are on the same stream in publication
+order), but graders mostly key on the rows above. BP-health metrics
+(deadlock counts, idle-to-trigger ratios) read straight off `kind` counts.
 
-## The capture wiring
+## Identity + correlation
 
-The capture layer is always a `useTrace` listener. What the listener does
-with each event is the consumer's choice — the callback is the sink. behavioral
-does not prescribe JSONL, a database, a socket, or any particular store. The
-callback writes wherever the consumer wants. The engine's `Trace` union is
-closed (no `sendTrace`), so agent-lifecycle events are captured via the agent
-SDK's own subscription and written to the same sink, correlated with engine
-traces by timestamp.
+Every trace carries `TraceBase { kind, timestamp, instanceId, sessionId }`
+(`src/behavioral/behavioral.types.ts`). The two id axes are separate:
 
-```ts
-import { behavioral } from '../../behavioral/behavioral.ts'
+- `instanceId` — the per-process identity the engine self-mints (`bp_` +
+  UUID v7). Exposed on the API object, so a host can hand it to clients
+  without sniffing the wire.
+- `sessionId` — the host's session identity, accepted at factory time
+  (`behavioral({ sessionId })`), never minted; defaults to `instanceId` when
+  no host supplies one.
 
-// 1. Construct the program. No generic parameter — the Trace union is closed.
-const program = behavioral()
-const { useTrace, useAddThread, trigger } = program
+**Correlate by `sessionId`, not timestamp.** Timestamps order events within
+one stream but are too coarse to join the engine's traces with an agent
+SDK's side-channel reliably. One trial = one sessionId; the boundary
+question below decides what a trial is.
 
-// 2. Subscribe a capture listener. It receives the engine's Trace variants
-//    in publication order.
-const events = []
-useTrace((msg) => {
-  events.push(msg)
-  // ...or write to a file, socket, DB, stdout — the callback is the sink.
-})
+## Space
 
-// 3. From the agent SDK's lifecycle callbacks (pi session.subscribe, Claude
-//    Code hooks, etc.), write agent events to the SAME sink directly — they
-//    do NOT flow through the engine's trace stream (there is no sendTrace).
-//    Correlate by timestamp.
-//
-//   session.subscribe((e) => {
-//     if (e.type === 'tool_execution_end') {
-//       events.push({ kind: 'tool_call', timestamp: Date.now(), tool: e.toolName, args: e.input })
-//     }
-//   })
-```
+A trace's space is best-effort, derived by the consumer lane (`traceSpace`
+in `src/cli/trace-consumer.ts`): a top-level trace `space` if present, else
+the `selection`'s / `interrupt`'s `selected.space`, else a
+`thread_added`'s `thread.space`, else root. Per-space grading is
+**consumer-side filtering** — the engine stamps spaces on events, not on
+traces beyond the above; a grader that wants per-space results filters the
+stream itself using the same derivation.
 
-The behavioral program itself (threads, triggers) is wired with `useAddThread`
-/ `trigger` as usual — see [behavioral](./behavioral.md). The capture layer
-is orthogonal: it observes the program's execution via `useTrace` and bridges
-the agent SDK's lifecycle into the same sink via the SDK's own subscription.
+## `Thread[]` for divergence
 
-## What constitutes a trace? (intake)
+Divergence analysis needs the **threads**, not just the messages — and with
+behavioral the capture is free: every registration emits a `thread_added`
+trace carrying the full validated `Thread`, so a subscriber that persists
+`thread_added` payloads has the `Thread[]` by the time the run ends. (Replay
+= `thread_added` payloads + ingress events in order — see `StepTrace.ingress`
+in behavioral.md.)
 
-The old `agent-eval-harness` answered this for you with a fixed shape. With
-the harness dissolved, the agent + engineer decide. These are the questions to
-surface (use `grill-me` to work through them with the engineer) — the answers
-shape the capture wiring and differ by eval:
+For divergence analysis, issue `frontier_request { id, op, input }` over the
+captured `Thread[]` + messages — `replay`, `explore`, or `verify`. The op
+contracts, the `progress` spec, and the `maxDepth`/`truncated` semantics are
+[frontier-analysis](./frontier-analysis.md)'s; eval.md only records that a
+harness must capture `Thread[]` (via `thread_added`) and the messages to be
+able to branch-analyze later. For a plain agent (no behavioral layer) there
+are no threads and frontier analysis doesn't apply.
 
-- **Boundary** — what counts as one trace? One agent session? One task attempt?
-  One inference turn? One branched exploration? For eval, usually *one trial*
-  (one task attempt, from start to a terminal result).
+## The redacted/raw split
+
+**Consumer position determines the view.** The engine never awaits or gates
+listeners — each `useTrace` subscriber sees the same raw stream, with a
+per-consumer catch (one failing listener is log-only and cannot suppress the
+others):
+
+- **In-process subscribers are raw.** A second `useTrace` subscriber on the
+  composition is THE canonical eval path: it sees every trace unredacted and
+  coexists with the composition's own lanes (the pump, the redacted egress
+  consumer) — engine isolation is per-consumer, so an eval listener's
+  failures never break the program or the log.
+- **Every remote carrier is redacted-once.** The stdio serve and the
+  instance-socket host wire the egress consumer
+  (`createTraceConsumer` in `src/cli/trace-consumer.ts`): one redaction
+  pass, then fan-out to the JSONL log (`<root>/<space>/<date>.jsonl`) and
+  the `trace` notification. Redaction replaces exactly the secret-bearing
+  values — declared secret values (env keys matching the sensitive-name
+  pattern, minimum length 8), sensitive field names (`authorization`,
+  `cookie`, `token`, ...), and credential shapes — with `[REDACTED]`.
+
+What a grader can rely on per position: an in-process grader sees the full
+fidelity stream (secrets included — it is inside the trust boundary); a
+remote grader reads redacted traces and must NOT expect credential-bearing
+fields to carry values (redacted fields are exactly the secrets — their
+presence is still informative, their content is not). Do not try to recover
+redacted values from the carrier; capture what you must via the in-process
+subscriber instead.
+
+## Wiring seams as shapes, not code
+
+The host-facing runtime is `HostRuntime = { trigger, useTrace, start,
+terminate, identity }` (`src/cli/serve.ts` — a pick of the composition's
+handle). The seams a harness wires:
+
+- **The engine never awaits listeners** — a capture listener that throws or
+  rejects cannot stall the super-step; keep sinks synchronous when ordering
+  is the contract (`traceLogSink` is sync by design for exactly this
+  reason). Async work belongs after the listener returns, re-entered via
+  `trigger`/`step` per the action channel (behavioral.md).
+- **Subscribe before `start()`** — the boot cascade runs after subscribers
+  attach, so boot traces are observable.
+- **Sinks are the harness's** — behavioral does not prescribe JSONL, a
+  database, a socket, or any store; the egress consumer above is what the
+  runtime's own carriers do, and a harness mirrors or reuses it.
+
+## Intake questions
+
+These shape the capture wiring; the answers differ by eval:
+
+- **Boundary** — what counts as one trace? One agent session? One task
+  attempt? One inference turn? One branched exploration? For eval, usually
+  *one trial* (one task attempt, start to a terminal result) — which maps to
+  one `sessionId`.
 - **Lifecycle** — what event closes the trace and triggers flush? A
-  `completed`/`failed`/`timed_out` result? A turn budget? A wall-clock budget?
-  The flush trigger is where the capture callback hands the accumulated events
-  to whatever comes next (a grader, a file write, a socket send).
-- **Sink** — where does the `useTrace` callback write? File, socket, DB, in-memory,
-  stdout. behavioral doesn't know or care; the callback handles it.
-- **Retention** — for eval, are all trials kept, or only failures, or a sample?
-  The keep/discard rule is the consumer's.
-- **Analysis target** — post-hoc outcome grading (grade what the agent produced),
-  divergence analysis (`frontier-analysis` over the behavioral layer's branches),
-  or both? This determines whether you need `Thread[]` capture (see below).
-
-## The `Thread[]` capture concern (behavioral agents only)
-
-`useTrace` gives you the **messages** (the trace stream). frontier-analysis
-needs the **threads** that produced those messages — `frontier-explore` and
-`frontier-verify` take a `Thread[]` plus a `messages` trace. If the agent runs
-a behavioral program and you want divergence grading later, persist the
-`Thread[]` definition at capture time, alongside the trace:
-
-```ts
-const threads: Thread[] = [
-  { label: 'coordinator', rules: [...], once: true },
-  // ...the threads the agent's behavioral layer runs
-]
-// At flush: write `threads` and `events` together — one trial's full capture.
-```
-
-A consumer who wires `useTrace` and later wants `frontier-analysis` without
-having captured `Thread[]` is stuck — the messages alone aren't enough to
-reconstruct reachable branches. Surface this at intake time, not after the
-run. For a plain agent (no behavioral layer), there are no threads and
-`frontier-analysis` doesn't apply — only trace grading does.
+  `completed`/`failed`/`timed_out` result? A turn budget? A wall-clock
+  budget?
+- **Sink** — in-process subscriber or a remote carrier? This decides the
+  redacted/raw split above. Then: file, socket, DB, in-memory.
+- **Retention** — all trials kept, or only failures, or a sample? The
+  keep/discard rule is the consumer's.
+- **Analysis target** — post-hoc outcome grading, divergence analysis
+  (needs `Thread[]` capture), or both? Decide at intake: the messages alone
+  can't reconstruct reachable branches, and `thread_added` is the only
+  provision record.
 
 ## Grading is beyond this package
 
-behavioral supplies the capture primitives (`useTrace`) and, for
-behavioral agents, the divergence-analysis tools (`frontier-analysis`).
-It supplies **no grading code**. Graders are consumer-authored and run
-wherever the consumer chose to sink the trace:
+behavioral supplies the capture primitive (`useTrace`) and, for behavioral
+agents, the divergence-analysis faculty (frontier analysis). It supplies
+**no grading code**. Graders are consumer-authored:
 
-- **Deterministic** — read the trace, apply rules (gold-answer match, BP-health
-  metrics over `kind` counts, token/cost aggregation). The consumer's code, in
-  the consumer's chosen language/store.
+- **Deterministic** — read the trace, apply rules (gold-answer match,
+  BP-health metrics over `kind` counts, token/cost aggregation).
 - **LLM-rubric** — a subprocess grader that reads the trace and asks a judge
-  model. The consumer authors the grader; behavioral does not ship a grader
-  contract or IO helpers.
+  model.
 - **Hybrid** — deterministic pre-filter + LLM-rubric on the survivors.
 
 Anthropic's framing applies to the outcome-grading subset: *grade what the
 agent produced, not the path it took.* Trajectory signals (tool-call count,
 BP deadlocks, latency) are metrics, not pass/fail graders. The divergence
-case is the exception — there, the *branches* are the thing being graded, and
-`frontier-analysis` is the tool.
-
-## A common wiring mistake to avoid
-
-Wiring `useTrace`, running the agent, then discovering you wanted divergence
-grading and have no `Thread[]`. The messages alone can't reconstruct
-reachable branches. Decide at intake whether the eval needs divergence
-analysis; if it does, capture `Thread[]` alongside the trace. If it doesn't
-(plain agent, outcome-only grading), skip `Thread[]` capture and skip
-`frontier-analysis` — they don't apply without a behavioral layer.
-
-## Going deeper
-
-The capture primitive (`useTrace`) lives in-repo at
-`src/behavioral/behavioral.ts`, with the `Trace` union and hook types in
-`src/behavioral/behavioral.types.ts`. Read those files directly — the engine
-is not a public package export (there is no root `@behavioral/sh` export),
-so there is no specifier to resolve. The kernel's dispatch bridge
-(`src/kernel/kernel.ts`) is the canonical `useTrace` action-channel
-implementation.
+case is the exception — there, the *branches* are the thing being graded.
 
 ## See also
 
-- [frontier-analysis](./frontier-analysis.md) — divergence analysis over a captured `Thread[]` + messages.
-- [behavioral](./behavioral.md) — wiring the behavioral program itself (`useAddThread`, `trigger`, `useTrace`).
+- [behavioral](./behavioral.md) — the runtime, the full trace-kind table,
+  and the hook surface.
+- [frontier-analysis](./frontier-analysis.md) — the op contracts over a
+  captured `Thread[]` + messages.
