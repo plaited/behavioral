@@ -18,6 +18,7 @@ import {
 import { handleFrontierMessage } from '../faculties/frontier/faculty.ts'
 import { admissionAnalysisInput, admissionReviewThreads } from '../faculties/frontier/threads.ts'
 import { bindEmit } from '../faculties/process-lane.ts'
+import { pluginThreadsThreads } from '../faculties/shell/plugin-threads.threads.ts'
 import { remoteMcpThreads } from '../faculties/shell/remote-mcp.threads.ts'
 import { rpcAuthThreads } from '../faculties/shell/rpc-auth.threads.ts'
 import { shellThreads } from '../faculties/shell/threads.ts'
@@ -338,6 +339,11 @@ export const bProgram = ({
     })
   }
 
+  // The plugin-threads proposal path: the dispatcher/join/candidate threads
+  // over the shell faculty's `run` op — requires the executor (shell) only.
+  // The admission registry (host-local, under `<home>`) is composition-side
+  // and independent of this mount.
+  if (has('shell')) facultyAddThreads(pluginThreadsThreads)
   // The rpc auth seam: the vend-and-replay spine requires the op (shell) and
   // the vending leg (security) — the threads mount only when both are on.
   if (has('shell') && has('security')) facultyAddThreads(rpcAuthThreads)

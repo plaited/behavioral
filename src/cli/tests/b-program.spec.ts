@@ -1,4 +1,7 @@
 import { describe, expect, test } from 'bun:test'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { TRACE_MESSAGE_KINDS } from '../../behavioral/behavioral.constants.ts'
 import type { BPEvent, JsonObject, SelectionTrace, Trace } from '../../behavioral/behavioral.types.ts'
 import { FACULTY_MESSAGE_KINDS } from '../../faculties/faculties.constants.ts'
@@ -10,6 +13,7 @@ import {
   ShellRequestEventSchema,
   ShellRequestResultEventSchema,
 } from '../../faculties/faculties.types.ts'
+import { PLUGIN_THREADS_EVENT_TYPES } from '../../faculties/shell/plugin-threads.threads.ts'
 import {
   REMOTE_MCP_EVENT_TYPES,
   REMOTE_MCP_PROTOCOL_VERSION,
@@ -1091,6 +1095,65 @@ describe('bProgram — the runtime composition', () => {
       runtime.terminate()
       rpc.stop(true)
       broker.stop(true)
+    }
+  })
+
+  // The plugin-threads proposal path — the vertical through the REAL shell
+  // faculty: the proposal issues the worker import (the plugin file's top
+  // level executes in the `bun run -` subprocess — the only code-execution
+  // moment, behind the explicit proposal act), the ctx.echo join maps the
+  // result to candidates, and the landed admission path (structural review,
+  // verdict, the pending-id write) carries each candidate live.
+  test('the plugin-threads proposal path: one add_thread per validated export, invalid exports skipped with warnings', async () => {
+    const plugin = mkdtempSync(join(tmpdir(), 'bprogram-plugin-'))
+    try {
+      const dir = join(plugin, 'sh.behavioral/threads')
+      mkdirSync(dir, { recursive: true })
+      writeFileSync(
+        join(dir, 't.ts'),
+        "export const greeter = { label: 'greeter', once: true, rules: [{ request: { type: 'hello' } }] }\n" +
+          'export const notAThread = { nope: true }\n',
+      )
+      const { runtime, traces } = startRuntime()
+      try {
+        runtime.trigger({
+          type: PLUGIN_THREADS_EVENT_TYPES.proposal,
+          detail: { id: 'pt1', input: { plugin, file: 't.ts' } },
+        })
+        // one add_thread proposal — only the valid export, keyed by its candidate id
+        await waitForTraces(traces, (s) =>
+          s.some(
+            (t) =>
+              t.selected.type === FACULTY_MESSAGE_KINDS.frontier_request &&
+              (t.selected.detail as { op?: string } | undefined)?.op === 'add_thread',
+          ),
+        )
+        const adds = selectionsOf(traces).filter(
+          (t) =>
+            t.selected.type === FACULTY_MESSAGE_KINDS.frontier_request &&
+            (t.selected.detail as { op?: string } | undefined)?.op === 'add_thread',
+        )
+        expect(adds.map((t) => (t.selected.detail as { id?: string }).id)).toEqual(['pt1-add-0'])
+        const thread = (adds[0]?.selected.detail as { input?: { thread?: { label?: string } } } | undefined)?.input
+          ?.thread
+        expect(thread?.label).toBe('greeter')
+        // the invalid export skipped with a warning — the imported batch surface carries it
+        const imported = selectionsOf(traces).find((t) => t.selected.type === PLUGIN_THREADS_EVENT_TYPES.imported)
+        const importedInput = (imported?.selected.detail as { input?: { warnings?: string[] } } | undefined)?.input
+        expect(importedInput?.warnings?.some((w) => w.includes('notAThread'))).toBe(true)
+        // the verdict admits: the thread_added provision fires — the candidate is live
+        await waitForTraces(traces, () =>
+          traces.some(
+            (t) =>
+              t.kind === TRACE_MESSAGE_KINDS.thread_added &&
+              (t as { thread?: { label?: string } }).thread?.label === 'greeter',
+          ),
+        )
+      } finally {
+        runtime.terminate()
+      }
+    } finally {
+      rmSync(plugin, { recursive: true, force: true })
     }
   })
 })
