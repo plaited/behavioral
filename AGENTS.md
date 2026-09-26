@@ -93,7 +93,9 @@ faculties), plus its `tests/`:
   `configSystemTwo(respond)` wires it, `useSystemTwo({ endpoints })` seeds the
   endpoint map
 - `system-one/` — TypeSafe/OpenRouter Decisions; `configSystemOne` +
-  `useSystemOne({ endpoint })`, with 429/529 retry
+  `useSystemOne({ endpoint })`, with 429/529 retry; `threads.ts` — the
+  admission judgment pack (the BP-native blocking judge over the Decisions
+  lane; the composition mounts it when systemOne is wired)
 - `shell/` — bun-direct script execution — `run` op TS scripts via `bun run -`,
   `shell` op Bun Shell commands through the wrapper; `rpc` op generic remote
   JSON-RPC (the remote-mcp layering is the thread pack, not the op);

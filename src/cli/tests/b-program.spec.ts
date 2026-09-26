@@ -17,6 +17,7 @@ import {
 } from '../../faculties/shell/remote-mcp.threads.ts'
 import { useSystemOne } from '../../faculties/system-one/config.ts'
 import { startDecisionsServer } from '../../faculties/system-one/tests/fixtures/decisions-server.ts'
+import { ADMISSION_EVENT_TYPES } from '../../faculties/system-one/threads.ts'
 import { useSystemTwo } from '../../faculties/system-two/config.ts'
 import { ASSISTANT_TEXT, startOpenResponsesServer } from '../../faculties/system-two/tests/fixtures/model-server.ts'
 import { useFaculty } from '../../faculties/use-faculty.ts'
@@ -329,6 +330,100 @@ describe('bProgram — the runtime composition', () => {
       } finally {
         runtime.terminate()
       }
+    })
+    describe('add_thread — the admission judgment (systemOne wired)', () => {
+      test('the judged path: the Decision approves, the block lifts, the candidate admits and goes live', async () => {
+        const server = await startDecisionsServer()
+        const { runtime, traces } = startRuntime({
+          systemOne: useSystemOne({ endpoint: { url: server.url, model: 'jev-latest' } }),
+        })
+        try {
+          // The admitted thread is `once` — its ping selects and the thread completes.
+          // (A looping thread here would recurse the engine's super-step cascade
+          // unboundedly — a known engine frontier this test does not exercise.)
+          runtime.trigger(
+            addThreadRequest('aj1', { label: 'greeter', once: true, rules: [{ request: { type: 'ping' } }] }),
+          )
+          // The judgment's outcome: the admission fires with the candidate id…
+          await waitForTraces(traces, (s) =>
+            s.some(
+              (t) =>
+                t.selected.type === ADMISSION_EVENT_TYPES.admitted &&
+                (t.selected.detail as { id?: string }).id === 'aj1',
+            ),
+          )
+          // …the Decision saw the proposed thread (the faculty's recorded request —
+          // the semantic layer judged the actual thread, not a schema echo).
+          const judged = server.requests.find(
+            (r) => (r.body.state as { thread?: { label?: string } } | undefined)?.thread?.label === 'greeter',
+          )
+          expect(judged).toBeDefined()
+          expect(Object.keys(judged?.body.questions ?? {})).toContain('admission')
+          // The admission rides the judged outcome — the verdict precedes it.
+          const selections = selectionsOf(traces)
+          const judgeResultIndex = selections.findIndex(
+            (t) =>
+              t.selected.type === FACULTY_MESSAGE_KINDS.system_one_request_result &&
+              (t.selected.detail as { id?: string }).id === 'aj1-judge',
+          )
+          const admittedIndex = selections.findIndex(
+            (t) =>
+              t.selected.type === ADMISSION_EVENT_TYPES.admitted && (t.selected.detail as { id?: string }).id === 'aj1',
+          )
+          expect(admittedIndex).toBeGreaterThan(judgeResultIndex)
+          // The thread_added provision fires — the composition owns the write.
+          expect(
+            traces.some(
+              (t) =>
+                t.kind === TRACE_MESSAGE_KINDS.thread_added &&
+                (t as { thread?: { label?: string } }).thread?.label === 'greeter',
+            ),
+          ).toBe(true)
+          // …and the admitted thread goes live — its request selects like any other thread's.
+          await waitForTraces(traces, (s) => s.some((t) => t.selected.type === 'ping'))
+        } finally {
+          runtime.terminate()
+          await server.close()
+        }
+      })
+
+      test('the judged path: a rejection holds the line — the candidate never admits', async () => {
+        const server = await startDecisionsServer({ pickChoice: 'reject' })
+        const { runtime, traces } = startRuntime({
+          systemOne: useSystemOne({ endpoint: { url: server.url, model: 'jev-latest' } }),
+        })
+        try {
+          runtime.trigger(addThreadRequest('aj2', { label: 'suspicious', rules: [{ request: { type: 'evil' } }] }))
+          // The rejection is visible, stamped with the candidate id…
+          await waitForTraces(traces, (s) =>
+            s.some(
+              (t) =>
+                t.selected.type === ADMISSION_EVENT_TYPES.rejected &&
+                (t.selected.detail as { id?: string }).id === 'aj2',
+            ),
+          )
+          // …and the line held: no admission for the rejected candidate, no
+          // thread_added provision, nothing live.
+          expect(
+            selectionsOf(traces).some(
+              (t) =>
+                t.selected.type === ADMISSION_EVENT_TYPES.admitted &&
+                (t.selected.detail as { id?: string }).id === 'aj2',
+            ),
+          ).toBe(false)
+          expect(
+            traces.some(
+              (t) =>
+                t.kind === TRACE_MESSAGE_KINDS.thread_added &&
+                (t as { thread?: { label?: string } }).thread?.label === 'suspicious',
+            ),
+          ).toBe(false)
+          expect(selectionsOf(traces).some((t) => t.selected.type === 'evil')).toBe(false)
+        } finally {
+          runtime.terminate()
+          await server.close()
+        }
+      })
     })
   })
 

@@ -20,6 +20,11 @@ import { bindEmit } from '../faculties/process-lane.ts'
 import { remoteMcpThreads } from '../faculties/shell/remote-mcp.threads.ts'
 import { rpcAuthThreads } from '../faculties/shell/rpc-auth.threads.ts'
 import { shellThreads } from '../faculties/shell/threads.ts'
+import {
+  ADMISSION_EVENT_TYPES,
+  admissionJudgmentThreads,
+  validateAdmissionVerdict,
+} from '../faculties/system-one/threads.ts'
 import { useFaculty } from '../faculties/use-faculty.ts'
 import type { Faculty } from '../faculties.ts'
 
@@ -230,6 +235,12 @@ export const bProgram = ({
     // useFaculty compiled — a malformed system_one event is blocked (visible
     // in the frontier traces), not silently dropped.
     facultyAddThreads(guardThreads(`guard:${systemOne.name}-schema`, eventGuardEntries(systemOne.schemas)))
+    // The admission judgment pack: the BP-native blocking judge — it requires
+    // the Decisions lane (systemOne) and the structural layer (the in-process
+    // frontier embed, always present). With judgment wired, a validated
+    // candidate's admission is blocked while its Decision runs; the verdict
+    // events below are the judge's road back to the pump.
+    facultyAddThreads(admissionJudgmentThreads)
     route([FACULTY_MESSAGE_KINDS.system_one_request, FACULTY_MESSAGE_KINDS.system_one_cancel], {
       send: (event: BPEvent): void => systemOne.send(event),
       gate: (event: BPEvent): boolean => systemOne.invalidEventGate(event),
@@ -250,7 +261,9 @@ export const bProgram = ({
   // correlated frontier_request_result carries the verdict. The map is the
   // authorization: only results correlated to requests this composition
   // itself routed can ever admit. A null thread (the proposal failed the
-  // Thread-schema gate at registration) never admits.
+  // Thread-schema gate at registration) never admits. With systemOne wired
+  // the entry survives until the judgment resolves: the verdict is the
+  // CANDIDATE record — the judged outcome events below are the write legs.
   const pendingAdmissions = new Map<string, Thread | null>()
 
   route([FACULTY_MESSAGE_KINDS.frontier_request], {
@@ -300,13 +313,59 @@ export const bProgram = ({
   useTrace((trace: Trace) => {
     if (trace.kind !== TRACE_MESSAGE_KINDS.selection) return
     const candidate = (trace as SelectionTrace).selected
+    // The judgment's outcome legs — the admission judgment pack's road back
+    // to the pump. Only a conforming verdict with admit === true admits; a
+    // rejection (or anything malformed — fail-closed) drops the pending id,
+    // the rejection visible in the traces.
+    if (candidate.type === ADMISSION_EVENT_TYPES.admitted || candidate.type === ADMISSION_EVENT_TYPES.rejected) {
+      const detail = candidate.detail as { id?: string } | undefined
+      const id = detail?.id
+      if (typeof id === 'string' && pendingAdmissions.has(id)) {
+        const thread = pendingAdmissions.get(id)
+        pendingAdmissions.delete(id)
+        if (thread && candidate.type === ADMISSION_EVENT_TYPES.admitted && validateAdmissionVerdict(candidate.detail))
+          addThreads([thread])
+      }
+      return
+    }
     if (candidate.type === FACULTY_MESSAGE_KINDS.frontier_request_result) {
       const detail = candidate.detail as { id?: string; ok?: boolean; result?: { ok?: boolean } } | undefined
       const id = detail?.id
       if (typeof id === 'string' && pendingAdmissions.has(id)) {
         const thread = pendingAdmissions.get(id)
-        pendingAdmissions.delete(id)
-        if (detail?.ok === true && thread && detail.result?.ok === true) addThreads([thread])
+        if (detail?.ok === true && thread && detail.result?.ok === true) {
+          if (systemOne === undefined) {
+            // The structural-only path: no judge, no block — the candidate
+            // admits directly under the re-entry law.
+            pendingAdmissions.delete(id)
+            addThreads([thread])
+          } else {
+            // The judged path: the verdict is the candidate record — emit it
+            // to the admission judgment pack (which blocks the admission
+            // while the Decision runs). The entry survives until the judged
+            // outcome leg above. (A validated thread is pure data — it
+            // serializes as JSON — but its listener schemas aren't statically
+            // JsonValue, hence the cast.)
+            addThreads([
+              {
+                label: `thread-candidate:${id}`,
+                once: true,
+                rules: [
+                  {
+                    request: {
+                      type: ADMISSION_EVENT_TYPES.candidate,
+                      detail: { id, thread: thread as unknown as JsonObject },
+                    },
+                  },
+                ],
+              },
+            ])
+          }
+        } else {
+          // The rejection is data — the requester reads the why from the
+          // verdict trace.
+          pendingAdmissions.delete(id)
+        }
       }
       return
     }

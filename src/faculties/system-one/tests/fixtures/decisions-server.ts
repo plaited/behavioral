@@ -13,16 +13,19 @@ export const DECISIONS_MODEL = 'jev-1.13.0'
 
 type Question = { type: string; instructions: unknown; criteria?: unknown }
 
-const answerFor = (question: Question, index: number): unknown => {
+const answerFor = (question: Question, index: number, pickChoice?: string): unknown => {
   if (question.type === 'noul') return { type: 'noul', noul: 0.9 }
   if (question.type === 'choice') {
     const options = Object.keys((question.criteria ?? {}) as Record<string, unknown>)
+    // `pickChoice` overrides the canned first-option answer (the rejection
+    // path needs a server that answers reject).
+    const choice = pickChoice !== undefined && options.includes(pickChoice) ? pickChoice : (options[0] ?? 'unknown')
     const probabilities = Object.fromEntries(
-      options.map((o, i) => [o, i === 0 ? 0.7 : 0.3 / Math.max(options.length - 1, 1)]),
+      options.map((o) => [o, o === choice ? 0.7 : 0.3 / Math.max(options.length - 1, 1)]),
     )
     return {
       type: 'choice',
-      choice: options[0] ?? 'unknown',
+      choice,
       probabilities,
       confidence: 0.81,
     }
@@ -51,10 +54,13 @@ export const startDecisionsServer = async ({
   apiKey,
   rateLimitFirst = 0,
   delayMs = 0,
+  pickChoice,
 }: {
   apiKey?: string
   rateLimitFirst?: number
   delayMs?: number
+  /** Override the canned choice answer (e.g. `'reject'` for the judgment's rejection path). */
+  pickChoice?: string
 } = {}): Promise<DecisionsFixture> => {
   const requests: RecordedDecisionRequest[] = []
   let rateLimited = 0
@@ -88,7 +94,7 @@ export const startDecisionsServer = async ({
 
       const questions = body.questions ?? {}
       const answers = Object.fromEntries(
-        Object.entries(questions).map(([id, question], index) => [id, answerFor(question, index)]),
+        Object.entries(questions).map(([id, question], index) => [id, answerFor(question, index, pickChoice)]),
       )
       return Response.json({
         model: DECISIONS_MODEL,
