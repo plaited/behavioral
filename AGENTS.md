@@ -118,8 +118,10 @@ fleet. Remote MCP is remote-mcp threads over the shell faculty's
 generic `rpc` op (`src/faculties/shell/remote-mcp.threads.ts` — the retired
 `mcp` faculty's replacement; the official SDK dependency is gone);
 skill/plugin operations are the shell faculty's threads
-(`src/faculties/shell/threads.ts`) + recipes + store, taught by
-`skills/skill-conventions/`.
+(`src/faculties/shell/threads.ts` + `src/faculties/shell/plugin-threads.threads.ts` —
+the plugin-thread proposal path: a host proposal → worker import → engine-ThreadSchema
+validation → one `add_thread` candidate per validated export) + recipes + store,
+taught by `skills/skill-conventions/`.
 **`src/faculties.ts`** — the faculties public surface (package export `./faculties`): the
 `Faculty` union, the wire types + JSON schemas/validators (`faculties.types.ts`), the override thread
 threads (`shellThreads`), their schemas/types, `useFaculty`, and the
@@ -147,12 +149,17 @@ fleet (0 tools); turn/config commands land here as the composition rulings build
 JSON-RPC IPC host lives here too: `b-program.ts` (the runtime composition, `bProgram`),
 `json-rpc.ts` (the line codec), `serve.ts` (the `serve`
 entry — ingress messages → triggers, `ui_*` selections → client notifications, redacted
-traces out), `load-config.ts` (`<BEHAVIORAL_HOME>/config.ts`), and `trace-consumer.ts`.
+traces out), `load-config.ts` (`<BEHAVIORAL_HOME>/config.ts`), `trace-consumer.ts`, and
+`plugin-thread-registry.ts` (the plugin-thread admission registry under `<home>` —
+host-local, keyed (plugin, file, content hash, space): `bProgram` mounts admitted
+snapshots at boot, decided keys never re-adjudicate).
 **`src/utils/`** — shared pure utilities.
 **`src/faculties/<faculty>/threads.ts`** — faculty threads: `shell/threads.ts`
 (the ICL threads — skill/plugin scans, catalog/manifest schema gates, links dispatchers
 + stored recipes), `shell/rpc-auth.threads.ts` (the credential vend-and-replay
-spine), `shell/remote-mcp.threads.ts` (the MCP layering over the rpc op), and
+spine), `shell/remote-mcp.threads.ts` (the MCP layering over the rpc op),
+`shell/plugin-threads.threads.ts` (the plugin-thread proposal path — dispatcher,
+import join, candidate carry, add_thread dispatch), and
 `system-one/threads.ts` (the admission judgment threads + the supervision
 threads — the runtime circuit breaker, its judgment, and its recovery).
 Threads ship with
