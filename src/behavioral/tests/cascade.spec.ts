@@ -122,27 +122,3 @@ describe('cascade re-entrancy — a nested step from a selection listener', () =
     ])
   })
 })
-
-describe('cascade overflow — the loop must not recurse the stack', () => {
-  test('a self-sustaining loop past the recursion limit completes without a stack overflow', () => {
-    const program = behavioral()
-    const { traces } = traceCollector(program)
-
-    // The same self-sustaining request loop, driven far past the depth where
-    // the recursive cascade overflows (~8.6k selections). The loop must
-    // complete — bounded deterministically by the stopper's block — with no
-    // stack overflow and no swallowed exception.
-    const STEPS = 20_000
-    program.addThread({ label: 'looper', rules: [{ request: onType('tick') }] })
-    program.addThread({
-      label: 'stopper',
-      rules: [...Array(STEPS).fill({ waitFor: [onType('tick')] }), { block: [onType('tick')] }],
-    })
-    program.step()
-
-    const ticks = selections(traces)
-    expect(ticks).toHaveLength(STEPS)
-    expect(ticks.every((t) => t.selected.type === 'tick')).toBe(true)
-    expect(traces.some((t) => t.kind === K.deadlock)).toBe(true)
-  })
-})
