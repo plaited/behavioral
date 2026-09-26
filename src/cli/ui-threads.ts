@@ -30,6 +30,11 @@
  */
 
 import type { Thread } from '../behavioral/behavioral.types.ts'
+import {
+  CONTROLLER_INCOMING_MESSAGE_TYPES,
+  CONTROLLER_OUTGOING_MESSAGE_TYPES,
+  SWAP_MODES,
+} from '../controller/controller.constants.ts'
 import { FACULTY_MESSAGE_KINDS } from '../faculties/faculties.constants.ts'
 
 // ── Vocabulary ───────────────────────────────────────────────────────────────
@@ -248,5 +253,108 @@ const designTenant: Thread = {
   ],
 }
 
+// ── The scale preflight — Structural IA/E: fixed mechanism (the controller
+//    resolves the DOM fact), thread-authored policy (the hold) ────────────────
+
+/** The generation trigger's event type — the b-trigger convention (`b-trigger="click:render"`). */
+export const UI_RENDER_TRIGGER_TYPE = 'render'
+
+/**
+ * The generation request's event type — thread-owned, NOT a controller
+ * `ui_*` message (the egress fan-out emits `ui_*` selections to clients; the
+ * pipeline's own vocabulary stays off that wire).
+ */
+export const UI_GENERATE_EVENT_TYPE = 'generate'
+
+/** The preflight's scale-check request id — the result join (the controller echoes the id). */
+export const UI_SCALE_CHECK_CALL_ID = 'ui-scale-check'
+
+/** The default render target when the trigger carries none. */
+export const UI_RENDER_TARGET = 'body'
+
+/** The render swap mode the pipeline composes with. */
+export const UI_RENDER_SWAP: (typeof SWAP_MODES)[keyof typeof SWAP_MODES] = SWAP_MODES.innerHTML
+
+/** The render trigger's detail contract — any object; `target` names the render target. */
+const RENDER_TRIGGER_SCHEMA = {
+  type: 'object',
+  properties: { target: { type: 'string', minLength: 1 } },
+  required: [],
+  additionalProperties: true,
+} as const
+
+/**
+ * The generation request's detail — the scale-stamped trigger. The effective
+ * scale and target ride `ctx` (host-supplied, never model-facing — the
+ * Consumption/F lane); `echo.check` carries the scale-check lineage.
+ */
+export const UI_GENERATE_SCHEMA = {
+  type: 'object',
+  properties: {
+    ctx: {
+      type: 'object',
+      properties: {
+        scale: { type: 'string', minLength: 1 },
+        target: { type: 'string', minLength: 1 },
+        echo: { type: 'object', required: [], additionalProperties: true },
+      },
+      required: ['scale', 'target'],
+      additionalProperties: true,
+    },
+  },
+  required: ['ctx'],
+  additionalProperties: false,
+} as const
+
+/**
+ * The scale preflight — the admission-gate shape over the DOM fact:
+ *
+ * - rule 1 — a `render` trigger derives its `ui_scale_check` request (the
+ *   controller resolves the target's effective `b-scale` and replies
+ *   `ui_scale_check_result`, joined by the echoed id — the controller wire
+ *   carries no ctx, so the id IS the join lane);
+ * - rule 2 — the hold: the `generate` request is BLOCKED until the
+ *   correlated result re-enters, and the result is stamped INTO the
+ *   generation request's `ctx` (block + transform in one sync point — the
+ *   block is the in-flight discipline, the transform is the release).
+ *
+ * Without a browser attached the result never arrives: the preflight parks
+ * at rule 2 with its block declared — the deadlocked-ish hold visible in the
+ * frontier (pending_bids), CORRECT for the first pass (no browser, no scale
+ * fact, no generation). A foreign-echo result (a different id) never matches
+ * the listener — it joins nothing and the hold stands.
+ */
+const preflight: Thread = {
+  label: 'ui/preflight',
+  rules: [
+    {
+      transform: [
+        {
+          type: UI_RENDER_TRIGGER_TYPE,
+          detailSchema: RENDER_TRIGGER_SCHEMA,
+          query: `. as $d | { id: "${UI_SCALE_CHECK_CALL_ID}", target: ($d.target // "${UI_RENDER_TARGET}"), swap: "${UI_RENDER_SWAP}" }`,
+          target: CONTROLLER_INCOMING_MESSAGE_TYPES.ui_scale_check,
+        },
+      ],
+    },
+    {
+      block: [{ type: UI_GENERATE_EVENT_TYPE }],
+      transform: [
+        {
+          type: CONTROLLER_OUTGOING_MESSAGE_TYPES.ui_scale_check_result,
+          detailSchema: {
+            type: 'object',
+            properties: { id: { type: 'string', const: UI_SCALE_CHECK_CALL_ID } },
+            required: ['id'],
+            additionalProperties: true,
+          },
+          query: `. as $d | { ctx: { scale: $d.effectiveScale, target: $d.target, echo: { check: $d.id } } }`,
+          target: UI_GENERATE_EVENT_TYPE,
+        },
+      ],
+    },
+  ],
+}
+
 /** The ui_* producer threads — the thread set `bProgram` mounts with shell + store + systemTwo. */
-export const uiThreads: Thread[] = [designScanBoot, designTenant]
+export const uiThreads: Thread[] = [designScanBoot, designTenant, preflight]

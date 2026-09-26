@@ -23,7 +23,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { TRACE_MESSAGE_KINDS } from '../../behavioral/behavioral.constants.ts'
 import { behavioral } from '../../behavioral/behavioral.ts'
-import type { BPEvent, JsonObject, SelectionTrace, Trace } from '../../behavioral/behavioral.types.ts'
+import type { BPEvent, JsonObject, PendingBidsTrace, SelectionTrace, Trace } from '../../behavioral/behavioral.types.ts'
 import { FACULTY_MESSAGE_KINDS } from '../../faculties/faculties.constants.ts'
 import {
   ShellCancelEventSchema,
@@ -35,11 +35,14 @@ import {
 import { useSystemTwo } from '../../faculties/system-two/config.ts'
 import { useFaculty } from '../../faculties/use-faculty.ts'
 import { bProgram } from '../b-program.ts'
+import { createHost, dispatchToRuntime } from '../serve.ts'
 import {
   DESIGN_SCAN_SCRIPT,
   UI_DESIGN_COLLECTION,
   UI_DESIGN_CONTEXT_KEY,
   UI_DESIGN_SCAN_CALL_ID,
+  UI_GENERATE_EVENT_TYPE,
+  UI_SCALE_CHECK_CALL_ID,
   uiThreads,
 } from '../ui-threads.ts'
 
@@ -326,6 +329,66 @@ describe('ui threads — the design scan recipe (real run)', () => {
   })
 })
 
+// ─── Slice 2 — the scale preflight thread ─────────────────────────────────────
+
+describe('ui threads — the scale preflight', () => {
+  test('a render event requests the scale check for the target — and no generation until the result', () => {
+    const { selected, traces } = runProgram([{ type: 'render', detail: {} }])
+    const check = selected.find((s) => s.type === 'ui_scale_check')
+    expect(check).toBeDefined()
+    expect(check?.detail).toEqual({ id: 'ui-scale-check', target: 'body', swap: 'innerHTML' })
+    expect(selected.some((s) => s.type === 'generate')).toBe(false)
+    // The hold is visible in the frontier: the preflight parks with the
+    // generate block — the deadlocked-ish hold without a browser.
+    const holds = traces.filter((t): t is PendingBidsTrace => t.kind === TRACE_MESSAGE_KINDS.pending_bids)
+    expect(
+      holds.some((t) =>
+        t.threads.some((bid) => bid.label === 'ui/preflight' && bid.block?.some((b) => b.type === 'generate')),
+      ),
+    ).toBe(true)
+  })
+
+  test('a named target on the trigger rides the scale check', () => {
+    const { selected } = runProgram([{ type: 'render', detail: { target: 'main' } }])
+    const check = selected.find((s) => s.type === 'ui_scale_check')
+    expect(check?.detail).toEqual({ id: 'ui-scale-check', target: 'main', swap: 'innerHTML' })
+  })
+
+  test('the correlated result stamps the generation request — the effective scale rides its ctx', () => {
+    const { selected } = runProgram([
+      { type: 'render', detail: {} },
+      {
+        type: 'ui_scale_check_result',
+        detail: { id: 'ui-scale-check', target: 'body', effectiveScale: 's3', timeStamp: 1 },
+      },
+    ])
+    const generate = selected.find((s) => s.type === 'generate')
+    expect(generate).toBeDefined()
+    expect(generate?.detail).toEqual({
+      ctx: { scale: 's3', target: 'body', echo: { check: 'ui-scale-check' } },
+    })
+  })
+
+  test('a result with a foreign echo joins nothing — the pipeline holds for the correlated one', () => {
+    const { selected } = runProgram([
+      { type: 'render', detail: {} },
+      {
+        type: 'ui_scale_check_result',
+        detail: { id: 'other-check', target: 'body', effectiveScale: 's2', timeStamp: 1 },
+      },
+      {
+        type: 'ui_scale_check_result',
+        detail: { id: 'ui-scale-check', target: 'body', effectiveScale: 's5', timeStamp: 2 },
+      },
+    ])
+    const generates = selected.filter((s) => s.type === 'generate')
+    expect(generates).toHaveLength(1)
+    expect(generates[0]?.detail).toEqual({
+      ctx: { scale: 's5', target: 'body', echo: { check: 'ui-scale-check' } },
+    })
+  })
+})
+
 // ─── The composition mount ────────────────────────────────────────────────────
 
 const selectionsOf = (traces: Trace[]): SelectionTrace[] =>
@@ -428,6 +491,72 @@ describe('ui threads — the composition mount', () => {
       rmSync(home, { recursive: true, force: true })
     }
   })
+
+  test('a ui_event render drives the preflight end-to-end through the serve dispatcher', async () => {
+    const home = tempHome()
+    try {
+      const traces: Trace[] = []
+      const runtime = bProgram({
+        shell: shellWithHome(home),
+        store: storeWithHome(home),
+        systemTwo: useSystemTwo({ endpoints: { default: { url: 'http://unused.local' } } }),
+      })
+      runtime.useTrace((trace) => {
+        traces.push(trace)
+      })
+      const out: string[] = []
+      const host = createHost({
+        runtime,
+        input: new Response('').body as unknown as ReadableStream<Uint8Array>,
+        write: (line) => out.push(line),
+        home,
+      })
+      await host.rpc.done
+      try {
+        const generateSelected = () => selectionsOf(traces).some((t) => t.selected.type === UI_GENERATE_EVENT_TYPE)
+
+        // The browser side of the pipeline is the dispatcher itself: the
+        // ui_event's inner BPEvent is the render trigger.
+        dispatchToRuntime(runtime, {
+          method: 'ui_event',
+          params: { event: { type: 'render', detail: {} }, timeStamp: 1 },
+        })
+        await waitForTraces(traces, (s) => s.some((t) => t.selected.type === 'ui_scale_check'))
+        // The scale check went OUT as its own client notification (egress).
+        expect(out.some((line) => line.includes('"method":"ui_scale_check"'))).toBe(true)
+        // No browser reply yet — no generation request.
+        expect(generateSelected()).toBe(false)
+
+        // A foreign-echo result joins nothing.
+        dispatchToRuntime(runtime, {
+          method: 'ui_scale_check_result',
+          params: { id: 'other-check', target: 'body', effectiveScale: 's2', timeStamp: 2 },
+        })
+        await Bun.sleep(150)
+        expect(generateSelected()).toBe(false)
+
+        // The correlated reply re-enters through the same seam — the
+        // generation request carries the effective scale in its ctx.
+        dispatchToRuntime(runtime, {
+          method: 'ui_scale_check_result',
+          params: { id: UI_SCALE_CHECK_CALL_ID, target: 'body', effectiveScale: 's3', timeStamp: 3 },
+        })
+        await waitForTraces(traces, (s) =>
+          s.some(
+            (t) =>
+              t.selected.type === UI_GENERATE_EVENT_TYPE &&
+              (t.selected.detail as { ctx?: { scale?: string; target?: string } } | undefined)?.ctx?.scale === 's3',
+          ),
+        )
+        const generate = selectionsOf(traces).find((t) => t.selected.type === UI_GENERATE_EVENT_TYPE)
+        expect((generate?.selected.detail as { ctx?: { target?: string } } | undefined)?.ctx?.target).toBe('body')
+      } finally {
+        runtime.terminate()
+      }
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  }, 10_000)
 
   test('absent systemTwo there is no generation lane — the ui threads do not mount', async () => {
     const home = tempHome()

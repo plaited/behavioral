@@ -120,6 +120,22 @@ group dropping to a warning; a duplicate `##` section heading rejects the
 file (tokens and sections null, the rejection riding the warnings). A missing
 `DESIGN.md` is not an error — no tenant, no warnings.
 
+### The scale preflight
+
+A `render` trigger (the b-trigger convention — a `ui_event` whose inner BPEvent
+has type `render`, optionally carrying `detail.target`) drives the preflight
+thread: it requests `ui_scale_check` for the render target and HOLDS the
+generation request (`generate`, a thread-owned event — never a `ui_*` wire
+message) until the correlated `ui_scale_check_result` re-enters. The join is
+the echoed `id` (the controller wire carries no ctx); a result with a foreign
+id joins nothing. The effective scale and target are stamped into the
+generation request's `ctx` — host-supplied, never model-facing.
+
+Without a browser attached the reply never arrives and the hold stands —
+correct first-pass behavior: no browser, no scale fact, no generation. The
+hold is visible in the frontier (`pending_bids` traces show the preflight
+parked with its `generate` block).
+
 ## Wiring guidance
 
 - **Wiring a multi-page app**: one `Controller` per page, constructed in the
