@@ -270,6 +270,21 @@ describe('bProgram — the runtime composition', () => {
     }
   })
 
+  test('the root guard watches every space: a named-space malformed ui_* message is blocked', async () => {
+    const { runtime, traces } = startRuntime({ faculties: [] })
+    try {
+      // The same invalid ui_render, stamped into s1: the root guard's
+      // unstamped block matches every space (Direction/R) — the named-space
+      // validation gap is closed with zero new wiring.
+      runtime.trigger({ type: 'ui_render', space: 's1', detail: { id: 'r1', target: 'main', swap: 'innerHTML' } })
+      await Bun.sleep(100)
+      expect(selectionsOf(traces).some((t) => t.selected.type === 'ui_render')).toBe(false)
+      expect(traces.some((t) => t.kind === TRACE_MESSAGE_KINDS.deadlock)).toBe(true)
+    } finally {
+      runtime.terminate()
+    }
+  })
+
   describe('add_thread — the admission path', () => {
     const addThreadRequest = (id: string, thread: JsonObject, extra?: JsonObject): BPEvent => ({
       type: FACULTY_MESSAGE_KINDS.frontier_request,

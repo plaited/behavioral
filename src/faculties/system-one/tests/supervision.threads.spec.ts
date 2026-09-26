@@ -128,6 +128,32 @@ describe('supervision threads — the counting breaker', () => {
   test('the default threshold sits under the ~8.6k cascade overflow', () => {
     expect(SUPERVISION_DEFAULT_THRESHOLD).toBe(4096)
   })
+
+  test('a space-stamped loop trips the root breaker and the type blocks globally — accepted v1 bluntness', () => {
+    const { program, selected } = liveProgram()
+    mountAll(program, supervisionThreads({ watch: ['leaky-s1'], threshold: 4 }))
+    // The runaway loop lives in s1; the supervisor is root-mounted — its
+    // unstamped listeners watch every space (Direction/R).
+    mountAll(program, [{ label: 'loop', space: 's1', rules: [{ request: { type: 'leaky-s1', detail: {} } }] }])
+    program.trigger({ type: 'pump', detail: {} })
+
+    expect(count(selected, 'leaky-s1')).toBe(4)
+    const trip = selected.find((s) => s.type === SUPERVISION_EVENT_TYPES.tripped)
+    expect(trip).toBeDefined()
+    expect(trip?.detail).toEqual({ type: 'leaky-s1', count: 4, threshold: 4 })
+    expect(validateSupervisionTripped(trip?.detail)).toBe(true)
+
+    // The block is GLOBAL: the same type in ROOT is blocked too — one
+    // space's runaway loop halts the kind everywhere (v1 bluntness; a
+    // space-stamped supervisor set confines — expressible, not built).
+    mountAll(program, [{ label: 'root-loop', once: true, rules: [{ request: { type: 'leaky-s1', detail: {} } }] }])
+    program.trigger({ type: 'pump2', detail: {} })
+    expect(count(selected, 'leaky-s1')).toBe(4)
+    // ...while the REST of the program keeps running.
+    mountAll(program, [{ label: 'after', once: true, rules: [{ request: { type: 'tick', detail: {} } }] }])
+    program.trigger({ type: 'pump3', detail: {} })
+    expect(count(selected, 'tick')).toBe(1)
+  })
 })
 
 describe('supervision threads — block-then-judge', () => {
