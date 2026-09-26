@@ -38,6 +38,7 @@ import {
   readPluginThreadRegistry,
   writePluginThreadRegistry,
 } from './plugin-thread-registry.ts'
+import { uiThreads } from './ui-threads.ts'
 
 /*
  * The runtime composition — IN-PROCESS. The engine is behavioral() in the
@@ -414,6 +415,12 @@ export const bProgram = ({
   // The remote-mcp threads: the MCP layering over the rpc op — requires the
   // executor (shell), the vending leg (security), and the registry (store).
   if (has('shell') && has('security') && has('store')) facultyAddThreads(remoteMcpThreads)
+  // The ui_* producer threads: the view-generation policy — the design.md
+  // scan → store tenant, the scale preflight, and the generation lane. Requires
+  // shell (the scan recipe's executor), store (the design tenant), and
+  // systemTwo (generation); absent systemTwo there is no generation lane and
+  // the threads don't mount (the remote-mcp precedent).
+  if (has('shell') && has('store') && systemTwo !== undefined) facultyAddThreads(uiThreads)
 
   // ── The engine pump: traces out, gated events to their faculty lanes ─────
 

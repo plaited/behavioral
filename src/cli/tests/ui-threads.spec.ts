@@ -1,0 +1,458 @@
+/**
+ * The ui_* producer threads — the view-generation policy (composition
+ * territory, no process). Slice coverage here:
+ *
+ * - the design.md scan → store tenant (the boot scan recipe through the
+ *   shell `run` op, the lenient consumer-table validation, the warnings-as-
+ *   data posture, the no-lock contract: the USER's `<home>/DESIGN.md` only);
+ * - the scale preflight (block-then-stamp over `ui_scale_check`);
+ * - the generation lane (the design tenant → systemTwo → `ui_render`,
+ *   validate-before-request, the custom-properties artifact, the plain
+ *   degradation when no tenant exists);
+ * - the autoresearch loop capture is pinned in ui-capture.spec.ts.
+ *
+ * Engine-level specs drive the pure threads through the real engine (the
+ * skill-client spec pattern); composition-level specs drive the real
+ * bProgram — the serve dispatcher included — against real faculty processes
+ * and the fixture Open Responses endpoint.
+ */
+
+import { describe, expect, test } from 'bun:test'
+import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { TRACE_MESSAGE_KINDS } from '../../behavioral/behavioral.constants.ts'
+import { behavioral } from '../../behavioral/behavioral.ts'
+import type { BPEvent, JsonObject, SelectionTrace, Trace } from '../../behavioral/behavioral.types.ts'
+import { FACULTY_MESSAGE_KINDS } from '../../faculties/faculties.constants.ts'
+import {
+  ShellCancelEventSchema,
+  ShellRequestEventSchema,
+  ShellRequestResultEventSchema,
+  StoreRequestEventSchema,
+  StoreRequestResultEventSchema,
+} from '../../faculties/faculties.types.ts'
+import { useSystemTwo } from '../../faculties/system-two/config.ts'
+import { useFaculty } from '../../faculties/use-faculty.ts'
+import { bProgram } from '../b-program.ts'
+import {
+  DESIGN_SCAN_SCRIPT,
+  UI_DESIGN_COLLECTION,
+  UI_DESIGN_CONTEXT_KEY,
+  UI_DESIGN_SCAN_CALL_ID,
+  uiThreads,
+} from '../ui-threads.ts'
+
+type Selected = { type: string; detail: Record<string, unknown> | undefined }
+
+/** Drive the thread set through the real engine — the skill-client spec harness. */
+const runProgram = (events: BPEvent[]): { selected: Selected[]; traces: Trace[] } => {
+  const program = behavioral()
+  const selected: Selected[] = []
+  const traces: Trace[] = []
+  program.useTrace((trace: Trace) => {
+    traces.push(trace)
+    if (trace.kind === TRACE_MESSAGE_KINDS.selection)
+      selected.push({
+        type: (trace as SelectionTrace).selected.type,
+        detail: (trace as SelectionTrace).selected.detail as Record<string, unknown> | undefined,
+      })
+  })
+  for (const thread of uiThreads) program.addThread(thread)
+  for (const event of events)
+    program.addThread({ label: `producer/${event.type}`, once: true, rules: [{ request: event }] })
+  // addThread is inert — trigger admits one ingress event and runs one
+  // super-step; the second pump cascades transform re-entries.
+  program.trigger({ type: 'ui_threads_pump', detail: {} })
+  program.trigger({ type: 'ui_threads_pump', detail: {} })
+  return { selected, traces }
+}
+
+/** Run one scan recipe for real (bun-direct, the run-op contract) against a home. */
+const runScan = async (env: Record<string, string>) => {
+  const proc = Bun.spawn(['bun', 'run', '-'], {
+    stdin: 'pipe',
+    stdout: 'pipe',
+    stderr: 'pipe',
+    env: { ...process.env, ...env },
+  })
+  proc.stdin.write(DESIGN_SCAN_SCRIPT)
+  proc.stdin.end()
+  const stdout = await new Response(proc.stdout).text()
+  const stderr = await new Response(proc.stderr).text()
+  const exitCode = await proc.exited
+  return { stdout, stderr, exitCode }
+}
+
+// ─── Slice 1 — the design.md scan → store tenant ─────────────────────────────
+
+describe('ui threads — the design scan boot', () => {
+  test('boot requests the design-scan shell_request: the run op carries the recipe, json format', () => {
+    const { selected } = runProgram([])
+    const call = selected.find(
+      (s) => s.type === FACULTY_MESSAGE_KINDS.shell_request && s.detail?.id === UI_DESIGN_SCAN_CALL_ID,
+    )
+    expect(call).toBeDefined()
+    expect(call?.detail?.label).toBe('design-scan')
+    const input = call?.detail?.input as JsonObject
+    expect(input.op).toBe('run')
+    expect(input.format).toBe('json')
+    expect(input.script).toBe(DESIGN_SCAN_SCRIPT)
+  })
+
+  test('boot fires once — a second pump adds no duplicate call', () => {
+    const { selected } = runProgram([])
+    const calls = selected.filter(
+      (s) => s.type === FACULTY_MESSAGE_KINDS.shell_request && s.detail?.id === UI_DESIGN_SCAN_CALL_ID,
+    )
+    expect(calls).toHaveLength(1)
+  })
+})
+
+describe('ui threads — the design tenant transform', () => {
+  test('a scan result with a design context is put into the store as the design tenant', () => {
+    const context = {
+      tokens: { colors: { primary: '#101010' } },
+      sections: { Overview: 'Matte surfaces.' },
+      warnings: [],
+    }
+    const { selected } = runProgram([
+      {
+        type: FACULTY_MESSAGE_KINDS.shell_request_result,
+        detail: { id: UI_DESIGN_SCAN_CALL_ID, result: { status: 'completed', jsonData: context } },
+      },
+    ])
+    const put = selected.find((s) => s.type === FACULTY_MESSAGE_KINDS.store_request && s.detail?.op === 'put')
+    expect(put).toBeDefined()
+    const input = put?.detail?.input as JsonObject
+    expect(input.collection).toBe('design')
+    expect(input.key).toBe('context')
+    expect(input.value).toEqual(context)
+  })
+
+  test('a missing DESIGN.md (the empty scan shape) puts nothing — no tenant, no warning-spam', () => {
+    const { selected } = runProgram([
+      {
+        type: FACULTY_MESSAGE_KINDS.shell_request_result,
+        detail: {
+          id: UI_DESIGN_SCAN_CALL_ID,
+          result: { status: 'completed', jsonData: { tokens: null, sections: null, warnings: [] } },
+        },
+      },
+    ])
+    expect(selected.some((s) => s.type === FACULTY_MESSAGE_KINDS.store_request)).toBe(false)
+  })
+
+  test('a warnings-only scan result (the rejected file) still puts — the rejection rides the tenant', () => {
+    const rejected = {
+      tokens: null,
+      sections: null,
+      warnings: ['Duplicate section heading "## Colors": the file is rejected'],
+    }
+    const { selected } = runProgram([
+      {
+        type: FACULTY_MESSAGE_KINDS.shell_request_result,
+        detail: { id: UI_DESIGN_SCAN_CALL_ID, result: { status: 'completed', jsonData: rejected } },
+      },
+    ])
+    const put = selected.find((s) => s.type === FACULTY_MESSAGE_KINDS.store_request && s.detail?.op === 'put')
+    expect(put).toBeDefined()
+    const input = put?.detail?.input as JsonObject
+    expect(input.value).toEqual(rejected)
+  })
+
+  test('a malformed scan result fails the detailSchema gate — fail-closed, never partial admission', () => {
+    const malformed = { tokens: 'not-an-object', sections: null, warnings: [] }
+    const { selected } = runProgram([
+      {
+        type: FACULTY_MESSAGE_KINDS.shell_request_result,
+        detail: { id: UI_DESIGN_SCAN_CALL_ID, result: { status: 'completed', jsonData: malformed } },
+      },
+    ])
+    expect(selected.some((s) => s.type === FACULTY_MESSAGE_KINDS.store_request)).toBe(false)
+  })
+})
+
+describe('ui threads — the design scan recipe (real run)', () => {
+  test('a user-authored DESIGN.md carries the USER\u2019s tokens, not the shipped defaults', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'behavioral-ui-home-'))
+    try {
+      writeFileSync(
+        join(home, 'DESIGN.md'),
+        [
+          '---',
+          'name: Mine',
+          'colors:',
+          '  primary: "#0A0A0A"',
+          '  accent: "light-dark(#111, #EEE)"',
+          'rounded:',
+          '  md: 8px',
+          '---',
+          '',
+          '# Mine',
+          '',
+          '## Overview',
+          '',
+          'My system.',
+          '',
+          '## Iconography',
+          '',
+          'An unknown section.',
+        ].join('\n'),
+      )
+      const { stdout, stderr, exitCode } = await runScan({ BEHAVIORAL_HOME: home })
+      expect([exitCode, stderr]).toEqual([0, ''])
+      const out = JSON.parse(stdout) as {
+        tokens: Record<string, unknown> | null
+        sections: Record<string, string> | null
+        warnings: string[]
+      }
+      expect(out.tokens).toEqual({
+        name: 'Mine',
+        colors: { primary: '#0A0A0A', accent: 'light-dark(#111, #EEE)' },
+        rounded: { md: '8px' },
+      })
+      expect(out.sections).toEqual({ Overview: 'My system.', Iconography: 'An unknown section.' })
+      expect(out.warnings).toEqual([])
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  test('the shipped default DESIGN.md seeds a conforming tenant when copied', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'behavioral-ui-home-'))
+    try {
+      copyFileSync(join(import.meta.dir, '../../../skills/behavioral/assets/DESIGN.md'), join(home, 'DESIGN.md'))
+      const { stdout, stderr, exitCode } = await runScan({ BEHAVIORAL_HOME: home })
+      expect([exitCode, stderr]).toEqual([0, ''])
+      const out = JSON.parse(stdout) as {
+        tokens: Record<string, unknown> | null
+        sections: Record<string, string> | null
+        warnings: string[]
+      }
+      expect(out.tokens).not.toBe(null)
+      const tokens = out.tokens as Record<string, Record<string, unknown>>
+      // The spec-named groups validate; the unknown groups ride verbatim.
+      expect(typeof tokens.colors?.primary).toBe('string')
+      expect(typeof tokens.rounded?.md).toBe('string')
+      expect(typeof tokens.spacing?.md).toBe('string')
+      expect(typeof tokens.typography?.['display-lg']).toBe('object')
+      expect(typeof tokens.brand).toBe('object')
+      expect(out.warnings).toEqual([])
+      expect(Object.keys(out.sections ?? {}).length).toBeGreaterThan(0)
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  test('a duplicate body section rejects the file — the rejection rides the warnings', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'behavioral-ui-home-'))
+    try {
+      writeFileSync(
+        join(home, 'DESIGN.md'),
+        [
+          '---',
+          'colors:',
+          '  primary: "#101010"',
+          '---',
+          '',
+          '## Colors',
+          '',
+          'First.',
+          '',
+          '## Colors',
+          '',
+          'Second.',
+        ].join('\n'),
+      )
+      const { stdout, stderr, exitCode } = await runScan({ BEHAVIORAL_HOME: home })
+      expect([exitCode, stderr]).toEqual([0, ''])
+      const out = JSON.parse(stdout) as {
+        tokens: Record<string, unknown> | null
+        sections: Record<string, string> | null
+        warnings: string[]
+      }
+      expect(out.tokens).toBe(null)
+      expect(out.sections).toBe(null)
+      expect(out.warnings.some((w) => w.includes('Duplicate section heading') && w.includes('Colors'))).toBe(true)
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  test('a missing DESIGN.md is not an error — the empty shape, no warnings', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'behavioral-ui-home-'))
+    try {
+      const { stdout, stderr, exitCode } = await runScan({ BEHAVIORAL_HOME: home })
+      expect([exitCode, stderr]).toEqual([0, ''])
+      expect(JSON.parse(stdout)).toEqual({ tokens: null, sections: null, warnings: [] })
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  test('a malformed spec-named token group drops with a warning — lenient, the file survives', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'behavioral-ui-home-'))
+    try {
+      writeFileSync(
+        join(home, 'DESIGN.md'),
+        [
+          '---',
+          'colors:',
+          '  primary:',
+          '    nested: true',
+          'spacing:',
+          '  md: 16px',
+          '---',
+          '',
+          '## Overview',
+          '',
+          'Body.',
+        ].join('\n'),
+      )
+      const { stdout, stderr, exitCode } = await runScan({ BEHAVIORAL_HOME: home })
+      expect([exitCode, stderr]).toEqual([0, ''])
+      const out = JSON.parse(stdout) as {
+        tokens: Record<string, unknown> | null
+        sections: Record<string, string> | null
+        warnings: string[]
+      }
+      expect(out.tokens).toEqual({ spacing: { md: '16px' } })
+      expect(out.sections).toEqual({ Overview: 'Body.' })
+      expect(out.warnings.some((w) => w.includes('colors'))).toBe(true)
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+})
+
+// ─── The composition mount ────────────────────────────────────────────────────
+
+const selectionsOf = (traces: Trace[]): SelectionTrace[] =>
+  traces.filter((t): t is SelectionTrace => t.kind === TRACE_MESSAGE_KINDS.selection)
+
+const waitForTraces = async (traces: Trace[], until: (selections: SelectionTrace[]) => boolean) => {
+  const deadline = Date.now() + 8_000
+  while (!until(selectionsOf(traces))) {
+    if (Date.now() > deadline) {
+      throw new Error(`timed out waiting for traces; saw: ${JSON.stringify(traces.map((t) => t.kind))}`)
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+}
+
+/**
+ * The hermetic composition fixtures — a temp home handed to the faculty
+ * processes through their `env` overrides. Bun.spawn children see STARTUP env
+ * only (the carried TUI finding), so a runtime-set BEHAVIORAL_HOME never
+ * reaches a spawned worker; the override env is the one seam that does.
+ */
+const homeEnv = (home: string) => ({ BEHAVIORAL_HOME: home })
+
+const tempHome = () => mkdtempSync(join(tmpdir(), 'behavioral-ui-home-'))
+
+/** The shell faculty override: the default construction + the temp home env. */
+const shellWithHome = (home: string) =>
+  useFaculty({
+    command: ['bun', 'run', 'shell/faculty.ts'],
+    name: 'shell',
+    threads: [],
+    env: homeEnv(home),
+    requestSchema: ShellRequestEventSchema,
+    cancelSchema: ShellCancelEventSchema,
+    resultSchema: ShellRequestResultEventSchema,
+  })
+
+/** The store faculty override: the default construction + the temp home env. */
+const storeWithHome = (home: string) =>
+  useFaculty({
+    command: ['bun', 'run', 'store/faculty.ts'],
+    name: 'store',
+    threads: [],
+    env: homeEnv(home),
+    requestSchema: StoreRequestEventSchema,
+    cancelSchema: StoreRequestEventSchema, // no cancel; the request schema is the gate
+    resultSchema: StoreRequestResultEventSchema,
+  })
+
+describe('ui threads — the composition mount', () => {
+  test('with systemTwo on, the boot scan self-starts through the composition and the tenant lands', async () => {
+    const home = tempHome()
+    try {
+      writeFileSync(join(home, 'DESIGN.md'), '---\ncolors:\n  primary: "#0A0A0A"\n---\n\n## Overview\n\nMine.\n')
+      const traces: Trace[] = []
+      // Absent systemTwo = no generation lane = no mount, so the composition
+      // test wires the stub endpoint (lazy spawn — no process starts without
+      // a system_two_request). The shell/store overrides carry the temp home
+      // to the faculty processes (the one env seam Bun.spawn honors mid-run).
+      const runtime = bProgram({
+        shell: shellWithHome(home),
+        store: storeWithHome(home),
+        systemTwo: useSystemTwo({ endpoints: { default: { url: 'http://unused.local' } } }),
+      })
+      runtime.useTrace((trace) => {
+        traces.push(trace)
+      })
+      runtime.start()
+      try {
+        await waitForTraces(traces, (s) =>
+          s.some(
+            (t) =>
+              t.selected.type === FACULTY_MESSAGE_KINDS.shell_request &&
+              (t.selected.detail as { id?: string } | undefined)?.id === UI_DESIGN_SCAN_CALL_ID,
+          ),
+        )
+        await waitForTraces(traces, (s) =>
+          s.some((t) => {
+            if (t.selected.type !== FACULTY_MESSAGE_KINDS.store_request) return false
+            const detail = t.selected.detail as
+              | { op?: string; input?: { collection?: string; key?: string } }
+              | undefined
+            return detail?.op === 'put' && detail.input?.collection === UI_DESIGN_COLLECTION
+          }),
+        )
+        const put = selectionsOf(traces).find((t) => {
+          if (t.selected.type !== FACULTY_MESSAGE_KINDS.store_request) return false
+          const detail = t.selected.detail as { op?: string; input?: { collection?: string; key?: string } } | undefined
+          return detail?.op === 'put' && detail.input?.collection === UI_DESIGN_COLLECTION
+        })
+        const input = (put?.selected.detail as { input?: { key?: string; value?: JsonObject } } | undefined)?.input
+        expect(input?.key).toBe(UI_DESIGN_CONTEXT_KEY)
+        expect(
+          (input?.value as { tokens?: { colors?: { primary?: string } } } | undefined)?.tokens?.colors?.primary,
+        ).toBe('#0A0A0A')
+      } finally {
+        runtime.terminate()
+      }
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  test('absent systemTwo there is no generation lane — the ui threads do not mount', async () => {
+    const home = tempHome()
+    try {
+      writeFileSync(join(home, 'DESIGN.md'), '---\ncolors:\n  primary: "#0A0A0A"\n---\n\n## Overview\n\nMine.\n')
+      const traces: Trace[] = []
+      const runtime = bProgram({ shell: shellWithHome(home), store: storeWithHome(home) })
+      runtime.useTrace((trace) => {
+        traces.push(trace)
+      })
+      runtime.start()
+      try {
+        await Bun.sleep(300)
+        expect(
+          selectionsOf(traces).some(
+            (t) =>
+              t.selected.type === FACULTY_MESSAGE_KINDS.shell_request &&
+              (t.selected.detail as { id?: string } | undefined)?.id === UI_DESIGN_SCAN_CALL_ID,
+          ),
+        ).toBe(false)
+      } finally {
+        runtime.terminate()
+      }
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+})

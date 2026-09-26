@@ -89,6 +89,37 @@ What keeps the wire safe across every host:
   probabilistic admission over the schema context, with the floors as the
   deterministic backstop. Probabilistic gates never own security invariants.
 
+## The ui_* producer threads
+
+Nothing above emits `ui_*` on the agent side by itself — the view-generation
+policy is composition threads: `src/cli/ui-threads.ts`, mounted by `bProgram`
+when shell + store + systemTwo are all on (absent systemTwo there is no
+generation lane and the threads don't mount). The initial set is the thin
+vertical — ingress `ui_event` → scale preflight → generation → `ui_render` —
+refined by the autoresearch loop, not by argument.
+
+### The design tenant (DESIGN.md → store)
+
+At boot a scan recipe (the shell faculty's `run` op, the SKILL.md
+fence-slicing + `YAML.parse` contract) reads the USER'S `<home>/DESIGN.md` —
+[Google's DESIGN.md format](https://github.com/google-labs-code/design.md):
+YAML frontmatter token groups plus `##` prose sections — and lands it in the
+store as the `design` collection's `context` value:
+`{ tokens, sections, warnings }` (warnings-as-data). **The no-lock contract**:
+the shipped asset (`skills/behavioral/assets/DESIGN.md`) is an init-copied
+seed only — the runtime never reads the asset, never re-syncs it; a user who
+edits, replaces, or deletes their home file fully controls (or removes) their
+design context. The design lane is an optional input, never a gate: with no
+tenant (or a null-tokens tenant) generation proceeds plain and still produces
+a conforming `ui_render`.
+
+Consumption is lenient per the format's consumer table: unknown frontmatter
+groups and section headings ride verbatim; the spec-named groups
+(`colors`/`typography`/`rounded`/`spacing`) validate by shape with a bad
+group dropping to a warning; a duplicate `##` section heading rejects the
+file (tokens and sections null, the rejection riding the warnings). A missing
+`DESIGN.md` is not an error — no tenant, no warnings.
+
 ## Wiring guidance
 
 - **Wiring a multi-page app**: one `Controller` per page, constructed in the

@@ -155,7 +155,11 @@ entry — ingress messages → triggers, `ui_*` selections → client notificati
 traces out), `load-config.ts` (`<BEHAVIORAL_HOME>/config.ts`), `trace-consumer.ts`, and
 `plugin-thread-registry.ts` (the plugin-thread admission registry under `<home>` —
 host-local, keyed (plugin, file, content hash, space): `bProgram` mounts admitted
-snapshots at boot, decided keys never re-adjudicate).
+snapshots at boot, decided keys never re-adjudicate), and `ui-threads.ts` (the
+`ui_*` producer threads — the view-generation policy: the design.md scan →
+store tenant, the scale preflight, the generation lane → `ui_render`; mounted
+with shell + store + systemTwo, composition territory — no process, not a
+faculty).
 **`src/utils/`** — shared pure utilities.
 **`src/faculties/<faculty>/threads.ts`** — faculty threads: `shell/threads.ts`
 (the ICL threads — skill/plugin scans, catalog/manifest schema gates, links dispatchers
