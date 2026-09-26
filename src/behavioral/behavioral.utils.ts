@@ -21,10 +21,15 @@ import { ajv, validateTransformEvaluation } from './behavioral.types.ts'
 /**
  * @internal
  * Creates a checker function to determine if a given BPListener matches a CandidateBid.
+ *
+ * Space matching is SYMMETRIC: a listener matches an event iff both are
+ * unstamped (root), or both carry the same space stamp. An unstamped
+ * listener is ROOT-ONLY — never omni — so a thread governing several
+ * spaces is admitted (or wired) per space explicitly, each mount stamped.
  */
 export const isListeningFor = ({ type, detail, space, ingress }: CandidateBid) => {
   return (listener: RegisteredBPListener | RegisteredTransformListener): boolean => {
-    const spaceMatches = listener.space ? space === listener.space : true
+    const spaceMatches = listener.space || space ? space === listener.space : true
     const schemaMatches = listener.detailSchema ? detailValidators.get(listener)!(detail) : true
     const detailMatches = listener.detailMatch === false ? !schemaMatches : schemaMatches
     const ingressMatches = listener.ingressMatch === undefined || listener.ingressMatch === (ingress === true)
