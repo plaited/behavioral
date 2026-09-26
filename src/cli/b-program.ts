@@ -2,6 +2,7 @@ import { TRACE_MESSAGE_KINDS } from '../behavioral/behavioral.constants.ts'
 import { behavioral } from '../behavioral/behavioral.ts'
 import type { BPEvent, JsonObject, SelectionTrace, Thread, Trace } from '../behavioral/behavioral.types.ts'
 import { validateThread } from '../behavioral/behavioral.types.ts'
+import { behavioralHome } from '../faculties/behavioral-home.ts'
 import { FACULTY_MESSAGE_KINDS } from '../faculties/faculties.constants.ts'
 import { eventGuardEntries, facultiesThreads, guardThreads } from '../faculties/faculties.threads.ts'
 import {
@@ -18,7 +19,7 @@ import {
 import { handleFrontierMessage } from '../faculties/frontier/faculty.ts'
 import { admissionAnalysisInput, admissionReviewThreads } from '../faculties/frontier/threads.ts'
 import { bindEmit } from '../faculties/process-lane.ts'
-import { pluginThreadsThreads } from '../faculties/shell/plugin-threads.threads.ts'
+import { PLUGIN_THREADS_EVENT_TYPES, pluginThreadsThreads } from '../faculties/shell/plugin-threads.threads.ts'
 import { remoteMcpThreads } from '../faculties/shell/remote-mcp.threads.ts'
 import { rpcAuthThreads } from '../faculties/shell/rpc-auth.threads.ts'
 import { shellThreads } from '../faculties/shell/threads.ts'
@@ -32,6 +33,11 @@ import {
 } from '../faculties/system-one/threads.ts'
 import { useFaculty } from '../faculties/use-faculty.ts'
 import type { Faculty } from '../faculties.ts'
+import {
+  pluginThreadRegistryKey,
+  readPluginThreadRegistry,
+  writePluginThreadRegistry,
+} from './plugin-thread-registry.ts'
 
 /*
  * The runtime composition — IN-PROCESS. The engine is behavioral() in the
@@ -234,6 +240,29 @@ export const bProgram = ({
   // The root guard threads are always mounted, independent of the allow-list.
   facultyAddThreads(facultiesThreads)
 
+  // The plugin-thread admission registry — host-local under `<home>` (the
+  // config.ts/traces pattern, never the space-scoped store). Boot mounts the
+  // admitted SNAPSHOTs through the deferred lane (threads are pure data), so
+  // an unchanged admission never re-imports the plugin file. Independent of
+  // the supervision option — the registry gates plugin threads only.
+  const home = behavioralHome()
+  const registry = readPluginThreadRegistry(home)
+  facultyAddThreads(
+    Object.values(registry)
+      .filter((entry) => entry.status === 'admitted')
+      .map((entry) => (entry.status === 'admitted' ? entry.thread : null))
+      .filter((thread): thread is Thread => thread !== null),
+  )
+
+  // The pending plugin-threads admissions: candidate id → the registry key's
+  // dimensions (plugin, file, hash, space) + the captured failure reason.
+  // The candidate events carry everything; the composition joins at the
+  // outcome. A decided key never re-adjudicates.
+  const pluginAdmissions = new Map<
+    string,
+    { plugin: string; file: string; hash: string; space?: string; reason?: string }
+  >()
+
   type FacultyPort = { send: (event: BPEvent) => void; gate: (event: BPEvent) => boolean }
   const lanes: Record<string, FacultyPort> = {}
   const route = (types: string[], faculty: FacultyPort): void => {
@@ -307,6 +336,41 @@ export const bProgram = ({
       // write (the verdict leg, in the pump below).
       const detail = event.detail as { id?: string; op?: string; input?: { thread?: unknown } } | undefined
       if (detail?.op === 'add_thread' && typeof detail.id === 'string') {
+        // The registry gate: a decided (plugin, file, hash, space) key never
+        // re-adjudicates — an admitted key is already live (boot mounts the
+        // snapshot; a live admission mounted it this run), a rejected key
+        // stays out. The skip surfaces as its own event, never a silent drop.
+        const pluginMeta = pluginAdmissions.get(detail.id)
+        if (pluginMeta !== undefined) {
+          const decided = registry[pluginThreadRegistryKey(pluginMeta)]
+          if (decided !== undefined) {
+            addThreads([
+              {
+                label: `plugin-threads-skip:${detail.id}`,
+                once: true,
+                rules: [
+                  {
+                    request: {
+                      type: PLUGIN_THREADS_EVENT_TYPES.skipped,
+                      detail: {
+                        id: detail.id,
+                        input: {
+                          plugin: pluginMeta.plugin,
+                          file: pluginMeta.file,
+                          hash: pluginMeta.hash,
+                          ...(pluginMeta.space === undefined ? {} : { space: pluginMeta.space }),
+                          status: decided.status,
+                          ...(decided.status === 'rejected' ? { reason: decided.reason } : {}),
+                        },
+                      } as unknown as JsonObject,
+                    },
+                  },
+                ],
+              },
+            ])
+            return
+          }
+        }
         pendingAdmissions.set(
           detail.id,
           validateThread(detail.input?.thread) ? (detail.input as { thread: Thread }).thread : null,
@@ -361,6 +425,28 @@ export const bProgram = ({
   useTrace((trace: Trace) => {
     if (trace.kind !== TRACE_MESSAGE_KINDS.selection) return
     const candidate = (trace as SelectionTrace).selected
+    // The plugin-threads candidate record: the composition joins the registry
+    // key's dimensions to the add_thread id — the outcome legs below own the
+    // durable write.
+    if (candidate.type === PLUGIN_THREADS_EVENT_TYPES.candidate) {
+      const detail = candidate.detail as
+        | { id?: string; input?: { plugin?: string; file?: string; hash?: string; space?: string } }
+        | undefined
+      if (
+        typeof detail?.id === 'string' &&
+        typeof detail.input?.plugin === 'string' &&
+        typeof detail.input.file === 'string' &&
+        typeof detail.input.hash === 'string'
+      ) {
+        pluginAdmissions.set(detail.id, {
+          plugin: detail.input.plugin,
+          file: detail.input.file,
+          hash: detail.input.hash,
+          ...(detail.input.space === undefined ? {} : { space: detail.input.space }),
+        })
+      }
+      return
+    }
     // The judgment's outcome legs — the admission judgment threads' road back
     // to the pump. Only a conforming verdict with admit === true admits; a
     // rejection (or anything malformed — fail-closed) drops the pending id,
@@ -371,8 +457,27 @@ export const bProgram = ({
       if (typeof id === 'string' && pendingAdmissions.has(id)) {
         const thread = pendingAdmissions.get(id)
         pendingAdmissions.delete(id)
-        if (thread && candidate.type === ADMISSION_EVENT_TYPES.admitted && validateAdmissionVerdict(candidate.detail))
-          addThreads([thread])
+        const verdictOk =
+          candidate.type === ADMISSION_EVENT_TYPES.admitted && validateAdmissionVerdict(candidate.detail)
+        if (thread && verdictOk) addThreads([thread])
+        // The registry write — the plugin-threads decision is durable: the
+        // admitted SNAPSHOT mounts at the next boot (never re-importing the
+        // plugin file); the rejected key stays out with its reason.
+        const pluginMeta = pluginAdmissions.get(id)
+        if (pluginMeta !== undefined) {
+          pluginAdmissions.delete(id)
+          registry[pluginThreadRegistryKey(pluginMeta)] =
+            thread && verdictOk
+              ? { status: 'admitted', thread }
+              : {
+                  status: 'rejected',
+                  reason:
+                    (candidate.detail as { reason?: string } | undefined)?.reason ??
+                    pluginMeta.reason ??
+                    'admission rejected',
+                }
+          writePluginThreadRegistry(home, registry)
+        }
       }
       return
     }
@@ -381,6 +486,15 @@ export const bProgram = ({
       const id = detail?.id
       if (typeof id === 'string' && pendingAdmissions.has(id)) {
         const thread = pendingAdmissions.get(id)
+        // A plugin-threads candidate whose structural verdict failed captures
+        // the why — the registry's rejected entry carries it.
+        const pluginMeta = pluginAdmissions.get(id)
+        if (pluginMeta !== undefined && !(detail?.ok === true && detail.result?.ok === true)) {
+          pluginMeta.reason =
+            detail?.ok === false
+              ? ((detail as { error?: { message?: string } } | undefined)?.error?.message ?? 'invalid proposal')
+              : `structural verdict: ${(detail?.result as { status?: string } | undefined)?.status ?? 'failed'}`
+        }
         if (detail?.ok === true && thread && detail.result?.ok === true) {
           if (systemOne !== undefined) {
             // The judged path: the verdict is the candidate record — emit it
@@ -410,8 +524,19 @@ export const bProgram = ({
           // above own the write. The id stays registered until the outcome.
         } else {
           // The rejection is data — the requester reads the why from the
-          // verdict trace.
+          // verdict trace. A plugin-threads candidate's rejection is also
+          // DURABLE: the decided key stays out until the content changes.
+          // (The review pack's rejected event still fires after this — the
+          // pending id is gone, so the outcome leg above never re-writes.)
           pendingAdmissions.delete(id)
+          if (pluginMeta !== undefined) {
+            pluginAdmissions.delete(id)
+            registry[pluginThreadRegistryKey(pluginMeta)] = {
+              status: 'rejected',
+              reason: pluginMeta.reason ?? 'admission rejected',
+            }
+            writePluginThreadRegistry(home, registry)
+          }
         }
       }
       return

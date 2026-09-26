@@ -26,6 +26,7 @@ import { useSystemTwo } from '../../faculties/system-two/config.ts'
 import { ASSISTANT_TEXT, startOpenResponsesServer } from '../../faculties/system-two/tests/fixtures/model-server.ts'
 import { useFaculty } from '../../faculties/use-faculty.ts'
 import { bProgram } from '../b-program.ts'
+import { readPluginThreadRegistry } from '../plugin-thread-registry.ts'
 
 /**
  * bProgram — the runtime composition — through its REAL surface: the
@@ -1155,5 +1156,210 @@ describe('bProgram — the runtime composition', () => {
     } finally {
       rmSync(plugin, { recursive: true, force: true })
     }
+  })
+
+  // The plugin-thread admission registry — host-local under `<home>`
+  // (BEHAVIORAL_HOME isolates a whole harness instance, the documented
+  // mechanism): admitted decisions snapshot the validated thread, a fresh
+  // boot mounts the snapshot and never re-imports the plugin file; rejected
+  // decisions stay out, visibly; a changed content hash re-arms the proposal.
+  describe('the plugin-thread admission registry', () => {
+    const withIsolatedHome = async (run: (home: string, plugin: string) => Promise<void>): Promise<void> => {
+      const home = mkdtempSync(join(tmpdir(), 'bprogram-home-'))
+      const plugin = mkdtempSync(join(tmpdir(), 'bprogram-plugin-'))
+      const prevHome = process.env.BEHAVIORAL_HOME
+      process.env.BEHAVIORAL_HOME = home
+      try {
+        await run(home, plugin)
+      } finally {
+        process.env.BEHAVIORAL_HOME = prevHome
+        rmSync(home, { recursive: true, force: true })
+        rmSync(plugin, { recursive: true, force: true })
+      }
+    }
+
+    /** The fixture plugin thread — its requested event name identifies the snapshot version. */
+    const writePluginThread = (plugin: string, request: string): void => {
+      const dir = join(plugin, 'sh.behavioral/threads')
+      mkdirSync(dir, { recursive: true })
+      writeFileSync(
+        join(dir, 't.ts'),
+        `export const greeter = { label: 'greeter', once: true, rules: [{ request: { type: '${request}' } }] }\n`,
+      )
+    }
+
+    test('admit → a fresh boot mounts the snapshot with no plugin-file import — the OLD snapshot survives a post-admission file mutation', async () => {
+      await withIsolatedHome(async (home, plugin) => {
+        writePluginThread(plugin, 'hello')
+        // run 1: the proposal admits, the registry snapshots the validated thread
+        {
+          const { runtime, traces } = startRuntime()
+          try {
+            runtime.trigger({
+              type: PLUGIN_THREADS_EVENT_TYPES.proposal,
+              detail: { id: 'pt1', input: { plugin, file: 't.ts' } },
+            })
+            await waitForTraces(traces, () =>
+              traces.some(
+                (t) =>
+                  t.kind === TRACE_MESSAGE_KINDS.thread_added &&
+                  (t as { thread?: { label?: string } }).thread?.label === 'greeter',
+              ),
+            )
+          } finally {
+            runtime.terminate()
+          }
+        }
+        expect(Object.keys(readPluginThreadRegistry(home))).toHaveLength(1)
+        // the plugin file mutates post-admission — the content hash re-arms…
+        writePluginThread(plugin, 'hello2')
+        // …but a fresh boot mounts the SNAPSHOT: greeter is live with NO
+        // proposal, NO import shell_request — the old requested event fires.
+        {
+          const { runtime, traces } = startRuntime()
+          try {
+            await waitForTraces(traces, () =>
+              traces.some(
+                (t) =>
+                  t.kind === TRACE_MESSAGE_KINDS.thread_added &&
+                  (t as { thread?: { label?: string } }).thread?.label === 'greeter',
+              ),
+            )
+            await waitForTraces(traces, (s) => s.some((t) => t.selected.type === 'hello'))
+            expect(selectionsOf(traces).some((t) => t.selected.type === 'hello2')).toBe(false)
+            expect(
+              selectionsOf(traces).some(
+                (t) =>
+                  t.selected.type === FACULTY_MESSAGE_KINDS.shell_request &&
+                  (t.selected.detail as { label?: string } | undefined)?.label === 'plugin-threads',
+              ),
+            ).toBe(false)
+            expect(selectionsOf(traces).some((t) => t.selected.type === 'hello')).toBe(true)
+          } finally {
+            runtime.terminate()
+          }
+        }
+      })
+    })
+
+    test('reject → the registry holds it out: no boot mount, no re-adjudication — the skip is visible', async () => {
+      await withIsolatedHome(async (home, plugin) => {
+        const dir = join(plugin, 'sh.behavioral/threads')
+        mkdirSync(dir, { recursive: true })
+        // a self-sustaining request loop — the livelock guard rejects it
+        writeFileSync(
+          join(dir, 't.ts'),
+          "export const looper = { label: 'looper', rules: [{ request: { type: 'spin' } }] }\n",
+        )
+        // run 1: the proposal is rejected — the outcome is visible, the registry records why
+        {
+          const { runtime, traces } = startRuntime()
+          try {
+            runtime.trigger({
+              type: PLUGIN_THREADS_EVENT_TYPES.proposal,
+              detail: { id: 'pt1', input: { plugin, file: 't.ts' } },
+            })
+            await waitForTraces(traces, (s) => s.some((t) => t.selected.type === ADMISSION_EVENT_TYPES.rejected))
+          } finally {
+            runtime.terminate()
+          }
+        }
+        const registry = readPluginThreadRegistry(home)
+        const entry = Object.values(registry)[0]
+        expect(entry?.status).toBe('rejected')
+        if (entry?.status === 'rejected') expect(entry.reason.length).toBeGreaterThan(0)
+        // a fresh boot does NOT mount it
+        {
+          const { runtime, traces } = startRuntime()
+          try {
+            await Bun.sleep(300)
+            expect(
+              traces.some(
+                (t) =>
+                  t.kind === TRACE_MESSAGE_KINDS.thread_added &&
+                  (t as { thread?: { label?: string } }).thread?.label === 'looper',
+              ),
+            ).toBe(false)
+            // a re-proposal of the same content stays out: no import, no
+            // add_thread to the frontier — the skip surfaces as its own event
+            runtime.trigger({
+              type: PLUGIN_THREADS_EVENT_TYPES.proposal,
+              detail: { id: 'pt2', input: { plugin, file: 't.ts' } },
+            })
+            await waitForTraces(traces, (s) => s.some((t) => t.selected.type === PLUGIN_THREADS_EVENT_TYPES.skipped))
+            await Bun.sleep(300)
+            // the import DID re-run (the hash is only known after the worker
+            // import — the proposal act is the designed import moment), but
+            // the decided key never reaches the frontier analysis: no verdict
+            // comes back for the re-proposal's add_thread id
+            expect(
+              selectionsOf(traces).some(
+                (t) =>
+                  t.selected.type === FACULTY_MESSAGE_KINDS.frontier_request_result &&
+                  (t.selected.detail as { id?: string } | undefined)?.id === 'pt2-add-0',
+              ),
+            ).toBe(false)
+          } finally {
+            runtime.terminate()
+          }
+        }
+      })
+    })
+
+    test('a changed hash re-arms the proposal — the new thread code is a candidate again', async () => {
+      await withIsolatedHome(async (home, plugin) => {
+        writePluginThread(plugin, 'hello')
+        {
+          const { runtime, traces } = startRuntime()
+          try {
+            runtime.trigger({
+              type: PLUGIN_THREADS_EVENT_TYPES.proposal,
+              detail: { id: 'pt1', input: { plugin, file: 't.ts' } },
+            })
+            await waitForTraces(traces, () =>
+              traces.some(
+                (t) =>
+                  t.kind === TRACE_MESSAGE_KINDS.thread_added &&
+                  (t as { thread?: { label?: string } }).thread?.label === 'greeter',
+              ),
+            )
+          } finally {
+            runtime.terminate()
+          }
+        }
+        // the plugin updates — the content hash changes, the proposal re-arms
+        writePluginThread(plugin, 'hello2')
+        {
+          const { runtime, traces } = startRuntime()
+          try {
+            runtime.trigger({
+              type: PLUGIN_THREADS_EVENT_TYPES.proposal,
+              detail: { id: 'pt2', input: { plugin, file: 't.ts' } },
+            })
+            // the import re-runs in the worker (a new shell_request)…
+            await waitForTraces(traces, (s) =>
+              s.some(
+                (t) =>
+                  t.selected.type === FACULTY_MESSAGE_KINDS.shell_request &&
+                  (t.selected.detail as { label?: string } | undefined)?.label === 'plugin-threads',
+              ),
+            )
+            // …and the NEW code proposes add_thread again — never silently admitted
+            await waitForTraces(traces, (s) =>
+              s.some(
+                (t) =>
+                  t.selected.type === FACULTY_MESSAGE_KINDS.frontier_request &&
+                  (t.selected.detail as { op?: string } | undefined)?.op === 'add_thread',
+              ),
+            )
+            await waitForTraces(traces, (s) => s.some((t) => t.selected.type === 'hello2'))
+            // the registry now holds both hashes — independent decisions
+            expect(Object.keys(readPluginThreadRegistry(home))).toHaveLength(2)
+          } finally {
+            runtime.terminate()
+          }
+        }
+      })
+    })
   })
 })

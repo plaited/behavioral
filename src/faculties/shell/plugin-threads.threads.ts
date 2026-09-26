@@ -49,6 +49,8 @@ export const PLUGIN_THREADS_EVENT_TYPES = {
   candidate: 'plugin_threads_candidate',
   pending: 'plugin_threads_pending',
   failed: 'plugin_threads_failed',
+  /** The registry's skip surface — a decided (plugin, file, hash, space) key never re-adjudicates; the composition emits this. */
+  skipped: 'plugin_threads_skipped',
 } as const
 
 /** The reverse-domain namespace dir holding behavioral-specific plugin threads (agent-plugins §8.2). */
