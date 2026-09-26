@@ -1,19 +1,15 @@
-# UI Layer — Controller and html tools
+# UI Layer — the Controller
 
 Reference for an agent assisting an engineer in wiring up the UI layer of a
-behavioral app. There are two surfaces, both driven by a
-[behavioral program](./behavioral.md)'s `selection` listeners (the action
-channel):
+behavioral app. The live surface is the browser **`Controller`** — it applies
+`ui_*` wire messages to a **live DOM** over a WebSocket (or an injected
+`Transport`). It is driven by a [behavioral program](./behavioral.md)'s
+`selection` listeners (the action channel).
 
-- **Browser `Controller`** — applies `render`/`attrs` (plus
-  `dispatch_custom_event`/`navigate`/`scale_check`) to a **live DOM** over a
-  WebSocket.
-- **Stateless html tools** — apply `render`/`attrs` to an **HTML string** in
-  memory, in a Bun process (SSR).
-
-There is **no `Renderer` class** — SSR is stateless html-in / html-out tools.
-The two surfaces share the same `render`/`attrs` vocabulary; the substrate
-(live DOM vs string) is the variable.
+The compiled SSR html tools are **retired** (the ICL conversion removed the
+fleet). There is **no `Renderer` class** and no server-side html surface — the
+`ui_*` vocabulary's server side is emitted by the agent's behavioral program,
+and its browser side is the Controller below.
 
 ## Browser Controller
 
@@ -34,6 +30,7 @@ new Controller({
   onPageSwap,            // page swap callback
   onPageHide,            // pagehide callback
   onPageShow,            // pageshow callback
+  transport,             // optional injected Transport (default: built-in WebSocket carrier)
 })
 ```
 
@@ -41,34 +38,46 @@ new Controller({
 
 This is the load-bearing concept: a behavioral page is **push-based**, not
 pull-based. The controller does not fetch state and render client-side; it
-opens a WebSocket to its serving agent and applies server-pushed messages:
+opens a carrier to its serving agent and applies server-pushed `ui_*`
+messages:
 
-| Server → browser (`CONTROLLER_INCOMING_MESSAGE_TYPES`) | What the Controller does |
-|----------------------------------------------------------|---------------------------|
-| `render` | Apply HTML to `[b-target]` elements per the `swap` mode |
-| `attrs` | Set/remove attributes on `[b-target]` elements |
-| `dispatch_custom_event` | Fire a `CustomEvent` on the target |
-| `navigate` | Navigate the page (URL change) |
-| `scale_check` | Resolve the effective `b-scale` for a target and reply with `scale_check_result` |
+| Agent → browser (`CONTROLLER_INCOMING_MESSAGE_TYPES`) | What the Controller does |
+|-------------------------------------------------------|--------------------------|
+| `ui_render` | Apply HTML to `[b-target]` elements per the `swap` mode |
+| `ui_attrs` | Set/remove attributes on `[b-target]` elements |
+| `ui_dispatch_custom_event` | Fire a `CustomEvent` on the target |
+| `ui_navigate` | Navigate the page (URL change) |
+| `ui_scale_check` | Resolve the effective `b-scale` for a target and reply with `ui_scale_check_result` |
 
-User interactions and page lifecycle emit messages back to the agent:
+User interactions and page lifecycle emit `ui_*` messages back to the agent:
 
 | Browser → agent (`CONTROLLER_OUTGOING_MESSAGE_TYPES`) | When |
-|---------------------------------------------------------|------|
+|-------------------------------------------------------|------|
 | `ui_event` | A `b-trigger` declaration fired (DOM event → BP event with `getAttributes` detail) |
-| `snapshot` | A page lifecycle event (`pagereveal`/`pageswap`/`pagehide`/`pageshow`) — serialized HTML via `getHTML({ serializableShadowRoots: true })` |
-| `success` | A server message was applied successfully (carries the request `id`) |
-| `error` | A message handler threw (carries `name`, `error`, `stack`, `id`) |
-| `scale_check_result` | Reply to a `scale_check` message (carries `effectiveScale`) |
-| `form_submit` | A `b-form` form POST completed |
+| `ui_snapshot` | A page lifecycle event (`pagereveal`/`pageswap`/`pagehide`/`pageshow`) — serialized HTML via `getHTML({ serializableShadowRoots: true })` |
+| `ui_success` | A server message was applied successfully (carries the request `id`) |
+| `ui_error` | A message handler threw (carries `name`, `error`, `stack`, `id`) |
+| `ui_scale_check_result` | Reply to a `ui_scale_check` message (carries `effectiveScale`) |
+| `ui_form_submit` | A `b-form` form POST completed |
 
 The agent — running a behavioral program — is the source of truth for what
 the page shows; the Controller is the DOM applier.
 
-## Server-side html (the floors + classifier story)
+The kind names are `keyMirror` constants in
+`src/controller/controller.constants.ts`
+(`CONTROLLER_INCOMING_MESSAGE_TYPES` / `CONTROLLER_OUTGOING_MESSAGE_TYPES`).
 
-The compiled SSR html tools are **retired** (HTMLRewriter was Bun-only, dead
-in both target hosts; the ICL conversion removed the fleet). What survives:
+### The schema home
+
+`CONTROLLER_DETAIL_SCHEMAS` (`src/controller/controller.schemas.ts`) maps
+every `ui_*` kind to its AJV detail schema — the guard/reflection home. The
+host threads import it (`validateControllerDetail`) to gate controller
+messages at the composition boundary. The browser bundle **never** carries
+the compiled validators — it ships only the deterministic floors below.
+
+### The floors + classifier story
+
+What keeps the wire safe across every host:
 
 - **Deterministic floors** — `isInvalidTrigger` / `detectXssVectors`
   (`src/controller/controller.utils.ts`): hardcoded invariants (empty
@@ -77,15 +86,15 @@ in both target hosts; the ICL conversion removed the fleet). What survives:
 - **Schemas as data** — `src/controller/html.schemas.ts` + `css.schemas.ts`:
   pure JSON-schema data (the classifier's context, not compiled validators).
 - **The classifier ceiling** — the System One/Jev gate story:
-  
-  — probabilistic admission over the schema context, with the floors as the
+  probabilistic admission over the schema context, with the floors as the
   deterministic backstop. Probabilistic gates never own security invariants.
 
-## When to use which
+## Wiring guidance
 
 - **Wiring a multi-page app**: one `Controller` per page, constructed in the
-  page's `<head>` async module. The WebSocket URL is derived from the page's
-  origin (`location.href.replace(/^http/, 'ws')`).
+  page's `<head>` async module. The default carrier derives the WebSocket URL
+  from the page's origin (`location.href.replace(/^http/, 'ws')`); pass
+  `transport` to inject a different one.
 - **Binding interactive elements**: declare `b-trigger` and `b-form`
   attributes in the DOM; the Controller wires them to emit `ui_event`
   messages on user interaction. No manual `addEventListener` in your code.
@@ -94,34 +103,30 @@ in both target hosts; the ICL conversion removed the fleet). What survives:
   sockets, timers) on unload and bfcache freeze; the Controller does **not**
   force-close the socket on `pagehide` so a queued snapshot can flush during
   teardown.
-- **SSR / pre-render**: a behavioral-program `selection` listener calls the
-  html tools directly to produce an HTML string for an initial page load or
-  snapshot — see [html](../../behavioral-tools/references/html.md) for the tool
-  surface.
-- **Scale pre-flight**: the agent sends `scale_check` (browser) or calls
-  `html-scale-check` (SSR) to learn the effective `b-scale` a render target
-  lives in before generating content.
+- **Scale pre-flight**: the agent sends `ui_scale_check` before generating
+  content to learn the effective `b-scale` a render target lives in; the
+  Controller replies with `ui_scale_check_result` carrying `effectiveScale`.
 
 ## A common wiring mistake to avoid
 
 Calling `Controller` methods directly to mutate the DOM. The Controller is a
-**message applier**, not a DOM API — `render`/`attrs`/`dispatch_custom_event`/
-`navigate` arrive as server-pushed messages and are dispatched internally,
-not called by your code. If you find yourself reaching for a Controller method
-to change the page, the correct path is to emit a `ui_event` (via a
-`b-trigger`/`b-form` declaration) and let the agent's behavioral program
-respond with a server-pushed `render`. The DOM is downstream of the agent,
-not the other way around.
+**message applier**, not a DOM API — `ui_render`/`ui_attrs`/
+`ui_dispatch_custom_event`/`ui_navigate` arrive as server-pushed messages and
+are dispatched internally, not called by your code. If you find yourself
+reaching for a Controller method to change the page, the correct path is to
+emit a `ui_event` (via a `b-trigger`/`b-form` declaration) and let the
+agent's behavioral program respond with a server-pushed `ui_render`. The DOM
+is downstream of the agent, not the other way around.
 
 The second common mistake: expecting the WebSocket to be manually managed.
-The Controller handles connect, retry (with bounded backoff on codes 1006/
-1012/1013, max 3 retries), and message queuing during disconnect internally.
-Do not wrap it in your own reconnection logic — that duplicates the built-in
-faculty and races with the Controller's own retry.
+The Controller handles connect, retry (bounded backoff on close codes
+1006/1012/1013 — max 3 attempts, jittered exponential delay capped at
+`UI_CORE_MAX_RETRIES` in `controller.constants.ts`), and message queuing
+during disconnect (the queue flushes on reconnect) internally. Do not wrap it
+in your own reconnection logic — that races with the Controller's built-in
+retry.
 
 ## See also
 
 - [behavioral](./behavioral.md) — the runtime whose `selection` listeners
-  drive both surfaces (the action channel).
-- [html](../../behavioral-tools/references/html.md) — the SSR tool surface:
-  I/O contracts, dispatch examples, gotchas.
+  drive the agent side of the `ui_*` wire (the action channel).
