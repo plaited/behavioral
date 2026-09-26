@@ -489,6 +489,36 @@ describe('controller: error reporting & success acks', () => {
   }, 15000)
 })
 
+describe('controller: style handler', () => {
+  test('ui_style applies the scoped css — the subtree resolves the custom property, idempotently', async () => {
+    await using view = await open('/test/style-test')
+    // The scoped style applied: the descendant inherits the custom
+    // property from the @scope root (the b-target element).
+    const color = await waitFor(async () => {
+      const c = await view.evaluate<string | undefined>(
+        "getComputedStyle(document.getElementById('styled')).getPropertyValue('--design-colors-primary')",
+      )
+      return c && c.trim() !== '' ? c : undefined
+    })
+    expect(color.trim()).toBe('rebeccapurple')
+    // Idempotent: two identical messages replaced, never stacked — one
+    // style element per target, its text the css verbatim.
+    const applied = await view.evaluate<string>(
+      "JSON.stringify(Array.from(document.querySelectorAll('style')).map((s) => s.textContent))",
+    )
+    const styles = JSON.parse(applied) as string[]
+    const scoped = styles.filter((t) => t.includes('@scope ([b-target="main"])'))
+    expect(scoped).toHaveLength(1)
+    // Scope isolation: the style lives OUTSIDE the target subtree (head
+    // adoption or body-level), yet applies only within it — a sibling
+    // element resolves nothing.
+    const sibling = await view.evaluate<string>(
+      "document.body.style.getPropertyValue('--design-colors-primary') || getComputedStyle(document.body).getPropertyValue('--design-colors-primary')",
+    )
+    expect(sibling.trim()).toBe('')
+  }, 20_000)
+})
+
 describe('controller: scaleCheck handler', () => {
   test('into target without own b-scale inherits nearest ancestor scale', async () => {
     await using view = await open('/test/scale-check-test')

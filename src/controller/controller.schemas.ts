@@ -17,6 +17,7 @@ import type {
   RenderMessage,
   ScaleCheckMessage,
   ScaleCheckResultMessage,
+  StyleMessage,
   SuccessMessage,
   UiEventMessage,
 } from './controller.types.ts'
@@ -172,6 +173,17 @@ export const ErrorDetailSchema = {
   additionalProperties: false,
 } as unknown as JSONSchemaType<ErrorMessage['detail']>
 
+export const StyleDetailSchema: JSONSchemaType<StyleMessage['detail']> = {
+  type: 'object',
+  properties: {
+    id: { type: 'string' },
+    target: { type: 'string' },
+    css: { type: 'string' },
+  },
+  required: ['id', 'target', 'css'],
+  additionalProperties: false,
+}
+
 export const ScaleCheckResultDetailSchema: JSONSchemaType<ScaleCheckResultMessage['detail']> = {
   type: 'object',
   properties: {
@@ -191,6 +203,7 @@ export const CONTROLLER_DETAIL_SCHEMAS = {
   [CONTROLLER_INCOMING_MESSAGE_TYPES.ui_navigate]: NavigateDetailSchema,
   [CONTROLLER_INCOMING_MESSAGE_TYPES.ui_dispatch_custom_event]: DispatchCustomEventDetailSchema,
   [CONTROLLER_INCOMING_MESSAGE_TYPES.ui_scale_check]: ScaleCheckDetailSchema,
+  [CONTROLLER_INCOMING_MESSAGE_TYPES.ui_style]: StyleDetailSchema,
   [CONTROLLER_OUTGOING_MESSAGE_TYPES.ui_event]: UiEventDetailSchema,
   [CONTROLLER_OUTGOING_MESSAGE_TYPES.ui_form_submit]: FormSubmitDetailSchema,
   [CONTROLLER_OUTGOING_MESSAGE_TYPES.ui_snapshot]: SnapshotDetailSchema,

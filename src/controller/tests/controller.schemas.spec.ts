@@ -30,6 +30,15 @@ const samples: Array<[string, unknown, unknown]> = [
     { id: 's1', target: 'slot', effectiveScale: 's3', timeStamp: 1 },
     { id: 's1', target: 'slot', effectiveScale: 'nope', timeStamp: 1 },
   ],
+  [
+    'ui_style',
+    {
+      id: 'st1',
+      target: 'main',
+      css: '@scope ([b-target="main"]) {\n  :scope {\n    --design-colors-primary: #0A0A0A;\n  }\n}',
+    },
+    { id: 'st1', target: 'main' },
+  ],
 ]
 
 describe('controller detail schemas', () => {
@@ -45,6 +54,7 @@ describe('controller detail schemas', () => {
       'ui_scale_check',
       'ui_scale_check_result',
       'ui_snapshot',
+      'ui_style',
       'ui_success',
     ])
   })

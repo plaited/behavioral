@@ -103,6 +103,15 @@ const runPipelineSession = async () => {
   await host.rpc.done
   /** Trigger one render ingress and (unless held) reply to ITS minted scale check. */
   const drive = async (opts: { replyScale?: boolean; effectiveScale?: string } = {}): Promise<string> => {
+    // The boot tenant must land before the trigger (the pipeline's store get
+    // races the boot scan's put otherwise — a null tenant styles nothing).
+    await waitForTraces(traces, (s) =>
+      s.some((t) => {
+        if (t.selected.type !== 'store_request') return false
+        const detail = t.selected.detail as { op?: string; input?: { collection?: string } } | undefined
+        return detail?.op === 'put' && detail.input?.collection === 'design'
+      }),
+    )
     const before = selectionsOf(traces).filter((t) => t.selected.type === 'ui_scale_check').length
     dispatchToRuntime(runtime, {
       method: 'ui_event',
@@ -161,7 +170,7 @@ describe('ui capture — the pipeline-keyed raw run consumer', () => {
       // mint traces arrive before the ingress selection trace — lands the
       // legs as reentries at 0).
       const reentryLabels = run.reentries.map((r) => r.thread.label)
-      expect(reentryLabels.filter((l) => l.startsWith(`ui/pipeline:${run.pipeline}/`)).length).toBe(5)
+      expect(reentryLabels.filter((l) => l.startsWith(`ui/pipeline:${run.pipeline}/`)).length).toBe(6)
       // Round-trips: pure data, JSON-serializable, structurally intact.
       expect(JSON.parse(JSON.stringify(run.threads)) as unknown[]).toEqual(run.threads)
       expect(JSON.parse(JSON.stringify(run.reentries)) as unknown[]).toEqual(run.reentries)
@@ -173,7 +182,11 @@ describe('ui capture — the pipeline-keyed raw run consumer', () => {
       expect(kinds).toContain('ui_scale_check_result')
       expect(kinds).toContain('generate')
       expect(kinds).toContain('system_two_request')
+      // The scoped style rides the run (the serving seam's egress, by
+      // lineage: the `<pid>-style` id routes it).
+      expect(kinds).toContain('ui_style')
       expect(kinds.at(-1)).toBe('ui_render')
+      expect(kinds.indexOf('ui_style')).toBeLessThan(kinds.indexOf('ui_render'))
       // NO unrelated faculty traffic: the boot's design-store puts (tenant,
       // artifact) are NOT in the run — lineage, not time window.
       const storeKinds = run.messages

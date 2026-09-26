@@ -48,6 +48,7 @@ messages:
 | `ui_dispatch_custom_event` | Fire a `CustomEvent` on the target |
 | `ui_navigate` | Navigate the page (URL change) |
 | `ui_scale_check` | Resolve the effective `b-scale` for a target and reply with `ui_scale_check_result` |
+| `ui_style` | Apply scoped CSS (`@scope` block, verbatim) to the target's subtree — one idempotent style element per target |
 
 User interactions and page lifecycle emit `ui_*` messages back to the agent:
 
@@ -97,10 +98,10 @@ when shell + store + systemTwo are all on (absent systemTwo there is no
 generation lane and the threads don't mount). The shape is a dispatcher +
 per-trigger pipelines: a STANDING set (the boot design scan, the tenant +
 artifact compile, the render gate) plus, on each `render` ingress, one MINTED
-pipeline — `uiPipelineThreads({ id, detail })`, five once-threads added by the
+pipeline — `uiPipelineThreads({ id, detail })`, six once-threads added by the
 composition's host leg (b-program's pump, the admission-path precedent) — so
 concurrent triggers interleave without dropping and every correlation id is
-per-trigger (`<id>-scale`/`-tenant`/`-gen`/`-render`, label
+per-trigger (`<id>-scale`/`-tenant`/`-gen`/`-render`/`-style`, label
 `ui/pipeline:<id>/<leg>`). The vertical is the same — ingress `ui_event` →
 scale preflight → generation → `ui_render` — refined by the autoresearch
 loop, not by argument.
@@ -178,9 +179,23 @@ The custom-properties artifact: a tenant-bearing scan also compiles the
 tokens to a stylesheet (`--design-<token-path>: <value>;` — `light-dark()`
 values pass through verbatim) stored as the `design` collection's `artifact`
 value, compiled from the TENANT only, never from the shipped asset. Generated
-html references the properties, not literals. MINIMAL: the store is the v1
-home; the serving seam (a host stylesheet route or inlined `<style>`) is a
-named later iteration — the loop earns it.
+html references the properties, not literals.
+
+The artifact's serving seam is the `ui_style` egress message: a token-bearing
+pipeline composes the SAME declarations wrapped in an `@scope` block whose
+scope root is the render target's `b-target` selector —
+`@scope ([b-target=…]) { :scope { --design-…: …; } }` — so the properties
+live on the target and its subtree inherits them, without leaking to the
+page (scoping proximity; `:scope` carries the declarations). The browser
+applies the css VERBATIM into one `data-b-style`-keyed style element per
+target (idempotent replace, never stack). Baseline 2026 — Chrome/Edge 118+,
+Firefox 146+, Safari 26.4; an older engine drops the block silently, the
+same plain degradation as no tenant. Emitted BEFORE the `ui_render` when a
+token-bearing tenant exists; plain (no tenant, no tokens) emits nothing. The
+css is jq-deterministic from validated tenant tokens — no model in the loop,
+no standing gate (the render gate exists for MODEL output). MINIMAL: the
+`=` selector match only (match variants ride a named need); the store
+artifact remains the durable record for other consumers.
 
 ### The autoresearch loop
 

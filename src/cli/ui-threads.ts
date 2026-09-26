@@ -1,7 +1,8 @@
 /**
  * The ui_* producer threads — the view-generation policy that turns browser
  * ingress (`ui_event`, `ui_snapshot`, `ui_form_submit`) into engine-requested
- * egress (`ui_render`, `ui_attrs`, `ui_navigate`, `ui_scale_check`).
+ * egress (`ui_render`, `ui_attrs`, `ui_navigate`, `ui_scale_check`,
+ * `ui_style`).
  *
  * @remarks
  * Composition territory (no process, not a faculty) — mounted by `bProgram`
@@ -19,7 +20,7 @@
  * The pipeline is PER-TRIGGER: the composition's host leg (b-program's pump)
  * mints one `uiPipelineThreads({ id, detail })` set per `render` ingress —
  * every correlation id is per-trigger (`<id>-scale`/`-tenant`/`-gen`/
- * `-render`), so concurrent pipelines interleave without dropping, and the
+ * `-render`/`-style`), so concurrent pipelines interleave without dropping, and the
  * trigger's detail rides the generate request (the user's content,
  * model-facing by right) into the systemTwo user message.
  *
@@ -405,6 +406,15 @@ const GENERATION_INSTRUCTIONS =
  *   and the prose rides system context; the trigger's detail composes the
  *   user message; with NO tenant the request composes plain — the design
  *   lane is an optional input, never a gate.
+ * - **style-issue** — a token-bearing tenant ALSO composes the scoped
+ *   style: the compiled `--design-*` declarations wrapped in an `@scope`
+ *   block rooted on the render target's `b-target` selector (`:scope`
+ *   carries the properties; the subtree inherits them — Baseline 2026,
+ *   older engines drop the block, plain degradation). The css is
+ *   jq-deterministic from validated tenant tokens — no model in the loop, no
+ *   standing gate needed (the render gate exists for MODEL output); emitted
+ *   before the render, idempotent per target on the browser side. MINIMAL:
+ *   the `=` selector match only (match variants ride a named need).
  * - **render-compose** — the model reply composes the render draft: id,
  *   target, and swap are host-stamped (the model is never trusted with the
  *   envelope); only the html is model-composed. The standing render-gate
@@ -505,6 +515,60 @@ export const uiPipelineThreads = ({
     ],
   }
 
+  const styleIssue: Thread = {
+    label: `ui/pipeline:${id}/style-issue`,
+    once: true,
+    rules: [
+      {
+        transform: [
+          {
+            type: FACULTY_MESSAGE_KINDS.store_request_result,
+            detailSchema: {
+              type: 'object',
+              properties: {
+                id: { type: 'string', const: tenantId },
+                ok: { type: 'boolean', const: true },
+                result: {
+                  type: 'object',
+                  properties: {
+                    value: {
+                      type: 'object',
+                      properties: {
+                        // Only a TOKEN-BEARING tenant styles — the plain
+                        // lane (null tenant, null tokens) emits nothing.
+                        tokens: { type: 'object', required: [], additionalProperties: true },
+                      },
+                      required: ['tokens'],
+                      additionalProperties: true,
+                    },
+                  },
+                  required: ['value'],
+                  additionalProperties: true,
+                },
+                ctx: {
+                  type: 'object',
+                  properties: { echo: { type: 'object', required: [], additionalProperties: true } },
+                  required: ['echo'],
+                  additionalProperties: true,
+                },
+              },
+              required: ['id', 'ok', 'result', 'ctx'],
+              additionalProperties: true,
+            },
+            query:
+              `. as $d | ($d.ctx.echo) as $e | ($d.result.value.tokens) as $t` +
+              ` | {` +
+              `    id: "${id}-style",` +
+              `    target: $e.ctx.target,` +
+              `    css: ("@scope ([b-target=\\"" + $e.ctx.target + "\\"]) {\\n  :scope {\\n" + ([ ($t | paths(scalars)) as $p | "    --design-" + ($p | join("-")) + ": " + ($t | getpath($p) | tostring) + ";" ] | join("\\n")) + "\\n  }\\n}"),` +
+              `  }`,
+            target: CONTROLLER_INCOMING_MESSAGE_TYPES.ui_style,
+          },
+        ],
+      },
+    ],
+  }
+
   const generationCompose: Thread = {
     label: `ui/pipeline:${id}/generation-compose`,
     once: true,
@@ -591,7 +655,7 @@ export const uiPipelineThreads = ({
     ],
   }
 
-  return [scaleIssue, scaleJoin, contextIssue, generationCompose, renderCompose]
+  return [scaleIssue, scaleJoin, contextIssue, styleIssue, generationCompose, renderCompose]
 }
 
 /**

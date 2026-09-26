@@ -127,6 +127,7 @@ export const CONTROLLER_INCOMING_MESSAGE_TYPES = keyMirror(
   'ui_dispatch_custom_event',
   'ui_navigate',
   'ui_scale_check',
+  'ui_style',
 )
 
 /**

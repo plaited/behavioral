@@ -158,9 +158,9 @@ host-local, keyed (plugin, file, content hash, space): `bProgram` mounts admitte
 snapshots at boot, decided keys never re-adjudicate), and `ui-threads.ts` (the
 `ui_*` producer threads — the view-generation policy: the standing design.md
 scan → store tenant + artifact compile + render gate, plus the per-trigger
-pipeline factory `uiPipelineThreads` (five once-threads minted by b-program's
+pipeline factory `uiPipelineThreads` (six once-threads minted by b-program's
 pump on each `render` ingress — scale preflight, generation, `ui_render`,
-every correlation id per-trigger); mounted with shell + store + systemTwo,
+the scoped `ui_style` serving seam, every correlation id per-trigger); mounted with shell + store + systemTwo,
 composition territory — no process, not a faculty), and `ui-capture.ts` (the
 autoresearch loop's capture side — the in-process lineage-keyed raw run
 consumer + the frontier replay builder; the socket host wires its file sink

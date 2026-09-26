@@ -510,6 +510,41 @@ describe('ui threads — the per-trigger generation lane', () => {
     expect(content).toContain('a panel')
   })
 
+  test('the style-issue leg composes a scoped ui_style from the tenant — @scope root on the target', () => {
+    const { selected } = pipelineRun('ui-x1', { message: 'a panel' }, [
+      scaleReply('ui-x1'),
+      tenantStoreResult('ui-x1', {
+        tokens: { colors: { primary: 'light-dark(#755576, #E2BAE0)' } },
+        sections: null,
+        warnings: [],
+      }),
+    ])
+    const style = selected.find((s) => s.type === 'ui_style')
+    expect(style).toBeDefined()
+    expect(style?.detail?.id).toBe('ui-x1-style')
+    expect(style?.detail?.target).toBe('body')
+    const css = style?.detail?.css as string
+    // The @scope root is the render target's b-target selector; :scope
+    // carries the custom properties (the subtree inherits them).
+    expect(css).toContain('@scope ([b-target="body"])')
+    expect(css).toContain(':scope')
+    expect(css).toContain('--design-colors-primary: light-dark(#755576, #E2BAE0);')
+  })
+
+  test('plain degradation — a null tenant or tokenless tenant emits no ui_style', () => {
+    const tokenless = pipelineRun('ui-x1', { message: 'a panel' }, [
+      scaleReply('ui-x1'),
+      tenantStoreResult('ui-x1', { tokens: null, sections: { Overview: 'x' }, warnings: [] }),
+    ])
+    expect(tokenless.selected.some((s) => s.type === 'ui_style')).toBe(false)
+
+    const tenantless = pipelineRun('ui-x2', { message: 'a panel' }, [
+      scaleReply('ui-x2'),
+      tenantStoreResult('ui-x2', null),
+    ])
+    expect(tenantless.selected.some((s) => s.type === 'ui_style')).toBe(false)
+  })
+
   test('named provider/modelId reach the composed systemTwo request — the config seam', () => {
     const program = behavioral()
     const selected: Selected[] = []
@@ -921,6 +956,69 @@ describe('ui threads — the composition mount', () => {
     }
   }, 15_000)
 
+  test('the artifact serving seam: ui_style egresses before ui_render with a tenant, never plain', async () => {
+    const home = tempHome()
+    try {
+      writeFileSync(join(home, 'DESIGN.md'), '---\ncolors:\n  primary: "#0A0A0A"\n---\n\n## Overview\n\nMine.\n')
+      const server = await startOpenResponsesServer()
+      const traces: Trace[] = []
+      const runtime = bProgram({
+        shell: shellWithHome(home),
+        store: storeWithHome(home),
+        systemTwo: useSystemTwo({ endpoints: { default: { url: server.url } } }),
+      })
+      runtime.useTrace((trace) => {
+        traces.push(trace)
+      })
+      const out: string[] = []
+      const host = createHost({
+        runtime,
+        input: new Response('').body as unknown as ReadableStream<Uint8Array>,
+        write: (line) => out.push(line),
+        home,
+      })
+      await host.rpc.done
+      try {
+        // Boot: wait for the design tenant to land before driving.
+        await waitForTraces(traces, (s) =>
+          s.some((t) => {
+            if (t.selected.type !== FACULTY_MESSAGE_KINDS.store_request) return false
+            const detail = t.selected.detail as
+              | { op?: string; input?: { collection?: string; key?: string } }
+              | undefined
+            return detail?.op === 'put' && detail.input?.collection === UI_DESIGN_COLLECTION
+          }),
+        )
+        // The tenant-bearing pipeline emits ui_style BEFORE ui_render.
+        dispatchToRuntime(runtime, {
+          method: 'ui_event',
+          params: { event: { type: 'render', detail: { message: 'a panel' } }, timeStamp: 1 },
+        })
+        await waitForTraces(traces, (s) => s.some((t) => t.selected.type === 'ui_scale_check'))
+        const checkId = (
+          selectionsOf(traces).find((t) => t.selected.type === 'ui_scale_check')?.selected.detail as
+            | { id?: string }
+            | undefined
+        )?.id
+        dispatchToRuntime(runtime, {
+          method: 'ui_scale_check_result',
+          params: { id: checkId, target: 'body', effectiveScale: 's3', timeStamp: 2 },
+        })
+        await waitForTraces(traces, (s) => s.some((t) => t.selected.type === 'ui_render'))
+        const styleLine = out.findIndex((line) => line.includes('"method":"ui_style"'))
+        const renderLine = out.findIndex((line) => line.includes('"method":"ui_render"'))
+        expect(styleLine).toBeGreaterThan(-1)
+        expect(renderLine).toBeGreaterThan(styleLine)
+        expect(out[styleLine]).toContain('@scope')
+      } finally {
+        runtime.terminate()
+        await server.close()
+      }
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  }, 10_000)
+
   test('the composition config seam: named ui provider/modelId reach the recorded model call', async () => {
     const home = tempHome()
     try {
@@ -1140,6 +1238,9 @@ describe('ui threads — the composition mount', () => {
         })
         await waitForTraces(traces, (s) => s.some((t) => t.selected.type === 'ui_render'))
         expect(out.some((line) => line.includes('"method":"ui_render"') && line.includes(ASSISTANT_TEXT))).toBe(true)
+        // Plain degradation emits no style — the design lane is optional,
+        // never a gate, and never a phantom message.
+        expect(out.some((line) => line.includes('"method":"ui_style"'))).toBe(false)
         const body = server.requests.at(-1)?.body as { instructions?: string } | undefined
         expect(body?.instructions?.includes('--design-')).toBe(false)
       } finally {
