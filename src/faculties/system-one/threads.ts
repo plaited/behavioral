@@ -1,6 +1,7 @@
-import type { Thread } from '../../behavioral/behavioral.types.ts'
-import { ThreadSchema } from '../../behavioral/behavioral.types.ts'
+import type { JSONSchemaType } from 'ajv'
+import { ajv, type Thread, ThreadSchema } from '../../behavioral/behavioral.types.ts'
 import { FACULTY_MESSAGE_KINDS } from '../faculties.constants.ts'
+import { type ChoiceQuestion, choiceQuestionSchema } from './schemas.ts'
 
 /**
  * The System One faculty's admission judgment thread pack — the BP-native
@@ -134,6 +135,71 @@ const JUDGE_ANSWER =
   '(if ($d.result | type) == "object" then $d.result else {} end) as $r | ' +
   '(if ($r.answers | type) == "object" then $r.answers else {} end) as $a | ' +
   '(if ($a.admission | type) == "object" then $a.admission else {} end) as $q'
+
+/** The judged outcome — the Decision's answer mapped to a structured admission call. */
+export type AdmissionVerdict = {
+  /** The candidate's pending-admission id (the composition's key). */
+  id: string
+  /** The Decision's call: true admits the candidate, false keeps it out. */
+  admit: boolean
+  /**
+   * Optional free-text why. The choice answer carries no prose today, so the
+   * mapping emits none — a reason rides a future answer type, never a guess.
+   */
+  reason?: string
+}
+
+/** The judged outcome's schema — the composition's admission gate validates against this home. */
+export const ADMISSION_VERDICT_SCHEMA = {
+  type: 'object',
+  properties: {
+    id: { type: 'string', minLength: 1 },
+    admit: { type: 'boolean' },
+    reason: { type: 'string' },
+  },
+  required: ['id', 'admit'],
+  additionalProperties: false,
+} as unknown as JSONSchemaType<AdmissionVerdict>
+
+/**
+ * The Decision input the judgment issues: the proposed thread rides as state
+ * (the schema derives from the engine's ThreadSchema — one home, no
+ * mirroring), the question is the admit/reject choice over the shared
+ * question schema.
+ */
+export type AdmissionDecisionInput = {
+  state: { lane: 'admission-judgment'; thread: Thread }
+  questions: { [ADMISSION_QUESTION]: ChoiceQuestion }
+}
+
+export const ADMISSION_INPUT_SCHEMA = {
+  type: 'object',
+  properties: {
+    state: {
+      type: 'object',
+      properties: {
+        lane: { type: 'string', const: 'admission-judgment' },
+        thread: ThreadSchema,
+      },
+      required: ['lane', 'thread'],
+      additionalProperties: false,
+    },
+    questions: {
+      type: 'object',
+      properties: { [ADMISSION_QUESTION]: choiceQuestionSchema },
+      required: [ADMISSION_QUESTION],
+      additionalProperties: false,
+    },
+  },
+  required: ['state', 'questions'],
+  additionalProperties: false,
+} as unknown as JSONSchemaType<AdmissionDecisionInput>
+
+/** The issued Decision input's boundary — the pack's jq must produce exactly this. */
+export const validateAdmissionInput = ajv.compile(ADMISSION_INPUT_SCHEMA)
+
+/** The judged outcome's boundary — the composition's admission gate consumes only conforming verdicts. */
+export const validateAdmissionVerdict = ajv.compile(ADMISSION_VERDICT_SCHEMA)
 
 // ── Threads ──────────────────────────────────────────────────────────────────
 

@@ -3,7 +3,12 @@ import { TRACE_MESSAGE_KINDS } from '../../../behavioral/behavioral.constants.ts
 import { behavioral } from '../../../behavioral/behavioral.ts'
 import type { BPEvent, SelectionTrace, Thread, Trace } from '../../../behavioral/behavioral.types.ts'
 import { FACULTY_MESSAGE_KINDS } from '../../faculties.constants.ts'
-import { ADMISSION_EVENT_TYPES, admissionJudgmentThreads } from '../threads.ts'
+import {
+  ADMISSION_EVENT_TYPES,
+  admissionJudgmentThreads,
+  validateAdmissionInput,
+  validateAdmissionVerdict,
+} from '../threads.ts'
 
 /**
  * The system-one admission judgment pack against the real engine — the
@@ -186,5 +191,88 @@ describe('system-one admission judgment pack', () => {
       },
     ])
     expect(selected.length).toBeGreaterThan(0)
+  })
+
+  test('a malformed Decision result is error data — fail-closed rejection, no throw', () => {
+    // The answer is a hostile payload: `admission` is a bare string. The
+    // queries normalize it — no jq error, no admission; the reject listener
+    // holds the line.
+    const malformed: BPEvent = {
+      type: FACULTY_MESSAGE_KINDS.system_one_request_result,
+      detail: { id: 'at3-judge', ok: true, result: { model: 'm', answers: { admission: 'junk' } } },
+    }
+    const selected = runJudgment([
+      { event: candidate('at3', 'sneaky') },
+      {
+        event: malformed,
+        check: (selected) => {
+          const rejected = selected.find(
+            (s) => s.type === ADMISSION_EVENT_TYPES.rejected && (s.detail?.id as string) === 'at3',
+          )
+          expect(rejected).toBeDefined()
+          expect(
+            selected.some((s) => s.type === ADMISSION_EVENT_TYPES.admitted && (s.detail?.id as string) === 'at3'),
+          ).toBe(false)
+        },
+      },
+    ])
+    // The program survived the hostile result: the loop wrapped and the next
+    // candidate still judges.
+    expect(selected.length).toBeGreaterThan(0)
+  })
+
+  test('a faculty error result is error data — the candidate rejects, never admits', () => {
+    const selected = runJudgment([
+      { event: candidate('at4', 'unlucky') },
+      {
+        event: {
+          type: FACULTY_MESSAGE_KINDS.system_one_request_result,
+          detail: { id: 'at4-judge', ok: false, error: { code: 'error', message: 'endpoint down' } },
+        },
+        check: (selected) => {
+          const rejected = selected.find(
+            (s) => s.type === ADMISSION_EVENT_TYPES.rejected && (s.detail?.id as string) === 'at4',
+          )
+          expect(rejected).toBeDefined()
+          expect(
+            selected.some((s) => s.type === ADMISSION_EVENT_TYPES.admitted && (s.detail?.id as string) === 'at4'),
+          ).toBe(false)
+        },
+      },
+    ])
+    expect(selected.length).toBeGreaterThan(0)
+  })
+})
+
+describe('admission judgment — the Decision shapes', () => {
+  test('the issued Decision input validates against the input schema home', () => {
+    const selected = runJudgment([{ event: candidate('at1', 'greeter') }])
+    const request = selected.find(
+      (s) =>
+        s.type === FACULTY_MESSAGE_KINDS.system_one_request && (s.detail?.id as string | undefined) === 'at1-judge',
+    )
+    expect(request).toBeDefined()
+    expect(validateAdmissionInput(request?.detail?.input as unknown)).toBe(true)
+  })
+
+  test('the judged outcomes validate against the verdict schema home', () => {
+    const selected = runJudgment([
+      { event: candidate('at1', 'greeter') },
+      { event: judgeResult('at1', 'admit') },
+      { event: candidate('at2', 'suspicious') },
+      { event: judgeResult('at2', 'reject') },
+    ])
+    const outcomes = selected.filter(
+      (s) => s.type === ADMISSION_EVENT_TYPES.admitted || s.type === ADMISSION_EVENT_TYPES.rejected,
+    )
+    // Both outcomes fired and both conform to the one verdict home.
+    expect(outcomes.length).toBeGreaterThanOrEqual(2)
+    for (const outcome of outcomes) expect(validateAdmissionVerdict(outcome.detail)).toBe(true)
+    expect(outcomes.some((s) => s.type === ADMISSION_EVENT_TYPES.admitted && (s.detail?.id as string) === 'at1')).toBe(
+      true,
+    )
+    expect(outcomes.some((s) => s.type === ADMISSION_EVENT_TYPES.rejected && (s.detail?.id as string) === 'at2')).toBe(
+      true,
+    )
   })
 })
