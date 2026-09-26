@@ -37,16 +37,44 @@ import { FACULTY_MESSAGE_KINDS } from '../faculties.constants.ts'
 /** The correlation-suffix distinguishing a vend round-trip from its call. */
 export const CREDENTIAL_SUFFIX = '-cred'
 
-/** The gate schema for the shell result events the requestor consumes. */
+/**
+ * The gate schema for the shell result events the requestor consumes — the
+ * exact `credential_required` failure shape, so successes (the common case)
+ * and unrelated failures never even match: a matched listener whose jq
+ * declines is an empty-output transform_error trace, stray noise on every
+ * clean rpc op. The jq select stays as the defense in depth; the schema is
+ * the match gate (the transform idiom's separation).
+ */
 const RPC_AUTH_RESULT_DETAIL = {
   type: 'object',
   properties: {
     id: { type: 'string', minLength: 1 },
-    ok: { type: 'boolean' },
-    result: { type: 'object' },
-    error: { type: 'object' },
+    ok: { type: 'boolean', const: false },
+    error: {
+      type: 'object',
+      properties: {
+        code: { type: 'string', const: 'credential_required' },
+        request: {
+          type: 'object',
+          properties: {
+            // `authToken` null-or-absent (jq `== null` semantics): a replayed
+            // call carries the token and must not re-capture — the loop bound.
+            input: {
+              type: 'object',
+              properties: {
+                url: { type: 'string', minLength: 1 },
+                authToken: { type: 'null' },
+              },
+              required: ['url'],
+            },
+          },
+          required: ['input'],
+        },
+      },
+      required: ['code', 'request'],
+    },
   },
-  required: ['id', 'ok'],
+  required: ['id', 'ok', 'error'],
 } as const
 
 // ── Threads ───────────────────────────────────────────────────────────────────

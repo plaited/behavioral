@@ -162,18 +162,37 @@ export const REMOTE_MCP_INPUT_REQUIRED_RESULT_SCHEMA = {
 const RETRYABLE_REMOTE =
   '(($d.error.code == "timeout") or ($d.error.remoteCode == "network") or (($d.error.remoteCode | tonumber? // 0) >= 500))'
 
-/** The gate every acting transform shares: a shell result with the join lane present. */
-const RESULT_DETAIL_GATE = {
-  type: 'object',
-  properties: {
-    id: { type: 'string', minLength: 1 },
-    ok: { type: 'boolean' },
-    result: { type: 'object' },
-    error: { type: 'object' },
-    ctx: { type: 'object' },
-  },
-  required: ['id', 'ok'],
-} as const
+/**
+ * The gate the failure-path transforms share: a FAILURE-shaped shell result
+ * with the join lane (`ctx.echo`) present — `ok` const false, `error`
+ * required, the echo object required, and optionally the leg pinned. A
+ * matched listener whose jq declines is an empty-output transform_error
+ * trace, so the gate must match only what the jq handles: successes (the
+ * common case — every clean op) and foreign-leg failures never even match.
+ * (`retryable` — remoteCode numeric ≥ 500 — is not schema-expressible, so the
+ * retry/surface siblings still divide that call in jq; one genuine-failure
+ * decline remains, by design.)
+ */
+const rpcFailureGate = (legs?: string[]) =>
+  ({
+    type: 'object',
+    properties: {
+      id: { type: 'string', minLength: 1 },
+      ok: { type: 'boolean', const: false },
+      error: { type: 'object' },
+      ctx: {
+        type: 'object',
+        required: ['echo'],
+        properties: {
+          echo: {
+            type: 'object',
+            ...(legs === undefined ? {} : { properties: { leg: { enum: legs } }, required: ['leg'] }),
+          },
+        },
+      },
+    },
+    required: ['id', 'ok', 'error', 'ctx'],
+  }) as const
 
 // ── Threads ──────────────────────────────────────────────────────────────────
 
@@ -423,7 +442,7 @@ const retry: Thread = {
           type: FACULTY_MESSAGE_KINDS.shell_request_result,
           query: `. as $d | select($d.ok == false and ($d.error.code != "credential_required") and ($d.ctx.echo != null) and (($d.ctx.echo.attempt // 0) < ${REMOTE_MCP_MAX_ATTEMPTS}) and ${RETRYABLE_REMOTE}) | { id: $d.id, label: "${REMOTE_MCP_LABEL}", ctx: { echo: ($d.ctx.echo + { attempt: (($d.ctx.echo.attempt // 0) + 1) }) }, input: (if $d.ctx.echo.leg == "call" then { op: "rpc", url: $d.ctx.echo.url, method: "tools/call", headers: ${STAMP_HEADERS}, params: { name: $d.ctx.echo.tool, arguments: ($d.ctx.echo.args // {}), _meta: ${STAMP_META} } } elif $d.ctx.echo.leg == "tools" then { op: "rpc", url: $d.ctx.echo.url, method: "tools/list", headers: ${STAMP_HEADERS}, params: ${STAMP_META} } else { op: "rpc", url: $d.ctx.echo.url, method: "server/discover", headers: ${STAMP_HEADERS}, params: ${STAMP_META} } end) }`,
           target: FACULTY_MESSAGE_KINDS.shell_request,
-          detailSchema: RESULT_DETAIL_GATE,
+          detailSchema: rpcFailureGate(),
         },
       ],
     },
@@ -440,7 +459,7 @@ const callFailure: Thread = {
           type: FACULTY_MESSAGE_KINDS.shell_request_result,
           query: `. as $d | select($d.ok == false and $d.ctx.echo.leg == "call" and ($d.error.code != "credential_required") and ((${RETRYABLE_REMOTE} and (($d.ctx.echo.attempt // 0) < ${REMOTE_MCP_MAX_ATTEMPTS})) | not)) | { id: $d.ctx.echo.source, ok: false, error: { code: $d.error.code, message: $d.error.message, remoteCode: $d.error.remoteCode } }`,
           target: REMOTE_MCP_EVENT_TYPES.callResult,
-          detailSchema: RESULT_DETAIL_GATE,
+          detailSchema: rpcFailureGate(['call']),
         },
       ],
     },
@@ -457,7 +476,7 @@ const discoverFailure: Thread = {
           type: FACULTY_MESSAGE_KINDS.shell_request_result,
           query: `. as $d | select($d.ok == false and (($d.ctx.echo.leg == "discover") or ($d.ctx.echo.leg == "tools")) and ($d.error.code != "credential_required") and ((${RETRYABLE_REMOTE} and (($d.ctx.echo.attempt // 0) < ${REMOTE_MCP_MAX_ATTEMPTS})) | not)) | { id: $d.ctx.echo.source, ok: false, error: { code: $d.error.code, message: $d.error.message, remoteCode: $d.error.remoteCode } }`,
           target: REMOTE_MCP_EVENT_TYPES.discovered,
-          detailSchema: RESULT_DETAIL_GATE,
+          detailSchema: rpcFailureGate(['discover', 'tools']),
         },
       ],
     },
@@ -479,15 +498,41 @@ const vendFailure: Thread = {
           type: FACULTY_MESSAGE_KINDS.credential_result,
           query: `. as $d | select($d.ok == false and (($d.ctx.echo.ctx.echo.leg // "") == "call")) | { id: $d.ctx.echo.ctx.echo.source, ok: false, error: { code: "error", message: $d.error.message } }`,
           target: REMOTE_MCP_EVENT_TYPES.callResult,
+          // The gate is the jq condition in schema form — the failed vend of
+          // a REMOTE-MCP call (the ctx echo chain, leg "call"): a direct
+          // caller’s failed vend never even matches, so its decline is not an
+          // empty-output transform_error trace.
           detailSchema: {
             type: 'object',
             properties: {
               id: { type: 'string', minLength: 1 },
-              ok: { type: 'boolean' },
+              ok: { type: 'boolean', const: false },
               error: { type: 'object' },
-              ctx: { type: 'object' },
+              ctx: {
+                type: 'object',
+                required: ['echo'],
+                properties: {
+                  echo: {
+                    type: 'object',
+                    required: ['ctx'],
+                    properties: {
+                      ctx: {
+                        type: 'object',
+                        required: ['echo'],
+                        properties: {
+                          echo: {
+                            type: 'object',
+                            required: ['leg'],
+                            properties: { leg: { type: 'string', const: 'call' } },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
             },
-            required: ['id', 'ok', 'error'],
+            required: ['id', 'ok', 'error', 'ctx'],
           },
         },
       ],

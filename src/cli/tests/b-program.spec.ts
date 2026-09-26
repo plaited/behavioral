@@ -104,6 +104,22 @@ describe('bProgram — the runtime composition', () => {
     }
   })
 
+  test('a clean boot is trace-clean — successful shell results fire no transform_error noise', async () => {
+    const { runtime, traces } = startRuntime()
+    try {
+      // The boot runs successful shell ops (the skill scan, the plugin
+      // manifests) through a composition whose failure-path listeners
+      // (rpc-auth, remote-mcp) are mounted. Their gates match only
+      // failure-shaped details, so the successes they used to match (then
+      // decline into empty-output transform_errors — 8 per boot) never fire.
+      await waitForTraces(traces, (s) => storeRequest(s, 'put', 'skills') !== undefined)
+      const errors = traces.filter((t) => t.kind === TRACE_MESSAGE_KINDS.transform_error)
+      expect(errors).toHaveLength(0)
+    } finally {
+      runtime.terminate()
+    }
+  })
+
   test('a full round-trip via the default threads: links_request → run op → result re-entry', async () => {
     const { runtime, traces } = startRuntime()
     try {

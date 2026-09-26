@@ -143,4 +143,33 @@ describe('rpc auth threads — the vend-and-replay spine', () => {
     const selected = runProgram([credentialRequired('c4', 'https://mcp.example.com/mcp', { authToken: 'vended-1' })])
     expect(selected.some((s) => s.type === FACULTY_MESSAGE_KINDS.credential_request)).toBe(false)
   })
+
+  test('a successful shell result is trace-clean — the requestor gate matches only failures', () => {
+    // The failure-path listener's detailSchema must match only
+    // failure-shaped details: a success (the common case — every rpc op's
+    // result) must not even match, so its select() never declines into an
+    // empty-output transform_error. Stray error traces on clean operation
+    // are noise: 8 of them fired on every composition boot before this pin.
+    const program = behavioral()
+    const transformErrors: Trace[] = []
+    program.useTrace((trace: Trace) => {
+      if (trace.kind === TRACE_MESSAGE_KINDS.transform_error) transformErrors.push(trace)
+    })
+    for (const thread of rpcAuthThreads) program.addThread(thread)
+    program.addThread({
+      label: 'producer/success',
+      once: true,
+      rules: [
+        {
+          request: {
+            type: FACULTY_MESSAGE_KINDS.shell_request_result,
+            detail: { id: 'ok1', ok: true, result: { output: { done: true } } },
+          },
+        },
+      ],
+    })
+    program.trigger({ type: 'rpc_auth_pump', detail: {} })
+    program.trigger({ type: 'rpc_auth_pump', detail: {} })
+    expect(transformErrors).toHaveLength(0)
+  })
 })

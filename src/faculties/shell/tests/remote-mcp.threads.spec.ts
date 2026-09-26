@@ -357,3 +357,58 @@ describe('remote-mcp threads — retry', () => {
     expect(selected.some((s) => s.type === REMOTE_MCP_EVENT_TYPES.callResult)).toBe(false)
   })
 })
+
+describe('remote-mcp threads — trace cleanliness', () => {
+  /** Mount the threads and drive one producer event, collecting transform_error traces. */
+  const traceErrorsFor = (event: BPEvent): Trace[] => {
+    const program = behavioral()
+    const transformErrors: Trace[] = []
+    program.useTrace((trace: Trace) => {
+      if (trace.kind === TRACE_MESSAGE_KINDS.transform_error) transformErrors.push(trace)
+    })
+    for (const thread of remoteMcpThreads) program.addThread(thread)
+    program.addThread({ label: `producer/${event.type}`, once: true, rules: [{ request: event }] })
+    program.trigger({ type: 'rmcp_pump', detail: {} })
+    program.trigger({ type: 'rmcp_pump', detail: {} })
+    program.trigger({ type: 'rmcp_pump', detail: {} })
+    return transformErrors
+  }
+
+  test('a successful call result is trace-clean — the failure listeners never match successes', () => {
+    // The failure-path listeners (retry, call-failure, discover-failure) must
+    // match only failure-shaped details: a genuine success — ctx echo, call
+    // leg, a call-shaped output — is the common case, and a matched listener
+    // whose jq declines is an empty-output transform_error, stray noise on
+    // every clean op (8 fired on every composition boot before this pin).
+    const errors = traceErrorsFor(
+      rpcResult(
+        'tc1-call',
+        'tc1',
+        'call',
+        { tool: 'echo', args: {}, round: 0 },
+        {
+          content: [{ type: 'text', text: 'hi' }],
+        },
+      ),
+    )
+    expect(errors).toHaveLength(0)
+  })
+
+  test('a direct caller’s failed vend is trace-clean — the vend-failure gate matches only the remote-mcp echo chain', () => {
+    // The vend-failure listener must match only vends whose ctx echo chain
+    // marks them remote-mcp calls: a direct (declarative) rpc caller’s failed
+    // vend never even matches, so its decline is not an empty-output
+    // transform_error. (The surface outcome itself is pinned above: no
+    // remote-mcp result fires.)
+    const errors = traceErrorsFor({
+      type: FACULTY_MESSAGE_KINDS.credential_result,
+      detail: {
+        id: 'direct-2-cred',
+        ok: false,
+        ctx: { echo: { id: 'direct-2', input: {}, ctx: null } },
+        error: { code: 'error', message: 'no credential available' },
+      },
+    })
+    expect(errors).toHaveLength(0)
+  })
+})
