@@ -75,7 +75,7 @@ describe('rpc auth threads — the vend-and-replay spine', () => {
   })
 
   test('a remote 401 challenge (no auth flag) also requests a credential — the reactive path', () => {
-    // The pack's issued rpc ops carry ctx but no auth flag: the op maps a
+    // The threads' issued rpc ops carry ctx but no auth flag: the op maps a
     // 401-on-unauthenticated-call to credential_required, so the seam serves
     // both the declarative and the reactive path with one gate.
     const selected = runProgram([
@@ -98,7 +98,7 @@ describe('rpc auth threads — the vend-and-replay spine', () => {
     expect(request).toBeDefined()
     const detail = request?.detail as { id?: string; ctx?: { echo?: { ctx?: unknown } } }
     expect(detail.id).toBe('c1r-call-cred')
-    // The echoed ctx preserves the pack's join payload through the vend.
+    // The echoed ctx preserves the threads' join payload through the vend.
     expect(detail.ctx?.echo?.ctx).toEqual({
       echo: { source: 'c1r', url: 'https://mcp.example.com/mcp', leg: 'call', attempt: 0 },
     })
@@ -123,7 +123,7 @@ describe('rpc auth threads — the vend-and-replay spine', () => {
     expect(detail.input?.authToken).toBe('vended-1')
     expect(detail.input?.auth).toBe(true)
     expect(detail.input?.url).toBe('https://mcp.example.com/mcp')
-    // The pack's join payload survives the vend round-trip.
+    // The threads' join payload survives the vend round-trip.
     expect(detail.ctx).toEqual({ echo: { source: 'c2', leg: 'call', round: 0, attempt: 0 } })
   })
 

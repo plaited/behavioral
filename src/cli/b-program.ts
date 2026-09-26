@@ -200,7 +200,7 @@ export const bProgram = ({
   // The security faculty: the cross-cutting credential/policy faculty — its
   // vending leg serves shell (remote rpc), system-two endpoints, ATProto,
   // and any future remote faculty. No threads of its own yet (the skeleton
-  // vends); the rpc auth seam's pack lives with the op it serves.
+  // vends); the rpc auth seam's threads lives with the op it serves.
   const security =
     securityOverride === undefined
       ? useFaculty({
@@ -235,7 +235,7 @@ export const bProgram = ({
     // useFaculty compiled — a malformed system_one event is blocked (visible
     // in the frontier traces), not silently dropped.
     facultyAddThreads(guardThreads(`guard:${systemOne.name}-schema`, eventGuardEntries(systemOne.schemas)))
-    // The admission judgment pack: the BP-native blocking judge — it requires
+    // The admission judgment threads: the BP-native blocking judge — it requires
     // the Decisions lane (systemOne) and the structural layer (the in-process
     // frontier embed, always present). With judgment wired, a validated
     // candidate's admission is blocked while its Decision runs; the verdict
@@ -297,9 +297,9 @@ export const bProgram = ({
   }
 
   // The rpc auth seam: the vend-and-replay spine requires the op (shell) and
-  // the vending leg (security) — the pack mounts only when both are on.
+  // the vending leg (security) — the threads mount only when both are on.
   if (has('shell') && has('security')) facultyAddThreads(rpcAuthThreads)
-  // The remote-mcp pack: the MCP layering over the rpc op — requires the
+  // The remote-mcp threads: the MCP layering over the rpc op — requires the
   // executor (shell), the vending leg (security), and the registry (store).
   if (has('shell') && has('security') && has('store')) facultyAddThreads(remoteMcpThreads)
 
@@ -313,7 +313,7 @@ export const bProgram = ({
   useTrace((trace: Trace) => {
     if (trace.kind !== TRACE_MESSAGE_KINDS.selection) return
     const candidate = (trace as SelectionTrace).selected
-    // The judgment's outcome legs — the admission judgment pack's road back
+    // The judgment's outcome legs — the admission judgment threads' road back
     // to the pump. Only a conforming verdict with admit === true admits; a
     // rejection (or anything malformed — fail-closed) drops the pending id,
     // the rejection visible in the traces.
@@ -341,7 +341,7 @@ export const bProgram = ({
             addThreads([thread])
           } else {
             // The judged path: the verdict is the candidate record — emit it
-            // to the admission judgment pack (which blocks the admission
+            // to the admission judgment threads (which blocks the admission
             // while the Decision runs). The entry survives until the judged
             // outcome leg above. (A validated thread is pure data — it
             // serializes as JSON — but its listener schemas aren't statically

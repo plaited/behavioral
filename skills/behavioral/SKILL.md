@@ -47,8 +47,8 @@ only when the task calls for it.
 | UI layer — the browser Controller over the `ui_*` wire (`ui_render`/`ui_attrs`/`ui_scale_check`, `ui_event`/`ui_snapshot`/`ui_error`/`ui_success`/`ui_scale_check_result`/`ui_form_submit`) | [`references/controller.md`](./references/controller.md) |
 | Capturing/grading an agent run — eval trace primitives, divergence analysis | [`references/eval.md`](./references/eval.md) |
 
-**Companion skills:** remote MCP operations are the **remote-mcp thread
-pack** over the shell faculty's generic `rpc` op
+**Companion skills:** remote MCP operations are the **remote-mcp threads
+over the shell faculty's generic `rpc` op
 (`src/faculties/shell/remote-mcp.threads.ts`); the
 skill/plugin domain conventions (store tenants, scan recipes,
 `links_request`, ICL composition) are the **skill-conventions** skill. This

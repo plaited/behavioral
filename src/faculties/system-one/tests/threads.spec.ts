@@ -11,7 +11,7 @@ import {
 } from '../threads.ts'
 
 /**
- * The system-one admission judgment pack against the real engine — the
+ * The system-one admission judgment threads against the real engine — the
  * BP-native blocking judge: a validated candidate's admission is BLOCKED
  * while a system-one Decision judges the proposed thread; an approval
  * lifts the block (the candidate admits), a rejection holds the line
@@ -67,7 +67,7 @@ const judgeResult = (id: string, choice: string): BPEvent => ({
   },
 })
 
-describe('system-one admission judgment pack', () => {
+describe('system-one admission judgment threads', () => {
   test('a candidate issues a system_one_request carrying the proposed thread as the Decision input', () => {
     const selected = runJudgment([
       {

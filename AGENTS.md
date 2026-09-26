@@ -94,11 +94,11 @@ faculties), plus its `tests/`:
   endpoint map
 - `system-one/` — TypeSafe/OpenRouter Decisions; `configSystemOne` +
   `useSystemOne({ endpoint })`, with 429/529 retry; `threads.ts` — the
-  admission judgment pack (the BP-native blocking judge over the Decisions
+  admission judgment threads (the BP-native blocking judge over the Decisions
   lane; the composition mounts it when systemOne is wired)
 - `shell/` — bun-direct script execution — `run` op TS scripts via `bun run -`,
   `shell` op Bun Shell commands through the wrapper; `rpc` op generic remote
-  JSON-RPC (the remote-mcp layering is the thread pack, not the op);
+  JSON-RPC (the remote-mcp layering is the threads, not the op);
   temp-file payloads over ~100KB, deleted on every exit
 - `store/` — durable space-scoped persistence
 - `security/` — the cross-cutting credential/policy faculty:
@@ -111,7 +111,7 @@ faculties), plus its `tests/`:
 Each faculty owns its event types + input boundary; results echo the request
 `space`; op runners errors-as-data.
 **`src/tools/`** — deleted (fleet 0): the ICL conversion retired the CLI tool
-fleet. Remote MCP is the remote-mcp thread pack over the shell faculty's
+fleet. Remote MCP is remote-mcp threads over the shell faculty's
 generic `rpc` op (`src/faculties/shell/remote-mcp.threads.ts` — the retired
 `mcp` faculty's replacement; the official SDK dependency is gone);
 skill/plugin operations are the shell faculty's threads

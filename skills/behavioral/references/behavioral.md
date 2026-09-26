@@ -233,7 +233,7 @@ a `transform_error` trace carrying the `transformer` and a machine-readable
 `reason`.
 
 The contract test is `src/behavioral/tests/transform.spec.ts`, and the
-production consumer is real: the remote-MCP thread pack
+production consumer is real: the remote-mcp threads
 (`src/faculties/shell/remote-mcp.threads.ts`) drives its entire
 discover/tools/call pipeline with transforms over the shell faculty's `rpc`
 op.

@@ -189,7 +189,7 @@ const channelPayload = async ({
 }
 
 // ---------------------------------------------------------------------------
-// Credential seam — the declarative auth gate (the thread pack vends)
+// Credential seam — the declarative auth gate (the threads vends)
 // ---------------------------------------------------------------------------
 
 /**
@@ -197,7 +197,7 @@ const channelPayload = async ({
  * as typed `credential_required` — the op never calls the remote
  * unauthenticated, and the vended token reaches it only through the
  * replaying thread (`authToken` on the replayed input). The op itself never
- * knows OAuth — the cross-faculty round-trip is the thread pack's
+ * knows OAuth — the cross-faculty round-trip is the threads'
  * (`shell/rpc-auth.threads.ts`), not this module's.
  */
 const needsCredential = (input: ShellRpcOpInput): boolean => input.auth === true && input.authToken === undefined
@@ -313,7 +313,7 @@ const JSON_SNIPPET_CHARS = 200
 /**
  * Run the `rpc` op — one generic remote JSON-RPC call, abortable by cancel
  * or deadline through the fetch signal. The op is transport-shaped: it
- * carries the envelope, nothing more (MCP semantics live in thread packs).
+ * carries the envelope, nothing more (MCP semantics live in threads).
  *
  * @remarks
  * Errors-as-data at both layers: the client never throws on transport or
@@ -333,7 +333,7 @@ const runRpcOp = async ({
 }): Promise<RpcOpSuccess | RpcOpError> => {
   const started = performance.now()
   // The declarative auth gate: no vended token, no call — the typed
-  // credential_required result is the thread pack's capture payload.
+  // credential_required result is the threads' capture payload.
   if (needsCredential(input)) {
     return {
       code: 'credential_required',
@@ -365,7 +365,7 @@ const runRpcOp = async ({
     if (execution.stopReason === 'timeout') return { code: 'timeout', durationMs }
     if (outcome.ok) return { output: outcome.result, durationMs }
     // The reactive auth path: a 401 challenge on an unauthenticated call maps
-    // to the typed vend-and-replay capture payload (the thread pack vends and
+    // to the typed vend-and-replay capture payload (the threads vends and
     // replays). A 401 on a token'd call stays a remote error — bounded.
     if (outcome.error.code === 401 && input.authToken === undefined) {
       return {

@@ -1,7 +1,7 @@
 /**
- * The remote-mcp thread pack — the MCP layering over the shell faculty's
+ * The remote-mcp threads — the MCP layering over the shell faculty's
  * generic `rpc` op. This is where "MCP" lives: the op is transport-shaped,
- * and this pack stamps the protocol envelope, drives discovery, executes
+ * and these threads stamp the protocol envelope, drives discovery, executes
  * tools, runs the multi-round-trip elicitation loop, and retries retryable
  * remote failures.
  *
@@ -10,11 +10,11 @@
  * session id — every request carries the protocol stamp in-band, and every
  * response is one stateless HTTP POST's answer.
  *
- * - **Request stamping** — every rpc op the pack issues carries the
+ * - **Request stamping** — every rpc op the threads issue carries the
  *   `_meta` envelope (`io.modelcontextprotocol/protocolVersion` +
  *   `clientInfo` + `clientCapabilities`, the reserved request-envelope keys
  *   for this revision) and the `MCP-Protocol-Version` header. The op carries
- *   the envelope; the pack stamps it.
+ *   the envelope; the threads stamp it.
  * - **Discovery** — `remote_mcp_discover { url }` issues `server/discover`,
  *   chains `tools/list`, registers the tools in the store registry
  *   (alongside the skills/plugins tenants), and surfaces
@@ -25,7 +25,7 @@
  *   `requestState` members; at-least-one) surfaces
  *   `remote_mcp_elicitation` to the host; the host answers with
  *   `remote_mcp_elicitation_response` (the elicitation detail echoed + the
- *   bare `inputResponses`) and the pack retries `tools/call` with the
+ *   bare `inputResponses`) and the threads retry `tools/call` with the
  *   answers + a byte-exact `requestState` echo, on a FRESH request id, up to
  *   the round cap.
  * - **Retry** — retryable remote failures (deadline, network, generic 5xx)
@@ -39,7 +39,7 @@
  * credential seam (`shell/rpc-auth.threads.ts`): a 401 challenge maps to the
  * typed `credential_required`, and the seam vends + replays with the token.
  *
- * Trusted response shapes — the pack AJV-validates ONLY the four responses
+ * Trusted response shapes — the threads AJV-validate ONLY the four responses
  * it acts on (`server/discover`, `tools/list`, `tools/call`,
  * `InputRequiredResult`); a response failing its trusted shape silently
  * no-matches the acting transform (the result stays visible as an unmatched
@@ -73,10 +73,10 @@ export const REMOTE_MCP_EVENT_TYPES = {
 /** The store registry tenant holding registered remote tools, keyed by server URL. */
 export const REMOTE_MCP_STORE_COLLECTION = 'remote-mcp'
 
-/** The protocol revision this pack speaks (the 2026-07-28 stateless era). */
+/** The protocol revision these threads speak (the 2026-07-28 stateless era). */
 export const REMOTE_MCP_PROTOCOL_VERSION = '2026-07-28'
 
-/** The label every pack-issued rpc op carries (trace annotation, no routing weight). */
+/** The label every rpc op these threads issue carries (trace annotation, no routing weight). */
 export const REMOTE_MCP_LABEL = 'remote-mcp'
 
 /** Bounded retry: a retryable failure re-requests the op until this many attempts. */
@@ -93,11 +93,11 @@ const STAMP_HEADERS = `{ "MCP-Protocol-Version": "${REMOTE_MCP_PROTOCOL_VERSION}
 const STAMP_META = `{ "io.modelcontextprotocol/protocolVersion": "${REMOTE_MCP_PROTOCOL_VERSION}", "io.modelcontextprotocol/clientInfo": { name: "behavioral", version: "0.0.0" }, "io.modelcontextprotocol/clientCapabilities": { elicitation: {} } }`
 
 // ── The four trusted response shapes ─────────────────────────────────────────
-// Minimal slices of the 2026-07-28 responses the pack acts on — the trust
+// Minimal slices of the 2026-07-28 responses the threads act on — the trust
 // boundary for anything crossing in from a remote server. Loose on members
-// the pack doesn't consume (the responses carry _meta, icons, …).
+// the threads do not consume (the responses carry _meta, icons, …).
 
-/** `server/discover` result — the pack trusts the advertised versions. */
+/** `server/discover` result — the threads trust the advertised versions. */
 export const REMOTE_MCP_DISCOVER_RESULT_SCHEMA = {
   type: 'object',
   properties: {
@@ -108,7 +108,7 @@ export const REMOTE_MCP_DISCOVER_RESULT_SCHEMA = {
   additionalProperties: true,
 } as const
 
-/** `tools/list` result — the pack trusts the tool names (registration keys). */
+/** `tools/list` result — the threads trust the tool names (registration keys). */
 export const REMOTE_MCP_TOOLS_LIST_RESULT_SCHEMA = {
   type: 'object',
   properties: {
@@ -130,7 +130,7 @@ export const REMOTE_MCP_TOOLS_LIST_RESULT_SCHEMA = {
   additionalProperties: true,
 } as const
 
-/** `tools/call` result — the pack trusts the content array shape (loose members). */
+/** `tools/call` result — the threads trust the content array shape (loose members). */
 export const REMOTE_MCP_CALL_RESULT_SCHEMA = {
   type: 'object',
   properties: {
@@ -466,9 +466,9 @@ const discoverFailure: Thread = {
 
 /**
  * vend-failure — the security faculty echoes the request ctx on FAILED vends,
- * so a pack call whose vend fails surfaces the typed absent-credential error
- * to the caller (no pending-forever wait). Direct (non-pack) callers carry
- * no pack ctx — their vend failures never surface a pack result.
+ * so a remote-mcp call whose vend fails surfaces the typed absent-credential error
+ * to the caller (no pending-forever wait). Direct (non-remote-mcp) callers carry
+ * no remote-mcp ctx — their vend failures never surface a remote-mcp result.
  */
 const vendFailure: Thread = {
   label: 'remote-mcp/vend-failure',

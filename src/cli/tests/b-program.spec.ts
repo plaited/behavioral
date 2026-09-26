@@ -41,7 +41,7 @@ import { bProgram } from '../b-program.ts'
  *
  * The default threads are faculty-shipped: the shell threads
  * (shell/threads.ts — skill/plugin scans + links) mounts with shell+store
- * on; the remote-mcp pack mounts with shell+security+store on.
+ * on; the remote-mcp threads mounts with shell+security+store on.
  */
 
 const selectionsOf = (traces: Trace[]): SelectionTrace[] =>
@@ -580,7 +580,7 @@ describe('bProgram — the runtime composition', () => {
     }
   })
 
-  test('the remote-mcp pack ships with shell+security+store: discovery registers the tools', async () => {
+  test('the remote-mcp threads ships with shell+security+store: discovery registers the tools', async () => {
     // A plain JSON-RPC endpoint speaking server/discover + tools/list — the
     // 2026-07-28 stateless era needs no handshake.
     const rpc = Bun.serve({
@@ -609,7 +609,7 @@ describe('bProgram — the runtime composition', () => {
         type: REMOTE_MCP_EVENT_TYPES.discover,
         detail: { id: 'r1', input: { url: `http://localhost:${rpc.port}/mcp` } },
       })
-      // The pack drives the generic rpc op: server/discover → tools/list →
+      // The threads drive the generic rpc op: server/discover → tools/list →
       // the store registry put (alongside the skills/plugins tenants).
       await waitForTraces(traces, (s) => storeRequest(s, 'put', REMOTE_MCP_STORE_COLLECTION) !== undefined)
       const put = storeRequest(selectionsOf(traces), 'put', REMOTE_MCP_STORE_COLLECTION)
@@ -624,7 +624,7 @@ describe('bProgram — the runtime composition', () => {
       const surfaced = selectionsOf(traces).find((t) => t.selected.type === REMOTE_MCP_EVENT_TYPES.discovered)
       const surfacedDetail = surfaced?.selected.detail as { id?: string } | undefined
       expect(surfacedDetail?.id).toBe('r1')
-      // The pack's issued ops carry the protocol stamp (observed on the result lane).
+      // The threads' issued ops carry the protocol stamp (observed on the result lane).
       expect(
         selectionsOf(traces).some(
           (t) =>

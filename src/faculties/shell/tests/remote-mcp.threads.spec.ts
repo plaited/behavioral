@@ -11,7 +11,7 @@ import {
 } from '../remote-mcp.threads.ts'
 
 /**
- * The remote-mcp thread pack against the real engine — the MCP layering over
+ * The remote-mcp threads against the real engine — the MCP layering over
  * the generic `rpc` op: request stamping (`_meta` envelope + the
  * MCP-Protocol-Version header), discovery (server/discover + tools/list →
  * the store registry), execution (tools/call), the multi-round-trip
@@ -45,7 +45,7 @@ const runProgram = (events: BPEvent[]): Selected[] => {
 
 const URL = 'https://mcp.example.com/mcp'
 
-/** A shell result for one of the pack's stamped rpc legs — the ctx echo rides. */
+/** A shell result for one of the threads' stamped rpc legs — the ctx echo rides. */
 const rpcResult = (id: string, source: string, leg: string, extraEcho: JsonObject, output: JsonObject): BPEvent => ({
   type: FACULTY_MESSAGE_KINDS.shell_request_result,
   detail: {
@@ -56,7 +56,7 @@ const rpcResult = (id: string, source: string, leg: string, extraEcho: JsonObjec
   },
 })
 
-describe('remote-mcp pack — discovery', () => {
+describe('remote-mcp threads — discovery', () => {
   test('a discover event issues a stamped server/discover rpc op', () => {
     const selected = runProgram([{ type: REMOTE_MCP_EVENT_TYPES.discover, detail: { id: 'r1', input: { url: URL } } }])
     const request = selected.find(
@@ -122,7 +122,7 @@ describe('remote-mcp pack — discovery', () => {
   })
 })
 
-describe('remote-mcp pack — execution', () => {
+describe('remote-mcp threads — execution', () => {
   test('a call event issues a stamped tools/call rpc op; the result surfaces', () => {
     const selected = runProgram([
       {
@@ -254,7 +254,7 @@ describe('remote-mcp pack — execution', () => {
   })
 })
 
-describe('remote-mcp pack — retry', () => {
+describe('remote-mcp threads — retry', () => {
   test('a retryable remote failure re-requests the op with the attempt advanced', () => {
     const selected = runProgram([
       {
@@ -315,7 +315,7 @@ describe('remote-mcp pack — retry', () => {
     expect(selected.some((s) => s.type === REMOTE_MCP_EVENT_TYPES.callResult)).toBe(true)
   })
 
-  test('a failed vend echoes the request ctx — the pack surfaces the absent credential', () => {
+  test('a failed vend echoes the request ctx — the threads surface the absent credential', () => {
     const selected = runProgram([
       {
         type: FACULTY_MESSAGE_KINDS.credential_result,
@@ -340,9 +340,9 @@ describe('remote-mcp pack — retry', () => {
     expect(d?.error?.message).toContain('no credential')
   })
 
-  test('a failed vend for a non-pack caller never surfaces a pack result', () => {
-    // A direct (declarative) rpc caller's vend failure carries no pack ctx —
-    // the derived leg is not "call", so no pack-owned result fires.
+  test('a failed vend for a non-remote-mcp caller never surfaces a remote-mcp result', () => {
+    // A direct (declarative) rpc caller's vend failure carries no remote-mcp ctx —
+    // the derived leg is not "call", so no remote-mcp result fires.
     const selected = runProgram([
       {
         type: FACULTY_MESSAGE_KINDS.credential_result,

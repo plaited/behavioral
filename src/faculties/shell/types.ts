@@ -104,20 +104,20 @@ export type ShellRpcOpInput = {
   op: 'rpc'
   /** The remote endpoint URL — one stateless POST per call. */
   url: string
-  /** The JSON-RPC method name (transport-shaped; protocol semantics live in thread packs). */
+  /** The JSON-RPC method name (transport-shaped; protocol semantics live in threads). */
   method: string
   /** The JSON-RPC params object, when the method takes one. */
   params?: JsonObject
   /**
    * Declare the call needs a vended credential: without a token the op
-   * short-circuits as typed `credential_required` (the thread pack's vend-
+   * short-circuits as typed `credential_required` (the threads' vend-
    * and-replay capture payload) — it never calls the remote unauthenticated.
    * The token itself rides `authToken`, injected by the replaying thread.
    */
   auth?: boolean
   /** The vended bearer token — set by the replaying thread, never model input. */
   authToken?: string
-  /** Op-supplied headers (e.g. the remote-mcp pack's MCP-Protocol-Version stamp). */
+  /** Op-supplied headers (e.g. the remote-mcp threads' MCP-Protocol-Version stamp). */
   headers?: Record<string, string>
   /** Wall-clock deadline for the call. @default 30_000 */
   timeoutMs?: number

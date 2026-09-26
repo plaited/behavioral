@@ -1,11 +1,11 @@
 /**
- * The rpc auth seam's thread pack — the vend-and-replay spine that wires the
+ * The rpc auth seam's threads — the vend-and-replay spine that wires the
  * shell faculty's `rpc` op to the security faculty's credential vending.
  *
  * @remarks
  * The declarative flow: an `rpc` op declared `auth: true` short-circuits (in
  * the shell faculty) as a typed `credential_required` result echoing the
- * originating request — the capture payload. This pack completes the
+ * originating request — the capture payload. These threads complete the
  * round-trip:
  *
  * 1. **requestor** — a `credential_required` result (first attempt only: a

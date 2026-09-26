@@ -9,7 +9,7 @@ description: >
   styling emerges from generation, not component tokens.
 omitted:
   - section: components
-    reason: "basic theming — component styling emerges from generation (the interface pack derives structure from Structural IA; these tokens carry values only)"
+    reason: "basic theming — component styling emerges from generation (the ui_* producer threads derive structure from Structural IA; these tokens carry values only)"
 brand:
   name: behavioral.sh
   product: behavioral.sh

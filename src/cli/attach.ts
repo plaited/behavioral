@@ -18,7 +18,7 @@ export type AttachResult = {
  * Ingress: each prompt line resolves to a `tui_command` event sent as a
  * JSON-RPC `trigger` request; the engine's guard threads validate it. Egress:
  * `trace` notifications render (kind-colored) lines; `ui_*` selections render
- * when the interface pack lands — today the TUI renders trace/log lines only.
+ * when the ui_* producer threads lands — today the TUI renders trace/log lines only.
  *
  * @public
  */

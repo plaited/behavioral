@@ -4,7 +4,7 @@ import { FACULTY_MESSAGE_KINDS } from '../faculties.constants.ts'
 import { type ChoiceQuestion, choiceQuestionSchema } from './schemas.ts'
 
 /**
- * The System One faculty's admission judgment thread pack — the BP-native
+ * The System One faculty's admission judgment threads — the BP-native
  * blocking judge. When systemOne is wired, a validated candidate (the
  * `add_thread` op's structural verdict) does not admit directly: its
  * admission is BLOCKED while a system-one Decision judges the proposed
@@ -195,7 +195,7 @@ export const ADMISSION_INPUT_SCHEMA = {
   additionalProperties: false,
 } as unknown as JSONSchemaType<AdmissionDecisionInput>
 
-/** The issued Decision input's boundary — the pack's jq must produce exactly this. */
+/** The issued Decision input's boundary — the threads' jq must produce exactly this. */
 export const validateAdmissionInput = ajv.compile(ADMISSION_INPUT_SCHEMA)
 
 /** The judged outcome's boundary — the composition's admission gate consumes only conforming verdicts. */
@@ -267,5 +267,5 @@ const admissionVerdict: Thread = {
   ],
 }
 
-/** The admission judgment pack — mounts with systemOne (the composition wires it). */
+/** The admission judgment threads — mounts with systemOne (the composition wires it). */
 export const admissionJudgmentThreads: Thread[] = [admissionIssue, admissionGate, admissionVerdict]

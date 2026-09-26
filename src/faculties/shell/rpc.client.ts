@@ -7,7 +7,7 @@
  * `_meta`, protocol versions, or tool semantics — it carries the JSON-RPC
  * envelope (`{ jsonrpc: "2.0", id, method, params }`) over one stateless
  * HTTP POST per call. The MCP layering (request stamping, `server/discover`,
- * `tools/call`, MRTR) lives in the remote-mcp thread pack, not here.
+ * `tools/call`, MRTR) lives in the remote-mcp threads, not here.
  *
  * Auth is a seam, not a capability: the client does not know about OAuth —
  * it asks the injectable `getAuthToken` for a token and rides it as a
