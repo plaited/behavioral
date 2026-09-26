@@ -80,8 +80,8 @@ addThread({
 A thread is an object with `label`, `rules` (an array of `Idioms` sync points),
 and optional `once` and `space`. Without `once`, the thread loops its `rules`
 indefinitely; with `once: true`, it runs through the rules once and completes.
-The `label` identifies the thread in traces; the `space` scopes it (absent =
-root). Invalid thread arguments (failing
+The `label` identifies the thread in traces; the `space` stamps its idioms
+(absent = root — see Space matching below). Invalid thread arguments (failing
 `ThreadSchema`, or an un-compilable `detailSchema`) are surfaced as an
 `add_thread_error` trace, not a throw — the thread simply isn't added.
 
@@ -130,6 +130,25 @@ detail"; that keeps existing threads' filtering unchanged. All four listener
 idioms — `waitFor`, `block`, `interrupt`, `transform` — share this one matching
 seam, so both flags apply uniformly. `block` with `ingressMatch: true` is how
 backpressure on external events is expressed.
+
+#### Space matching
+
+Space scoping is **root authority** — visibility flows UP only. A thread's
+optional `space` stamp (absent = root) applies to all its idioms:
+
+| listener | candidate event | matches? |
+|----------|-----------------|----------|
+| root (unstamped) | any space | yes — a root listener sees every space |
+| space `s1` | `s1` | yes |
+| space `s1` | root or a sibling space | no — a stamped listener never escapes its space |
+
+A root thread can wait on, block, interrupt, and transform candidates in
+every space; a space-stamped thread is confined to its own — a thread
+governing several spaces is admitted per space explicitly, each mount
+stamped. Requests are emissions, not observations: a thread's request bids
+only in its own space (root requests bid in root). The `transform` target
+re-enters stamped with the **source event's** space — a root transformer's
+output stays in the space it observed.
 
 ### `useTrace` — observation and the action channel
 
@@ -224,7 +243,9 @@ applies the contract itself: each `query` is evaluated over `selected.detail`
 by the engine's internal jq subprocess (`src/behavioral/jq.worker.ts`, driven
 by the `evaluateTransform` bridge in `behavioral.utils.ts`), and the result
 re-enters as a `once` thread requesting `{ type: target, detail: result.value }`
-stamped with the contract's `space` — the target stays request-origin. The
+stamped with the **source event's** space (a stamped contract's space equals
+the event's — stamped confinement; a root transformer's output stays in the
+space it observed) — the target stays request-origin. The
 engine does no arbitrary I/O; its only external dependency is the jq binary.
 
 Failures are errors-as-data: a contract that fails (jq error, no detail,

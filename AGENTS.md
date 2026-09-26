@@ -98,7 +98,10 @@ faculties), plus its `tests/`:
   lane; the composition mounts it when systemOne is wired) and the supervision
   threads (the runtime circuit breaker — the counting supervisor, its
   block-then-judge verdict, and its recovery; `bProgram({ supervision })`
-  mounts the pack with systemOne when the host names watched types)
+  mounts the pack with systemOne when the host names watched types; a
+  root-mounted supervisor's block is global — one space's runaway loop halts
+  the watched type everywhere — while a space-stamped supervisor set
+  confines, expressible but not built)
 - `shell/` — bun-direct script execution — `run` op TS scripts via `bun run -`,
   `shell` op Bun Shell commands through the wrapper; `rpc` op generic remote
   JSON-RPC (the remote-mcp layering is the threads, not the op);
