@@ -16,20 +16,29 @@
  * (the 2026-09-25 design.md rulings), and anything beyond the thin vertical
  * (event → scale preflight → generation → render) is a named later iteration.
  *
+ * The pipeline is PER-TRIGGER: the composition's host leg (b-program's pump)
+ * mints one `uiPipelineThreads({ id, detail })` set per `render` ingress —
+ * every correlation id is per-trigger (`<id>-scale`/`-tenant`/`-gen`/
+ * `-render`), so concurrent pipelines interleave without dropping, and the
+ * trigger's detail rides the generate request (the user's content,
+ * model-facing by right) into the systemTwo user message.
+ *
  * MINIMAL notes (greppable ceilings, the upgrade path is the loop):
  * - the scan validates token-group SHAPE only — per-value CSS/dimension
  *   linting is the design.md linter's job (`npx @google/design.md lint`);
  * - the generation trigger is the b-trigger convention `render` (a ui_event
  *   whose inner BPEvent has type `render`); the wider ingress vocabulary
  *   (ui_snapshot rehydration, ui_form_submit) rides later iterations;
- * - the triggering event's DETAIL does not survive the scale-check round
- *   trip (the controller's `ui_scale_check_result` carries no source
- *   reference) — v1 composes the view from target + scale + design context.
+ * - the user message renders the trigger detail as compact JSON — a
+ *   structured content contract (named fields → message parts) rides the
+ *   loop's data;
+ * - the generation provider/modelId are the fixed conventions below — the
+ *   composition config seam is the loop's next slice.
  *
  * @packageDocumentation
  */
 
-import type { Thread } from '../behavioral/behavioral.types.ts'
+import type { JsonObject, Thread } from '../behavioral/behavioral.types.ts'
 import {
   CONTROLLER_INCOMING_MESSAGE_TYPES,
   CONTROLLER_OUTGOING_MESSAGE_TYPES,
@@ -294,8 +303,18 @@ const designTenant: Thread = {
   ],
 }
 
-// ── The scale preflight — Structural IA/E: fixed mechanism (the controller
-//    resolves the DOM fact), thread-authored policy (the hold) ────────────────
+// ── The per-trigger pipeline — the dispatcher's mint ─────────────────────────
+//
+// Structural IA/E (fixed mechanism, thread-authored policy) + the concurrency
+// fix: ONE standing pipeline dropped concurrent triggers and lost the
+// trigger detail at the scale-check round trip. The shape is now a dispatcher
+// (the composition's host leg — b-program's pump, the admission-path
+// precedent: it joins the render ingress and addThreads the set under the
+// re-entry law) + per-trigger once-threads, each carrying its whole pipeline
+// in pure data: the correlation ids are per-trigger, the joins are the
+// echoed id (the controller wire carries no ctx) and ctx.echo (the store and
+// systemTwo wires echo it verbatim — both lanes exist), and the trigger's
+// detail rides the generate request into the user message.
 
 /** The generation trigger's event type — the b-trigger convention (`b-trigger="click:render"`). */
 export const UI_RENDER_TRIGGER_TYPE = 'render'
@@ -307,27 +326,22 @@ export const UI_RENDER_TRIGGER_TYPE = 'render'
  */
 export const UI_GENERATE_EVENT_TYPE = 'generate'
 
-/** The preflight's scale-check request id — the result join (the controller echoes the id). */
-export const UI_SCALE_CHECK_CALL_ID = 'ui-scale-check'
-
-/** The default render target when the trigger carries none. */
+/** The default render target when the trigger detail carries none. */
 export const UI_RENDER_TARGET = 'body'
 
 /** The render swap mode the pipeline composes with. */
 export const UI_RENDER_SWAP: (typeof SWAP_MODES)[keyof typeof SWAP_MODES] = SWAP_MODES.innerHTML
 
-/** The render trigger's detail contract — any object; `target` names the render target. */
-const RENDER_TRIGGER_SCHEMA = {
-  type: 'object',
-  properties: { target: { type: 'string', minLength: 1 } },
-  required: [],
-  additionalProperties: true,
-} as const
+/** The render draft's event type — the model's composition, held as data before the gate. */
+export const UI_RENDER_DRAFT_TYPE = 'render_draft'
 
 /**
  * The generation request's detail — the scale-stamped trigger. The effective
- * scale and target ride `ctx` (host-supplied, never model-facing — the
- * Consumption/F lane); `echo.check` carries the scale-check lineage.
+ * scale and target ride `ctx` (host-supplied facts, never model-facing —
+ * the Consumption/F lane); `echo.pipeline` carries the per-trigger lineage;
+ * `request` is the TRIGGER's OWN detail — the user's content, model-facing
+ * by right (it composes the systemTwo user message; the ctx echo lane is
+ * only its transport between pipeline legs).
  */
 export const UI_GENERATE_SCHEMA = {
   type: 'object',
@@ -337,87 +351,26 @@ export const UI_GENERATE_SCHEMA = {
       properties: {
         scale: { type: 'string', minLength: 1 },
         target: { type: 'string', minLength: 1 },
-        echo: { type: 'object', required: [], additionalProperties: true },
+        echo: {
+          type: 'object',
+          properties: { pipeline: { type: 'string', minLength: 1 } },
+          required: ['pipeline'],
+          additionalProperties: true,
+        },
       },
-      required: ['scale', 'target'],
+      required: ['scale', 'target', 'echo'],
       additionalProperties: true,
     },
+    request: { type: 'object', required: [], additionalProperties: true },
   },
   required: ['ctx'],
   additionalProperties: false,
 } as const
 
 /**
- * The scale preflight — the admission-gate shape over the DOM fact:
- *
- * - rule 1 — a `render` trigger derives its `ui_scale_check` request (the
- *   controller resolves the target's effective `b-scale` and replies
- *   `ui_scale_check_result`, joined by the echoed id — the controller wire
- *   carries no ctx, so the id IS the join lane);
- * - rule 2 — the hold: the `generate` request is BLOCKED until the
- *   correlated result re-enters, and the result is stamped INTO the
- *   generation request's `ctx` (block + transform in one sync point — the
- *   block is the in-flight discipline, the transform is the release).
- *
- * Without a browser attached the result never arrives: the preflight parks
- * at rule 2 with its block declared — the deadlocked-ish hold visible in the
- * frontier (pending_bids), CORRECT for the first pass (no browser, no scale
- * fact, no generation). A foreign-echo result (a different id) never matches
- * the listener — it joins nothing and the hold stands.
- */
-const preflight: Thread = {
-  label: 'ui/preflight',
-  rules: [
-    {
-      transform: [
-        {
-          type: UI_RENDER_TRIGGER_TYPE,
-          detailSchema: RENDER_TRIGGER_SCHEMA,
-          query: `. as $d | { id: "${UI_SCALE_CHECK_CALL_ID}", target: ($d.target // "${UI_RENDER_TARGET}"), swap: "${UI_RENDER_SWAP}" }`,
-          target: CONTROLLER_INCOMING_MESSAGE_TYPES.ui_scale_check,
-        },
-      ],
-    },
-    {
-      block: [{ type: UI_GENERATE_EVENT_TYPE }],
-      transform: [
-        {
-          type: CONTROLLER_OUTGOING_MESSAGE_TYPES.ui_scale_check_result,
-          detailSchema: {
-            type: 'object',
-            properties: { id: { type: 'string', const: UI_SCALE_CHECK_CALL_ID } },
-            required: ['id'],
-            additionalProperties: true,
-          },
-          query: `. as $d | { ctx: { scale: $d.effectiveScale, target: $d.target, echo: { check: $d.id } } }`,
-          target: UI_GENERATE_EVENT_TYPE,
-        },
-      ],
-    },
-  ],
-}
-
-// ── The generation lane — Consumption/F's two lanes: tokens (the vocabulary)
-//    ride model-facing, prose rides system context; the scale fact and target
-//    ride ctx (host-supplied, never model-facing) ──────────────────────────
-
-/** The design-tenant fetch's correlation id — the compose thread joins on it. */
-export const UI_DESIGN_GET_CALL_ID = 'ui-design-context'
-
-/** The systemTwo generation call's correlation id — the render composer joins on it. */
-export const UI_GENERATION_CALL_ID = 'ui-render-generation'
-
-/** The render draft's event type — the model's composition, held as data before the gate. */
-export const UI_RENDER_DRAFT_TYPE = 'render_draft'
-
-/** The composed render detail's id (the pipeline's one render id in v1). */
-export const UI_RENDER_ID = 'ui-render'
-
-/**
  * The generation endpoint's provider label — the host's endpoint map must
- * carry it (`useSystemTwo({ endpoints: { default: … } })`). MINIMAL: a
- * config seam (the composition naming its model) arrives with the
- * autoresearch loop's first iteration; v1 is the fixed convention.
+ * carry it (`useSystemTwo({ endpoints: { default: … } })`). MINIMAL: the
+ * composition config seam is the loop's next slice; v1 is the convention.
  */
 export const UI_GENERATION_PROVIDER = 'default'
 
@@ -429,140 +382,203 @@ const GENERATION_INSTRUCTIONS =
   'Compose the HTML fragment for the requested UI view. Reply with ONLY the HTML fragment — no prose, no code fences, no explanation.'
 
 /**
- * generation-context — the scale-stamped generate request fetches the design
- * tenant: the generate ctx rides the store request's `ctx.echo` (the join
- * lane — the store echoes it verbatim), so the compose stage sees the scale,
- * the target, AND the tenant from one source event.
+ * Mint one per-trigger pipeline — the set the composition's host leg adds on
+ * a `render` ingress (the admission-path precedent: the host composes the
+ * pure-data threads; `addThread`'s own ThreadSchema gate is the backstop —
+ * there is no wire proposal to validate, the factory is trusted host code).
+ *
+ * The legs (all once-threads, label `ui/pipeline:<id>/<leg>` — the label is
+ * the capture's lineage key):
+ *
+ * - **scale-issue** — requests the `ui_scale_check` under `<id>-scale` (the
+ *   controller resolves the DOM fact and replies; the echoed id is the join).
+ * - **scale-join** — the correlated reply stamps the `generate` request:
+ *   scale+target via ctx, the pipeline lineage via `ctx.echo.pipeline`, the
+ *   trigger's detail as `request`. Without a browser the reply never arrives
+ *   and this thread parks on its transform listener — the per-trigger hold,
+ *   visible in the frontier (no block is needed: this join is the ONLY path
+ *   to a generate, so the in-flight discipline is structural).
+ * - **context-issue** — the generate fetches the design tenant; the WHOLE
+ *   generate detail rides the store request's `ctx.echo` (the join lane).
+ * - **generation-compose** — the tenant-bearing (or null) store result
+ *   composes the systemTwo request: with a tenant the token VOCABULARY (the
+ *   flattened `--design-*` names, never literal values) rides model-facing
+ *   and the prose rides system context; the trigger's detail composes the
+ *   user message; with NO tenant the request composes plain — the design
+ *   lane is an optional input, never a gate.
+ * - **render-compose** — the model reply composes the render draft: id,
+ *   target, and swap are host-stamped (the model is never trusted with the
+ *   envelope); only the html is model-composed. The standing render-gate
+ *   (below) validates the draft and requests the `ui_render`.
+ *
+ * The trigger detail is baked into the queries via `JSON.stringify` splices
+ * — inert JSON literals to jq's parser (the shell threads' script-splicing
+ * precedent), never string interpolation of raw content.
  */
-const generationContext: Thread = {
-  label: 'ui/generation-context',
-  rules: [
-    {
-      transform: [
-        {
-          type: UI_GENERATE_EVENT_TYPE,
-          detailSchema: UI_GENERATE_SCHEMA,
-          query: `. as $d | { id: "${UI_DESIGN_GET_CALL_ID}", op: "get", input: { collection: "${UI_DESIGN_COLLECTION}", key: "${UI_DESIGN_CONTEXT_KEY}" }, ctx: { echo: $d.ctx } }`,
-          target: FACULTY_MESSAGE_KINDS.store_request,
-        },
-      ],
-    },
-  ],
-}
+export const uiPipelineThreads = ({ id, detail }: { id: string; detail: JsonObject }): Thread[] => {
+  const target = typeof detail.target === 'string' && detail.target.length > 0 ? detail.target : UI_RENDER_TARGET
+  const scaleId = `${id}-scale`
+  const tenantId = `${id}-tenant`
+  const genId = `${id}-gen`
+  const renderId = `${id}-render`
 
-/** The tenant-bearing compose gate: the correlated get result with the ctx echo present. */
-const GENERATION_COMPOSE_SOURCE_SCHEMA = {
-  type: 'object',
-  properties: {
-    id: { type: 'string', const: UI_DESIGN_GET_CALL_ID },
-    ok: { type: 'boolean', const: true },
-    result: {
-      type: 'object',
-      properties: { value: { type: 'object', required: [], additionalProperties: true, nullable: true } },
-      required: ['value'],
-      additionalProperties: true,
-    },
-    ctx: {
-      type: 'object',
-      properties: {
-        echo: {
-          type: 'object',
-          properties: {
-            scale: { type: 'string', minLength: 1 },
-            target: { type: 'string', minLength: 1 },
+  /** The per-trigger generate listener — UI_GENERATE_SCHEMA with the pipeline const baked in. */
+  const generateListenerSchema = {
+    ...UI_GENERATE_SCHEMA,
+    properties: {
+      ...UI_GENERATE_SCHEMA.properties,
+      ctx: {
+        ...UI_GENERATE_SCHEMA.properties.ctx,
+        properties: {
+          ...UI_GENERATE_SCHEMA.properties.ctx.properties,
+          echo: {
+            ...UI_GENERATE_SCHEMA.properties.ctx.properties.echo,
+            properties: { pipeline: { type: 'string', const: id } },
           },
-          required: ['scale', 'target'],
-          additionalProperties: true,
         },
       },
-      required: ['echo'],
-      additionalProperties: true,
     },
-  },
-  required: ['id', 'ok', 'result', 'ctx'],
-  additionalProperties: true,
-} as const
+  } as const
 
-/** The systemTwo request composed from the store result — one source, all three inputs. */
-const GENERATION_COMPOSE_QUERY =
-  `. as $d` +
-  ` | ($d.result.value // null) as $v` +
-  ` | (if $v == null then null else ($v.tokens // null) end) as $tokens` +
-  ` | (if $v == null then null else ($v.sections // null) end) as $sections` +
-  ` | (if $tokens == null then [] else [ ($tokens | paths(scalars)) as $p | "--design-" + ($p | join("-")) ] end) as $vocab` +
-  ` | {` +
-  `    id: "${UI_GENERATION_CALL_ID}",` +
-  `    ctx: { scale: $d.ctx.echo.scale, target: $d.ctx.echo.target },` +
-  `    input: {` +
-  `      provider: "${UI_GENERATION_PROVIDER}",` +
-  `      modelId: "${UI_GENERATION_MODEL_ID}",` +
-  `      instructions: (` +
-  `        "${GENERATION_INSTRUCTIONS}"` +
-  `        + (if ($vocab | length) > 0 then "\\n\\nReference these CSS custom properties by name — never literal values: " + ($vocab | join(", ")) else "" end)` +
-  `        + (if $sections == null then "" else "\\n\\nDesign rationale:\\n\\n" + ([ $sections | to_entries[] | "## " + .key + "\\n\\n" + (.value // "") ] | join("\\n\\n")) end)` +
-  `      ),` +
-  `      input: [ { type: "message", role: "user", content: "Compose the HTML fragment for the requested UI view." } ],` +
-  `    },` +
-  `  }`
-
-/**
- * generation-compose — the tenant-bearing (or null-tenant) store result
- * composes the systemTwo request. With a tenant the token VOCABULARY (the
- * flattened `--design-*` property names, never literal values) and the prose
- * sections ride model-facing; the scale fact and target ride `ctx` (never
- * model-facing). With NO tenant (the plain-degradation lane) the request
- * composes plain — the design lane is an optional input, never a gate.
- */
-const generationCompose: Thread = {
-  label: 'ui/generation-compose',
-  rules: [
-    {
-      transform: [
-        {
-          type: FACULTY_MESSAGE_KINDS.store_request_result,
-          detailSchema: GENERATION_COMPOSE_SOURCE_SCHEMA,
-          query: GENERATION_COMPOSE_QUERY,
-          target: FACULTY_MESSAGE_KINDS.system_two_request,
+  const scaleIssue: Thread = {
+    label: `ui/pipeline:${id}/scale-issue`,
+    once: true,
+    rules: [
+      {
+        request: {
+          type: CONTROLLER_INCOMING_MESSAGE_TYPES.ui_scale_check,
+          detail: { id: scaleId, target, swap: UI_RENDER_SWAP },
         },
-      ],
-    },
-  ],
-}
+      },
+    ],
+  }
 
-/**
- * render-compose — the model reply composes the render draft: the id, target,
- * and swap are host-stamped (the model is never trusted with the envelope);
- * only the html is model-composed. An empty/missing reply produces a null
- * html — held as data at the gate, never a silent render.
- */
-const renderCompose: Thread = {
-  label: 'ui/render-compose',
-  rules: [
-    {
-      transform: [
-        {
-          type: FACULTY_MESSAGE_KINDS.system_two_request_result,
-          detailSchema: {
-            type: 'object',
-            properties: {
-              id: { type: 'string', const: UI_GENERATION_CALL_ID },
-              ok: { type: 'boolean', const: true },
-              ctx: {
-                type: 'object',
-                properties: { target: { type: 'string', minLength: 1 } },
-                required: ['target'],
-                additionalProperties: true,
-              },
+  const scaleJoin: Thread = {
+    label: `ui/pipeline:${id}/scale-join`,
+    once: true,
+    rules: [
+      {
+        transform: [
+          {
+            type: CONTROLLER_OUTGOING_MESSAGE_TYPES.ui_scale_check_result,
+            detailSchema: {
+              type: 'object',
+              properties: { id: { type: 'string', const: scaleId } },
+              required: ['id'],
+              additionalProperties: true,
             },
-            required: ['id', 'ok', 'ctx'],
-            additionalProperties: true,
+            query: `. as $d | { ctx: { scale: $d.effectiveScale, target: ($d.target // "${target}"), echo: { pipeline: "${id}" } }, request: ${JSON.stringify(detail)} }`,
+            target: UI_GENERATE_EVENT_TYPE,
           },
-          query: `. as $d | ([ $d.result.items[]? | select(.type == "message") | .content[]? | select(.type == "output_text") | .text ] | join("")) as $text | { id: "${UI_RENDER_ID}", target: $d.ctx.target, html: (if ($text | length) > 0 then $text else null end), swap: "${UI_RENDER_SWAP}" }`,
-          target: UI_RENDER_DRAFT_TYPE,
-        },
-      ],
-    },
-  ],
+        ],
+      },
+    ],
+  }
+
+  const contextIssue: Thread = {
+    label: `ui/pipeline:${id}/context-issue`,
+    once: true,
+    rules: [
+      {
+        transform: [
+          {
+            type: UI_GENERATE_EVENT_TYPE,
+            detailSchema: generateListenerSchema,
+            query: `. as $d | { id: "${tenantId}", op: "get", input: { collection: "${UI_DESIGN_COLLECTION}", key: "${UI_DESIGN_CONTEXT_KEY}" }, ctx: { echo: $d } }`,
+            target: FACULTY_MESSAGE_KINDS.store_request,
+          },
+        ],
+      },
+    ],
+  }
+
+  const generationCompose: Thread = {
+    label: `ui/pipeline:${id}/generation-compose`,
+    once: true,
+    rules: [
+      {
+        transform: [
+          {
+            type: FACULTY_MESSAGE_KINDS.store_request_result,
+            detailSchema: {
+              type: 'object',
+              properties: {
+                id: { type: 'string', const: tenantId },
+                ok: { type: 'boolean', const: true },
+                result: {
+                  type: 'object',
+                  properties: { value: { type: 'object', required: [], additionalProperties: true, nullable: true } },
+                  required: ['value'],
+                  additionalProperties: true,
+                },
+                ctx: {
+                  type: 'object',
+                  properties: { echo: { type: 'object', required: [], additionalProperties: true } },
+                  required: ['echo'],
+                  additionalProperties: true,
+                },
+              },
+              required: ['id', 'ok', 'result', 'ctx'],
+              additionalProperties: true,
+            },
+            query:
+              `. as $d | ($d.ctx.echo) as $e | ($d.result.value) as $v` +
+              ` | (if $v == null then null else ($v.tokens // null) end) as $tokens` +
+              ` | (if $v == null then null else ($v.sections // null) end) as $sections` +
+              ` | (if $tokens == null then [] else [ ($tokens | paths(scalars)) as $p | "--design-" + ($p | join("-")) ] end) as $vocab` +
+              ` | {` +
+              `    id: "${genId}",` +
+              `    ctx: { scale: $e.ctx.scale, target: $e.ctx.target, pipeline: "${id}" },` +
+              `    input: {` +
+              `      provider: "${UI_GENERATION_PROVIDER}",` +
+              `      modelId: "${UI_GENERATION_MODEL_ID}",` +
+              `      instructions: (` +
+              `        "${GENERATION_INSTRUCTIONS}"` +
+              `        + (if ($vocab | length) > 0 then "\\n\\nReference these CSS custom properties by name — never literal values: " + ($vocab | join(", ")) else "" end)` +
+              `        + (if $sections == null then "" else "\\n\\nDesign rationale:\\n\\n" + ([ $sections | to_entries[] | "## " + .key + "\\n\\n" + (.value // "") ] | join("\\n\\n")) end)` +
+              `      ),` +
+              `      input: [ { type: "message", role: "user", content: ("View request: " + (($e.request // {}) | tostring)) } ],` +
+              `    },` +
+              `  }`,
+            target: FACULTY_MESSAGE_KINDS.system_two_request,
+          },
+        ],
+      },
+    ],
+  }
+
+  const renderCompose: Thread = {
+    label: `ui/pipeline:${id}/render-compose`,
+    once: true,
+    rules: [
+      {
+        transform: [
+          {
+            type: FACULTY_MESSAGE_KINDS.system_two_request_result,
+            detailSchema: {
+              type: 'object',
+              properties: {
+                id: { type: 'string', const: genId },
+                ok: { type: 'boolean', const: true },
+                ctx: {
+                  type: 'object',
+                  properties: { target: { type: 'string', minLength: 1 } },
+                  required: ['target'],
+                  additionalProperties: true,
+                },
+              },
+              required: ['id', 'ok', 'ctx'],
+              additionalProperties: true,
+            },
+            query: `. as $d | ([ $d.result.items[]? | select(.type == "message") | .content[]? | select(.type == "output_text") | .text ] | join("")) as $text | { id: "${renderId}", target: $d.ctx.target, html: (if ($text | length) > 0 then $text else null end), swap: "${UI_RENDER_SWAP}" }`,
+            target: UI_RENDER_DRAFT_TYPE,
+          },
+        ],
+      },
+    ],
+  }
+
+  return [scaleIssue, scaleJoin, contextIssue, generationCompose, renderCompose]
 }
 
 /**
@@ -588,13 +604,10 @@ const renderGate: Thread = {
   ],
 }
 
-/** The ui_* producer threads — the thread set `bProgram` mounts with shell + store + systemTwo. */
-export const uiThreads: Thread[] = [
-  designScanBoot,
-  designTenant,
-  preflight,
-  generationContext,
-  generationCompose,
-  renderCompose,
-  renderGate,
-]
+/**
+ * The ui_* producer threads' STANDING set — what `bProgram` mounts with shell
+ * + store + systemTwo: the boot design scan, the tenant + artifact compile,
+ * and the render gate. The pipeline itself is per-trigger
+ * ({@link uiPipelineThreads}, minted by the composition's host leg).
+ */
+export const uiThreads: Thread[] = [designScanBoot, designTenant, renderGate]

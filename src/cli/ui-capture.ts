@@ -6,18 +6,21 @@
  * An in-process RAW `useTrace` consumer (the eval ruling's canonical path:
  * in-process = raw; the per-consumer catch means it coexists with the
  * redacted trace lane untouched) writing ui-pipeline runs to a capture sink
- * the eval harness reads. A run is the trace slice from a `render` ingress
- * (the pipeline's generation trigger) to its `ui_render` selection — ingress
- * → preflight → generation → render.
+ * the eval harness reads. A run is LINEAGE-KEYED, never time-windowed: the
+ * per-trigger pipeline's minted id (parsed from the mint thread labels,
+ * the correlation ids, and the ctx lineage) opens, routes, and closes the
+ * run — so interleaved pipelines attribute correctly and unrelated faculty
+ * traffic (boot scans, other spaces' requests) stays out of the runs.
  *
  * The Thread set rides `thread_added` for free, in two lanes: the STANDING
- * threads (the policy set — the once-thread boots are pre-run mechanics) and
- * the run's once-thread RE-ENTRIES (the transform targets and faculty
- * result re-entries), position-tagged by the message index at which each
- * arrived. The position tag is what makes prefix replay faithful: a replay
- * of the first N messages registers exactly the re-entries that existed at
- * that point — no unselectable events (the frontier's synthetic once-thread
- * reconstruction covers requesters), no phantom future candidates.
+ * threads (the policy set) and the run's once-thread RE-ENTRIES (the minted
+ * pipeline legs and the transform/faculty result re-entry requesters),
+ * position-tagged by the message index at which each arrived. The pump's
+ * SUBSCRIBER-ORDER WARP — the composition's pump subscribes first, so a
+ * minted set (and its scale-check selection) reaches this consumer BEFORE
+ * the opening render-ingress selection trace — is handled by binding runs
+ * lazily: the pipeline id arrives with the mint (or the first id-bearing
+ * message), the ingress trace is inserted at message 0 whenever it binds.
  *
  * The replay pass is `frontier_request { op: 'replay' }` over a captured
  * run — the divergence view: where requests blocked, what the frontier
@@ -27,9 +30,9 @@
  * graders are consumer-authored (the eval data-contract) — this module
  * wires the loop, nothing more.
  *
- * MINIMAL: a run closes at the `ui_render` terminus or is superseded by the
- * next `render` ingress (an incomplete hold run is captured as-is — exactly
- * the divergence-view fodder); a quiescence-based flush rides a named need.
+ * MINIMAL: a run closes ONLY at its `ui_render` terminus (the id-joined
+ * draft) — a held run (no browser reply) stays open forever; the
+ * quiescence-based flush of incomplete runs rides a named need.
  *
  * @packageDocumentation
  */
@@ -61,8 +64,10 @@ const normalizeThread = (thread: Thread): Thread => {
   return out as Thread
 }
 
-/** One captured ui-pipeline run: the standing Thread set, the position-tagged re-entries, the run's selections. */
+/** One captured ui-pipeline run: the lineage key, the standing Thread set, the position-tagged re-entries, the run's selections. */
 export type UiRun = {
+  /** The minted pipeline id — the run's lineage key (`ui-<ueid>`). */
+  pipeline: string
   startedAt: number
   threads: Thread[]
   reentries: UiReentry[]
@@ -70,62 +75,139 @@ export type UiRun = {
 }
 
 /**
+ * The pipeline id of a mint/re-entry thread, parsed from its label — the
+ * three label shapes the composition produces: the minted leg
+ * (`ui/pipeline:<pid>/<leg>`), the engine's transform re-entry
+ * (`Transform(ui/pipeline:<pid>/<leg> => target)`), and the faculty result
+ * re-entry (`on_<type>_<pid>-<leg>`). The correlation suffixes are the same
+ * legs the pipeline composes (ueid is base36 — no underscores in a pid).
+ */
+const pipelineOfThread = (thread: Thread): string | undefined => {
+  const mint = /^ui\/pipeline:([^/]+)\//.exec(thread.label)
+  if (mint !== null) return mint[1]
+  const transform = /Transform\(ui\/pipeline:([^/]+)\//.exec(thread.label)
+  if (transform !== null) return transform[1]
+  const reentry = /_(ui-[a-z0-9]+-(?:scale|tenant|gen|render))$/.exec(thread.label)
+  if (reentry !== null) return reentry[1]!.slice(0, -(reentry[1]!.length - reentry[1]!.lastIndexOf('-')))
+  return undefined
+}
+
+/**
+ * The pipeline id of a selection, parsed from the wire shapes the pipeline
+ * composes: the generate lineage (`ctx.echo.pipeline`), the systemTwo ctx
+ * (`ctx.pipeline`), and every correlation id (`<pid>-scale|tenant|gen|render`).
+ * A selection with no lineage is unrelated traffic — it belongs to no run.
+ */
+const pipelineOfSelection = (selected: { type: string; detail?: BPEvent['detail'] }): string | undefined => {
+  const detail = (selected.detail ?? {}) as {
+    ctx?: { pipeline?: unknown; echo?: { pipeline?: unknown } }
+    id?: unknown
+  }
+  if (typeof detail.ctx?.echo?.pipeline === 'string') return detail.ctx.echo.pipeline
+  if (typeof detail.ctx?.pipeline === 'string') return detail.ctx.pipeline
+  if (typeof detail.id === 'string') {
+    const id = /^(.+)-(scale|tenant|gen|render)$/.exec(detail.id)
+    if (id !== null) return id[1]
+  }
+  return undefined
+}
+
+/**
+ * The pipeline id of a once-thread's REQUESTED event — the fallback when the
+ * label carries no lineage (a STANDING thread's transform re-entry, e.g. the
+ * render gate's `Transform(ui/render-gate => ui_render)`: the requester's
+ * request detail still carries the per-trigger id, so the re-entry routes to
+ * its run and the replay can reconstruct the gate's request).
+ */
+const pipelineOfRequest = (thread: Thread): string | undefined => {
+  for (const rule of thread.rules) {
+    if (rule.request !== undefined) {
+      const pipeline = pipelineOfSelection(rule.request)
+      if (pipeline !== undefined) return pipeline
+    }
+  }
+  return undefined
+}
+
+/**
  * The raw capture consumer — mount beside the redacted lane
  * (`runtime.useTrace(createUiCapture({ sink }))`). The sink is the eval
  * harness's own code; {@link uiCaptureFileSink} is the durable default.
+ *
+ * Runs are keyed by pipeline lineage and MANY may be open at once
+ * (interleaved triggers are the per-trigger pipeline's norm). The mint's
+ * subscriber-order warp — the minted legs (and the first scale-check
+ * selection) arrive BEFORE the render ingress trace — is handled by binding
+ * lazily: the ingress trace is held until a pipeline id arrives, then
+ * inserted at message 0 of the NEWEST unbound run (the mint order is
+ * per-trigger sequential, so newest-unbound is unambiguous).
  */
 export const createUiCapture = ({ sink }: { sink: (run: UiRun) => void }): ((trace: Trace) => void) => {
   const threads: Thread[] = []
-  let open: UiRun | null = null
-  /** Once-thread re-entries seen since the last selection, while no run is open. */
-  let buffered: Thread[] = []
-  const flush = (): void => {
-    if (open === null) return
-    sink({ ...open, threads: [...threads], reentries: [...open.reentries] })
-    open = null
+  /** The open runs, keyed by pipeline id — several may be open (interleaving). */
+  const open = new Map<string, UiRun>()
+  /** Ingress traces not yet bound to a pipeline (the warp's true-order form). */
+  const unboundIngress: SelectionTrace[] = []
+  const ensureRun = (pipeline: string, timestamp: number): UiRun => {
+    let run = open.get(pipeline)
+    if (run === undefined) {
+      run = { pipeline, startedAt: timestamp, threads: [], reentries: [], messages: [] }
+      open.set(pipeline, run)
+      // Bind the OLDEST held ingress (FIFO — triggers mint in arrival order).
+      const ingress = unboundIngress.shift()
+      if (ingress !== undefined) run.messages.push(ingress)
+    }
+    return run
+  }
+  const flush = (run: UiRun): void => {
+    open.delete(run.pipeline)
+    sink({ ...run, threads: [...threads], reentries: [...run.reentries] })
   }
   return (trace: Trace): void => {
     if (trace.kind === TRACE_MESSAGE_KINDS.thread_added) {
-      if (trace.thread.once === true) {
-        // A once-thread re-entry (a transform target's or a faculty result's
-        // requester). While a run is open it is position-tagged for faithful
-        // prefix replay; while closed it buffers — the trigger's own
-        // transform re-entries arrive BEFORE the opening selection trace
-        // (the engine adds the once-thread, then traces the selection), so
-        // the buffer is what backfills a run at open. Boot onces ride the
-        // same buffer and are cleared by the boot's own selections.
-        const thread = normalizeThread(trace.thread)
-        if (open === null) buffered.push(thread)
-        else open.reentries.push({ at: open.messages.length, thread })
+      const thread = trace.thread
+      if (thread.once === true) {
+        // A once-thread re-entry: the minted pipeline legs, the transform
+        // target requesters, the faculty result re-entries. Route by label
+        // lineage, then by the REQUESTED event's id (a standing thread's
+        // transform re-entry still names its pipeline in the request
+        // detail). Unattributable onces (boot scans, replays) belong to no
+        // run — dropped, never buffered into the next one.
+        const pipeline = pipelineOfThread(thread) ?? pipelineOfRequest(thread)
+        if (pipeline === undefined) return
+        const run = ensureRun(pipeline, trace.timestamp)
+        // The minted legs compose the run — they precede its first message
+        // by construction (warp or true order), so they position-tag at 0;
+        // mid-run re-entries tag at the index their target will take.
+        run.reentries.push({ at: run.messages.length === 0 ? 0 : run.messages.length, thread: normalizeThread(thread) })
       } else {
-        threads.push(trace.thread)
+        threads.push(thread)
       }
       return
     }
     if (trace.kind !== TRACE_MESSAGE_KINDS.selection) return
     const selected = trace.selected
     if (selected.type === UI_RENDER_TRIGGER_TYPE && selected.ingress === true) {
-      // A new trigger supersedes an open run — an incomplete hold run is
-      // captured as-is (the divergence view's raw material) — and the
-      // buffered re-entries are this trigger's own transforms: backfill at 0.
-      flush()
-      open = {
-        startedAt: trace.timestamp,
-        threads: [],
-        reentries: buffered.map((thread) => ({ at: 0, thread })),
-        messages: [trace],
+      // The opening ingress — no lineage of its own. Warped order: the mint
+      // already created the run — bind to the NEWEST unbound run (insert at
+      // message 0, before the warp-arrived scale check). True order: hold
+      // until the mint (or first id-bearing message) creates the run.
+      const unbound = [...open.values()].filter(
+        (run) => run.messages.length === 0 || run.messages[0]?.selected.type !== UI_RENDER_TRIGGER_TYPE,
+      )
+      const run = unbound.at(-1)
+      if (run === undefined) {
+        unboundIngress.push(trace)
+        return
       }
-      buffered = []
+      run.messages.unshift(trace)
       return
     }
-    if (open === null) {
-      // A closed-world selection consumes whatever re-entries were pending
-      // — they belong to its cascade, not to a future run.
-      buffered = []
-      return
-    }
-    open.messages.push(trace)
-    if (selected.type === 'ui_render') flush()
+    const pipeline = pipelineOfSelection(selected)
+    if (pipeline === undefined) return // unrelated traffic — no run
+    const run = ensureRun(pipeline, trace.timestamp)
+    run.messages.push(trace)
+    if (selected.type === 'ui_render') flush(run)
   }
 }
 

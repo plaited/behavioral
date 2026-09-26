@@ -94,9 +94,16 @@ What keeps the wire safe across every host:
 Nothing above emits `ui_*` on the agent side by itself — the view-generation
 policy is composition threads: `src/cli/ui-threads.ts`, mounted by `bProgram`
 when shell + store + systemTwo are all on (absent systemTwo there is no
-generation lane and the threads don't mount). The initial set is the thin
-vertical — ingress `ui_event` → scale preflight → generation → `ui_render` —
-refined by the autoresearch loop, not by argument.
+generation lane and the threads don't mount). The shape is a dispatcher +
+per-trigger pipelines: a STANDING set (the boot design scan, the tenant +
+artifact compile, the render gate) plus, on each `render` ingress, one MINTED
+pipeline — `uiPipelineThreads({ id, detail })`, five once-threads added by the
+composition's host leg (b-program's pump, the admission-path precedent) — so
+concurrent triggers interleave without dropping and every correlation id is
+per-trigger (`<id>-scale`/`-tenant`/`-gen`/`-render`, label
+`ui/pipeline:<id>/<leg>`). The vertical is the same — ingress `ui_event` →
+scale preflight → generation → `ui_render` — refined by the autoresearch
+loop, not by argument.
 
 ### The design tenant (DESIGN.md → store)
 
@@ -123,31 +130,37 @@ file (tokens and sections null, the rejection riding the warnings). A missing
 ### The scale preflight
 
 A `render` trigger (the b-trigger convention — a `ui_event` whose inner BPEvent
-has type `render`, optionally carrying `detail.target`) drives the preflight
-thread: it requests `ui_scale_check` for the render target and HOLDS the
-generation request (`generate`, a thread-owned event — never a `ui_*` wire
-message) until the correlated `ui_scale_check_result` re-enters. The join is
-the echoed `id` (the controller wire carries no ctx); a result with a foreign
-id joins nothing. The effective scale and target are stamped into the
-generation request's `ctx` — host-supplied, never model-facing.
+has type `render`, optionally carrying `detail.target`) drives the pipeline's
+scale legs: the minted set requests `ui_scale_check` under its per-trigger id
+and the scale-join once-thread composes the generation request (`generate`, a
+thread-owned event — never a `ui_*` wire message) when the correlated
+`ui_scale_check_result` re-enters. The join is the echoed `id` (the controller
+wire carries no ctx); a result with a foreign id joins nothing. The effective
+scale and target are stamped into the generation request's `ctx` —
+host-supplied, never model-facing — and the TRIGGER's own detail rides as the
+request's `request` field: the user's content, model-facing by right (it
+composes the systemTwo user message).
 
 Without a browser attached the reply never arrives and the hold stands —
 correct first-pass behavior: no browser, no scale fact, no generation. The
-hold is visible in the frontier (`pending_bids` traces show the preflight
-parked with its `generate` block).
+hold is per-trigger and visible in the frontier (`pending_bids` traces show
+the scale-join once-thread parked on its transform listener); a second
+trigger mints a SECOND pipeline rather than superseding the first.
 
 ### The generation lane → `ui_render`
 
-With the preflight passed, the generation threads request a systemTwo response
-composing the render. The design tenant is an optional input, never a gate —
-with a tenant: the token **vocabulary** (the flattened `--design-*` custom
-property names, never literal values) rides model-facing and the prose
+With the preflight passed, the pipeline's generation legs request a systemTwo
+response composing the render. The design tenant is an optional input, never
+a gate — with a tenant: the token **vocabulary** (the flattened `--design-*`
+custom property names, never literal values) rides model-facing and the prose
 sections ride as system context (Consumption/F's two lanes); with NO tenant
 (user deleted their `DESIGN.md`, or never had one) generation proceeds plain
 — structural output, no token context, no artifact — and still produces a
 conforming `ui_render`. The scale fact and target ride the request's `ctx`
 (host-supplied, never model-facing; the store and systemTwo wires echo `ctx`
 verbatim on results — the join lane the pipeline state round-trips through).
+The user message composes from the trigger's own detail (`View request: …`)
+— the view the user actually asked for, not a host-supplied fixed string.
 
 The model composes only the **html fragment**; the id, target, and swap are
 host-stamped (the model is never trusted with the envelope). The composed
@@ -170,15 +183,22 @@ named later iteration — the loop earns it.
 The initial thread set is a **first hypothesis refined by measurement, not
 argument**. The capture lane: an in-process RAW `useTrace` consumer
 (`src/cli/ui-capture.ts`, mounted by the socket host — the TUI/start path)
-writes each ui-pipeline run — a `render` ingress through its `ui_render` — to
-`<home>/captures/ui-runs.jsonl` as `{ startedAt, threads, reentries, messages }`:
-the standing Thread set and the position-tagged once-thread re-entries ride
-`thread_added` for free. The replay pass is `frontier_request { op: 'replay' }`
-over a captured run (`uiReplayRequest`) — the divergence view: replay the full
-run for the end state, or pass a message-count prefix (e.g. up to just before
-the browser's scale reply) to re-derive the hold — where requests blocked and
-what the frontier looked like. The graders are consumer-authored; the loop
-wires the capture and the replay, nothing more.
+writes each ui-pipeline run to `<home>/captures/ui-runs.jsonl` as
+`{ pipeline, startedAt, threads, reentries, messages }`. Runs are LINEAGE-keyed
+— keyed by the minted pipeline id parsed from thread labels, correlation ids,
+and ctx lineage, never by a time window — so interleaved pipelines attribute
+correctly and unrelated faculty traffic stays out of the runs; the standing
+Thread set and the position-tagged once-thread re-entries (the minted legs
+included — the pump's subscriber-order warp, the mint arriving before the
+ingress trace, is handled by lazy binding) ride `thread_added` for free. A run
+closes only at its `ui_render` terminus; a held run stays open (the quiescence
+flush of incomplete runs is a named later iteration). The replay pass is
+`frontier_request { op: 'replay' }` over a captured run (`uiReplayRequest`) —
+the divergence view: replay the full run for the end state, or pass a
+message-count prefix (e.g. up to just before the browser's scale reply) to
+re-derive the hold — where requests blocked and what the frontier looked
+like. The graders are consumer-authored; the loop wires the capture and the
+replay, nothing more.
 
 ## Wiring guidance
 

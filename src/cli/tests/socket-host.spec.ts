@@ -258,8 +258,10 @@ describe('createSocketHost', () => {
     const fake = fakeRuntime()
     const host = await createSocketHost({ runtime: fake.runtime, home })
     try {
-      // A scripted ui pipeline: the render ingress, the scale check, the
-      // browser reply, and the render — the capture closes the run.
+      // A scripted ui pipeline under one minted pipeline id (pid `ui-e2e`):
+      // the render ingress, the scale check, the browser reply, and the
+      // render — the capture binds the run by the pid lineage and closes it
+      // at the render.
       fake.emit({
         ...selectionOf({ type: 'render', detail: {} }),
         selected: { priority: 0, type: 'render', detail: {}, ingress: true },
@@ -267,19 +269,19 @@ describe('createSocketHost', () => {
       fake.emit(
         selectionOf({
           type: 'ui_scale_check',
-          detail: { id: 'ui-scale-check', target: 'body', swap: 'innerHTML' },
+          detail: { id: 'ui-e2e-scale', target: 'body', swap: 'innerHTML' },
         }) as never,
       )
       fake.emit(
         selectionOf({
           type: 'ui_scale_check_result',
-          detail: { id: 'ui-scale-check', target: 'body', effectiveScale: 's3', timeStamp: 1 },
+          detail: { id: 'ui-e2e-scale', target: 'body', effectiveScale: 's3', timeStamp: 1 },
         }) as never,
       )
       fake.emit(
         selectionOf({
           type: 'ui_render',
-          detail: { id: 'ui-render', target: 'body', html: '<p>x</p>', swap: 'innerHTML' },
+          detail: { id: 'ui-e2e-render', target: 'body', html: '<p>x</p>', swap: 'innerHTML' },
         }) as never,
       )
       const file = join(home, 'captures', 'ui-runs.jsonl')

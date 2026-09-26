@@ -33,12 +33,13 @@ import {
 } from '../faculties/system-one/threads.ts'
 import { useFaculty } from '../faculties/use-faculty.ts'
 import type { Faculty } from '../faculties.ts'
+import { ueid } from '../utils.ts'
 import {
   pluginThreadRegistryKey,
   readPluginThreadRegistry,
   writePluginThreadRegistry,
 } from './plugin-thread-registry.ts'
-import { uiThreads } from './ui-threads.ts'
+import { UI_RENDER_TRIGGER_TYPE, uiPipelineThreads, uiThreads } from './ui-threads.ts'
 
 /*
  * The runtime composition — IN-PROCESS. The engine is behavioral() in the
@@ -415,12 +416,14 @@ export const bProgram = ({
   // The remote-mcp threads: the MCP layering over the rpc op — requires the
   // executor (shell), the vending leg (security), and the registry (store).
   if (has('shell') && has('security') && has('store')) facultyAddThreads(remoteMcpThreads)
-  // The ui_* producer threads: the view-generation policy — the design.md
-  // scan → store tenant, the scale preflight, and the generation lane. Requires
-  // shell (the scan recipe's executor), store (the design tenant), and
-  // systemTwo (generation); absent systemTwo there is no generation lane and
-  // the threads don't mount (the remote-mcp precedent).
-  if (has('shell') && has('store') && systemTwo !== undefined) facultyAddThreads(uiThreads)
+  // The ui_* producer threads: the view-generation policy — the boot design
+  // scan + tenant/artifact compile, the standing render gate, and the
+  // per-trigger pipeline DISPATCH (the host leg below mints a set per render
+  // ingress). Requires shell (the scan recipe's executor), store (the design
+  // tenant), and systemTwo (generation); absent systemTwo there is no
+  // generation lane and nothing ui mounts (the remote-mcp precedent).
+  const uiMounted = has('shell') && has('store') && systemTwo !== undefined
+  if (uiMounted) facultyAddThreads(uiThreads)
 
   // ── The engine pump: traces out, gated events to their faculty lanes ─────
 
@@ -546,6 +549,17 @@ export const bProgram = ({
           }
         }
       }
+      return
+    }
+    // The ui pipeline dispatcher (the HOST LEG — branch (a) of the ruling):
+    // a render INGRESS mints the per-trigger pipeline. The factory composes
+    // pure data (jq strings, no closures) from trusted host code — the
+    // admission-path precedent; addThread's ThreadSchema gate is the
+    // backstop, no frontier judgment needed for host-authored threads. The
+    // mint is the re-entry: addThreads pumps the super-step, so the minted
+    // scale-issue request runs in the same wave as the ingress.
+    if (uiMounted && candidate.type === UI_RENDER_TRIGGER_TYPE && candidate.ingress === true) {
+      addThreads(uiPipelineThreads({ id: `ui-${ueid()}`, detail: (candidate.detail ?? {}) as JsonObject }))
       return
     }
     const event = { type: candidate.type, detail: candidate.detail, space: candidate.space } as BPEvent

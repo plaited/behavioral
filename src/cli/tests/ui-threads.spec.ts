@@ -44,7 +44,7 @@ import {
   UI_DESIGN_CONTEXT_KEY,
   UI_DESIGN_SCAN_CALL_ID,
   UI_GENERATE_EVENT_TYPE,
-  UI_SCALE_CHECK_CALL_ID,
+  uiPipelineThreads,
   uiThreads,
 } from '../ui-threads.ts'
 
@@ -331,102 +331,160 @@ describe('ui threads — the design scan recipe (real run)', () => {
   })
 })
 
-// ─── Slice 2 — the scale preflight thread ─────────────────────────────────────
+// ─── The per-trigger pipeline once-threads (the dispatcher's mint) ────────────
 
-describe('ui threads — the scale preflight', () => {
-  test('a render event requests the scale check for the target — and no generation until the result', () => {
-    const { selected, traces } = runProgram([{ type: 'render', detail: {} }])
+/**
+ * Mount one minted per-trigger pipeline — what the composition's host leg
+ * (b-program's pump) mints on a render ingress.
+ */
+const mountPipeline = (program: ReturnType<typeof behavioral>, id: string, detail: JsonObject): void => {
+  for (const thread of uiPipelineThreads({ id, detail })) program.addThread(thread)
+}
+
+/** Drive one minted pipeline through the real engine (standing set + the set + drive events). */
+const pipelineRun = (id: string, detail: JsonObject, events: BPEvent[]) => {
+  const program = behavioral()
+  const selected: Selected[] = []
+  const traces: Trace[] = []
+  program.useTrace((trace: Trace) => {
+    traces.push(trace)
+    if (trace.kind === TRACE_MESSAGE_KINDS.selection)
+      selected.push({
+        type: (trace as SelectionTrace).selected.type,
+        detail: (trace as SelectionTrace).selected.detail as Record<string, unknown> | undefined,
+      })
+  })
+  for (const thread of uiThreads) program.addThread(thread)
+  mountPipeline(program, id, detail)
+  for (const event of events)
+    program.addThread({ label: `producer/${event.type}`, once: true, rules: [{ request: event }] })
+  program.trigger({ type: 'ui_pipeline_pump', detail: {} })
+  program.trigger({ type: 'ui_pipeline_pump', detail: {} })
+  return { selected, traces }
+}
+
+/** The browser's correlated scale reply for pipeline `id`. */
+const scaleReply = (id: string, scale = 's3', target = 'body'): BPEvent => ({
+  type: 'ui_scale_check_result',
+  detail: { id: `${id}-scale`, target, effectiveScale: scale, timeStamp: 1 },
+})
+
+describe('ui threads — the per-trigger pipeline', () => {
+  test('the set requests the scale check under its own id — and nothing generates before the reply', () => {
+    const { selected, traces } = pipelineRun('ui-x1', { message: 'a panel' }, [])
     const check = selected.find((s) => s.type === 'ui_scale_check')
     expect(check).toBeDefined()
-    expect(check?.detail).toEqual({ id: 'ui-scale-check', target: 'body', swap: 'innerHTML' })
+    expect(check?.detail).toEqual({ id: 'ui-x1-scale', target: 'body', swap: 'innerHTML' })
     expect(selected.some((s) => s.type === 'generate')).toBe(false)
-    // The hold is visible in the frontier: the preflight parks with the
-    // generate block — the deadlocked-ish hold without a browser.
+    // The no-browser hold, per-trigger: the scale-join once-thread parks on
+    // its transform listener — visible in the frontier (pending_bids).
     const holds = traces.filter((t): t is PendingBidsTrace => t.kind === TRACE_MESSAGE_KINDS.pending_bids)
     expect(
       holds.some((t) =>
-        t.threads.some((bid) => bid.label === 'ui/preflight' && bid.block?.some((b) => b.type === 'generate')),
+        t.threads.some(
+          (bid) =>
+            bid.label === 'ui/pipeline:ui-x1/scale-join' &&
+            bid.transform?.some((l) => l.type === 'ui_scale_check_result'),
+        ),
       ),
     ).toBe(true)
   })
 
-  test('a named target on the trigger rides the scale check', () => {
-    const { selected } = runProgram([{ type: 'render', detail: { target: 'main' } }])
+  test('a named target on the trigger detail rides the scale check', () => {
+    const { selected } = pipelineRun('ui-x2', { target: 'main' }, [])
     const check = selected.find((s) => s.type === 'ui_scale_check')
-    expect(check?.detail).toEqual({ id: 'ui-scale-check', target: 'main', swap: 'innerHTML' })
+    expect(check?.detail).toEqual({ id: 'ui-x2-scale', target: 'main', swap: 'innerHTML' })
   })
 
-  test('the correlated result stamps the generation request — the effective scale rides its ctx', () => {
-    const { selected } = runProgram([
-      { type: 'render', detail: {} },
-      {
-        type: 'ui_scale_check_result',
-        detail: { id: 'ui-scale-check', target: 'body', effectiveScale: 's3', timeStamp: 1 },
-      },
-    ])
+  test('the correlated reply stamps the generate request — scale+target via ctx, the trigger detail as the request', () => {
+    const { selected } = pipelineRun('ui-x1', { message: 'a panel' }, [scaleReply('ui-x1')])
     const generate = selected.find((s) => s.type === 'generate')
     expect(generate).toBeDefined()
     expect(generate?.detail).toEqual({
-      ctx: { scale: 's3', target: 'body', echo: { check: 'ui-scale-check' } },
+      ctx: { scale: 's3', target: 'body', echo: { pipeline: 'ui-x1' } },
+      request: { message: 'a panel' },
     })
   })
 
-  test('a result with a foreign echo joins nothing — the pipeline holds for the correlated one', () => {
-    const { selected } = runProgram([
-      { type: 'render', detail: {} },
+  test('a foreign reply joins nothing — the per-trigger id isolates the hold', () => {
+    const { selected } = pipelineRun('ui-x1', { message: 'a panel' }, [
       {
         type: 'ui_scale_check_result',
-        detail: { id: 'other-check', target: 'body', effectiveScale: 's2', timeStamp: 1 },
+        detail: { id: 'ui-other-scale', target: 'body', effectiveScale: 's2', timeStamp: 1 },
       },
-      {
-        type: 'ui_scale_check_result',
-        detail: { id: 'ui-scale-check', target: 'body', effectiveScale: 's5', timeStamp: 2 },
-      },
+      scaleReply('ui-x1', 's5'),
     ])
     const generates = selected.filter((s) => s.type === 'generate')
     expect(generates).toHaveLength(1)
-    expect(generates[0]?.detail).toEqual({
-      ctx: { scale: 's5', target: 'body', echo: { check: 'ui-scale-check' } },
+    expect((generates[0]?.detail as { ctx?: { scale?: string } } | undefined)?.ctx?.scale).toBe('s5')
+  })
+
+  test('two interleaved pipelines join independently — A’s reply never joins B’s hold', () => {
+    const program = behavioral()
+    const selected: Selected[] = []
+    program.useTrace((trace: Trace) => {
+      if (trace.kind === TRACE_MESSAGE_KINDS.selection)
+        selected.push({
+          type: (trace as SelectionTrace).selected.type,
+          detail: (trace as SelectionTrace).selected.detail as Record<string, unknown> | undefined,
+        })
     })
+    for (const thread of uiThreads) program.addThread(thread)
+    mountPipeline(program, 'ui-a', { message: 'view A' })
+    mountPipeline(program, 'ui-b', { message: 'view B' })
+    program.addThread({ label: 'producer/a-reply', once: true, rules: [{ request: scaleReply('ui-a') }] })
+    program.trigger({ type: 'ui_pipeline_pump', detail: {} })
+    program.trigger({ type: 'ui_pipeline_pump', detail: {} })
+    const generates = selected.filter((s) => s.type === 'generate')
+    expect(generates).toHaveLength(1)
+    expect((generates[0]?.detail as { ctx?: { echo?: { pipeline?: string } } } | undefined)?.ctx?.echo?.pipeline).toBe(
+      'ui-a',
+    )
   })
 })
 
-// ─── Slice 3 — the generation lane → ui_render ───────────────────────────────
+// ─── The per-trigger generation lane ──────────────────────────────────────────
 
-const generateEvent = (scale = 's3', target = 'body') => ({
-  type: 'generate',
-  detail: { ctx: { scale, target, echo: { check: 'ui-scale-check' } } },
-})
-
-const tenantStoreResult = (value: JsonObject | null) => ({
+/** The pipeline's tenant-bearing (or null) store result, joined by the ctx echo. */
+const tenantStoreResult = (pipeline: string, value: JsonObject | null): BPEvent => ({
   type: 'store_request_result',
   detail: {
-    id: 'ui-design-context',
+    id: `${pipeline}-tenant`,
     ok: true,
     result: { value },
-    ctx: { echo: { scale: 's3', target: 'body', echo: { check: 'ui-scale-check' } } },
+    ctx: {
+      echo: {
+        ctx: { scale: 's3', target: 'body', echo: { pipeline } },
+        request: { message: 'a panel' },
+      },
+    },
   },
 })
 
-describe('ui threads — the generation lane', () => {
-  test('a generate request fetches the design tenant — the scale+target ride the store ctx echo', () => {
-    const { selected } = runProgram([generateEvent()])
+describe('ui threads — the per-trigger generation lane', () => {
+  test('the generate fetches the design tenant — the whole generate detail rides the store ctx echo', () => {
+    const { selected } = pipelineRun('ui-x1', { message: 'a panel' }, [scaleReply('ui-x1')])
     const get = selected.find(
       (s) => s.type === 'store_request' && (s.detail as { op?: string } | undefined)?.op === 'get',
     )
     expect(get).toBeDefined()
     expect(get?.detail).toEqual({
-      id: 'ui-design-context',
+      id: 'ui-x1-tenant',
       op: 'get',
       input: { collection: 'design', key: 'context' },
-      ctx: { echo: { scale: 's3', target: 'body', echo: { check: 'ui-scale-check' } } },
+      ctx: {
+        echo: {
+          ctx: { scale: 's3', target: 'body', echo: { pipeline: 'ui-x1' } },
+          request: { message: 'a panel' },
+        },
+      },
     })
   })
 
-  test('a tenant-bearing store result composes the systemTwo request — vocabulary model-facing, scale+target via ctx', () => {
-    const { selected } = runProgram([
-      generateEvent(),
-      tenantStoreResult({
+  test('a tenant-bearing result composes the systemTwo request — the trigger detail in the user message, the vocabulary in the instructions', () => {
+    const { selected } = pipelineRun('ui-x1', { message: 'a panel' }, [
+      scaleReply('ui-x1'),
+      tenantStoreResult('ui-x1', {
         tokens: {
           colors: { primary: 'light-dark(#755576, #E2BAE0)' },
           typography: { 'body-md': { fontFamily: 'Ropa Sans', fontSize: '14px' } },
@@ -437,33 +495,44 @@ describe('ui threads — the generation lane', () => {
     ])
     const request = selected.find((s) => s.type === 'system_two_request')
     expect(request).toBeDefined()
-    expect(request?.detail?.id).toBe('ui-render-generation')
-    expect(request?.detail?.ctx).toEqual({ scale: 's3', target: 'body' })
+    expect(request?.detail?.id).toBe('ui-x1-gen')
+    expect(request?.detail?.ctx).toEqual({ scale: 's3', target: 'body', pipeline: 'ui-x1' })
     const input = request?.detail?.input as Record<string, unknown>
     expect(input.provider).toBe('default')
     const instructions = input.instructions as string
     expect(instructions).toContain('--design-colors-primary')
     expect(instructions).toContain('--design-typography-body-md-fontFamily')
     expect(instructions).toContain('Matte surfaces, notebook discipline.')
-    expect(JSON.stringify(input.input)).toContain('message')
+    // THE BLINDNESS FIX: the trigger's own content rides the user message,
+    // model-facing by right (the user's request, not a host-supplied fact).
+    const content = (input.input as Array<{ content?: string }>)[0]?.content
+    expect(content).toContain('View request:')
+    expect(content).toContain('a panel')
   })
 
-  test('a null tenant composes the plain request — no vocabulary, no prose', () => {
-    const { selected } = runProgram([generateEvent(), tenantStoreResult(null)])
+  test('a null tenant composes the plain request — no vocabulary, no prose, the content still rides', () => {
+    const { selected } = pipelineRun('ui-x1', { message: 'a panel' }, [
+      scaleReply('ui-x1'),
+      tenantStoreResult('ui-x1', null),
+    ])
     const request = selected.find((s) => s.type === 'system_two_request')
     expect(request).toBeDefined()
     const input = request?.detail?.input as Record<string, unknown> | undefined
     const instructions = input?.instructions as string | undefined
     expect(instructions?.includes('--design-')).toBe(false)
     expect(instructions?.includes('Design rationale')).toBe(false)
+    const content = (input?.input as Array<{ content?: string }> | undefined)?.[0]?.content
+    expect(content).toContain('a panel')
   })
 
-  test('the model reply composes a conforming ui_render — validate-before-request', () => {
-    const { selected } = runProgram([
+  test('the model reply composes the draft; the standing gate emits the render under the per-trigger id', () => {
+    const { selected } = pipelineRun('ui-x1', { message: 'a panel' }, [
+      scaleReply('ui-x1'),
+      tenantStoreResult('ui-x1', null),
       {
         type: 'system_two_request_result',
         detail: {
-          id: 'ui-render-generation',
+          id: 'ui-x1-gen',
           ok: true,
           result: {
             items: [
@@ -474,16 +543,22 @@ describe('ui threads — the generation lane', () => {
               },
             ],
           },
-          ctx: { scale: 's3', target: 'body' },
+          ctx: { scale: 's3', target: 'body', pipeline: 'ui-x1' },
         },
       },
     ])
     const draft = selected.find((s) => s.type === 'render_draft')
     expect(draft).toBeDefined()
+    expect(draft?.detail).toEqual({
+      id: 'ui-x1-render',
+      target: 'body',
+      html: '<p>Hello</p>',
+      swap: 'innerHTML',
+    })
     const render = selected.find((s) => s.type === 'ui_render')
     expect(render).toBeDefined()
     expect(render?.detail).toEqual({
-      id: 'ui-render',
+      id: 'ui-x1-render',
       target: 'body',
       html: '<p>Hello</p>',
       swap: 'innerHTML',
@@ -491,14 +566,16 @@ describe('ui threads — the generation lane', () => {
   })
 
   test('a non-conforming reply is held as data — the draft never becomes a render', () => {
-    const { selected } = runProgram([
+    const { selected } = pipelineRun('ui-x1', { message: 'a panel' }, [
+      scaleReply('ui-x1'),
+      tenantStoreResult('ui-x1', null),
       {
         type: 'system_two_request_result',
         detail: {
-          id: 'ui-render-generation',
+          id: 'ui-x1-gen',
           ok: true,
           result: { items: [] },
-          ctx: { scale: 's3', target: 'body' },
+          ctx: { scale: 's3', target: 'body', pipeline: 'ui-x1' },
         },
       },
     ])
@@ -654,7 +731,7 @@ describe('ui threads — the composition mount', () => {
     }
   })
 
-  test('a ui_event render drives the preflight end-to-end through the serve dispatcher', async () => {
+  test('a ui_event render mints the per-trigger pipeline and drives it end-to-end through the serve dispatcher', async () => {
     const home = tempHome()
     try {
       const traces: Trace[] = []
@@ -678,18 +755,28 @@ describe('ui threads — the composition mount', () => {
         const generateSelected = () => selectionsOf(traces).some((t) => t.selected.type === UI_GENERATE_EVENT_TYPE)
 
         // The browser side of the pipeline is the dispatcher itself: the
-        // ui_event's inner BPEvent is the render trigger.
+        // ui_event's inner BPEvent is the render trigger — the pump mints the
+        // pipeline, and the minted scale check carries a FRESH per-trigger id.
         dispatchToRuntime(runtime, {
           method: 'ui_event',
-          params: { event: { type: 'render', detail: {} }, timeStamp: 1 },
+          params: {
+            event: { type: 'render', detail: { message: 'a telemetry panel' } },
+            timeStamp: 1,
+          },
         })
         await waitForTraces(traces, (s) => s.some((t) => t.selected.type === 'ui_scale_check'))
+        const checkId = (
+          selectionsOf(traces).find((t) => t.selected.type === 'ui_scale_check')?.selected.detail as
+            | { id?: string }
+            | undefined
+        )?.id
+        expect(typeof checkId === 'string' && checkId.startsWith('ui-') && checkId.endsWith('-scale')).toBe(true)
         // The scale check went OUT as its own client notification (egress).
         expect(out.some((line) => line.includes('"method":"ui_scale_check"'))).toBe(true)
         // No browser reply yet — no generation request.
         expect(generateSelected()).toBe(false)
 
-        // A foreign-echo result joins nothing.
+        // A foreign-id result joins nothing — the per-trigger id isolates.
         dispatchToRuntime(runtime, {
           method: 'ui_scale_check_result',
           params: { id: 'other-check', target: 'body', effectiveScale: 's2', timeStamp: 2 },
@@ -698,10 +785,11 @@ describe('ui threads — the composition mount', () => {
         expect(generateSelected()).toBe(false)
 
         // The correlated reply re-enters through the same seam — the
-        // generation request carries the effective scale in its ctx.
+        // generation request carries the effective scale in its ctx AND the
+        // trigger's own detail as the request (the blindness fix).
         dispatchToRuntime(runtime, {
           method: 'ui_scale_check_result',
-          params: { id: UI_SCALE_CHECK_CALL_ID, target: 'body', effectiveScale: 's3', timeStamp: 3 },
+          params: { id: checkId, target: 'body', effectiveScale: 's3', timeStamp: 3 },
         })
         await waitForTraces(traces, (s) =>
           s.some(
@@ -712,6 +800,111 @@ describe('ui threads — the composition mount', () => {
         )
         const generate = selectionsOf(traces).find((t) => t.selected.type === UI_GENERATE_EVENT_TYPE)
         expect((generate?.selected.detail as { ctx?: { target?: string } } | undefined)?.ctx?.target).toBe('body')
+        expect((generate?.selected.detail as { request?: { message?: string } } | undefined)?.request?.message).toBe(
+          'a telemetry panel',
+        )
+      } finally {
+        runtime.terminate()
+      }
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  }, 10_000)
+
+  test('two rapid triggers mint two pipelines — both render, each under its own id', async () => {
+    const home = tempHome()
+    try {
+      const server = await startOpenResponsesServer()
+      const traces: Trace[] = []
+      const runtime = bProgram({
+        shell: shellWithHome(home),
+        store: storeWithHome(home),
+        systemTwo: useSystemTwo({ endpoints: { default: { url: server.url } } }),
+      })
+      runtime.useTrace((trace) => {
+        traces.push(trace)
+      })
+      const out: string[] = []
+      const host = createHost({
+        runtime,
+        input: new Response('').body as unknown as ReadableStream<Uint8Array>,
+        write: (line) => out.push(line),
+        home,
+      })
+      await host.rpc.done
+      try {
+        const scaleChecks = () => selectionsOf(traces).filter((t) => t.selected.type === 'ui_scale_check')
+
+        // Trigger A, then trigger B BEFORE any browser reply — the dropped
+        // trigger of the standing pipeline is now a second live pipeline.
+        dispatchToRuntime(runtime, {
+          method: 'ui_event',
+          params: { event: { type: 'render', detail: { message: 'view A' } }, timeStamp: 1 },
+        })
+        await waitForTraces(traces, (s) => s.filter((t) => t.selected.type === 'ui_scale_check').length >= 1)
+        dispatchToRuntime(runtime, {
+          method: 'ui_event',
+          params: { event: { type: 'render', detail: { message: 'view B' } }, timeStamp: 2 },
+        })
+        await waitForTraces(traces, (s) => s.filter((t) => t.selected.type === 'ui_scale_check').length >= 2)
+
+        // Both scale checks are live with DISTINCT per-trigger ids.
+        const ids = scaleChecks().map((t) => (t.selected.detail as { id?: string } | undefined)?.id)
+        expect(new Set(ids).size).toBe(2)
+
+        // Reply to both — A first, B after (the replies interleave).
+        const [a, b] = ids
+        dispatchToRuntime(runtime, {
+          method: 'ui_scale_check_result',
+          params: { id: a, target: 'body', effectiveScale: 's3', timeStamp: 3 },
+        })
+        dispatchToRuntime(runtime, {
+          method: 'ui_scale_check_result',
+          params: { id: b, target: 'body', effectiveScale: 's4', timeStamp: 4 },
+        })
+
+        // BOTH renders compose and egress — each under its own pipeline id.
+        await waitForTraces(traces, (s) => s.filter((t) => t.selected.type === 'ui_render').length >= 2)
+        const renderIds = selectionsOf(traces)
+          .filter((t) => t.selected.type === 'ui_render')
+          .map((t) => (t.selected.detail as { id?: string } | undefined)?.id)
+        expect(new Set(renderIds).size).toBe(2)
+        expect(out.filter((line) => line.includes('"method":"ui_render"')).length).toBe(2)
+
+        // Each model call carries ITS OWN trigger's content — the recorded
+        // bodies prove the two pipelines never crossed.
+        const contents = server.requests.map((r) => {
+          const input = (r.body as { input?: Array<{ content?: string }> }).input
+          return input?.[0]?.content ?? ''
+        })
+        expect(contents.some((c) => c.includes('view A'))).toBe(true)
+        expect(contents.some((c) => c.includes('view B'))).toBe(true)
+      } finally {
+        runtime.terminate()
+        await server.close()
+      }
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  }, 15_000)
+
+  test('absent systemTwo a render ingress mints no pipeline — the pump guard holds', async () => {
+    const home = tempHome()
+    try {
+      const traces: Trace[] = []
+      const runtime = bProgram({ shell: shellWithHome(home), store: storeWithHome(home) })
+      runtime.useTrace((trace) => {
+        traces.push(trace)
+      })
+      runtime.start()
+      try {
+        // The raw ingress trigger — what serve's ui_event unwrap delivers to
+        // the engine. Without systemTwo there is no generation lane: no
+        // standing set, no pump mint.
+        runtime.trigger({ type: 'render', detail: { message: 'a panel' } })
+        await Bun.sleep(150)
+        expect(selectionsOf(traces).some((t) => t.selected.type === 'ui_scale_check')).toBe(false)
+        expect(selectionsOf(traces).some((t) => t.selected.type === 'ui_render')).toBe(false)
       } finally {
         runtime.terminate()
       }
@@ -768,15 +961,24 @@ describe('ui threads — the composition mount', () => {
           (artifactPut?.selected.detail as { input?: { value?: { css?: string } } } | undefined)?.input?.value?.css,
         ).toContain('--design-colors-primary: #0A0A0A;')
 
-        // Drive: the render trigger, then the browser's scale reply.
+        // Drive: the render trigger carries the user's view request, then
+        // the browser's scale reply (with the MINTED per-trigger id).
         dispatchToRuntime(runtime, {
           method: 'ui_event',
-          params: { event: { type: 'render', detail: {} }, timeStamp: 1 },
+          params: {
+            event: { type: 'render', detail: { message: 'a telemetry panel for agent traces' } },
+            timeStamp: 1,
+          },
         })
         await waitForTraces(traces, (s) => s.some((t) => t.selected.type === 'ui_scale_check'))
+        const checkId = (
+          selectionsOf(traces).find((t) => t.selected.type === 'ui_scale_check')?.selected.detail as
+            | { id?: string }
+            | undefined
+        )?.id
         dispatchToRuntime(runtime, {
           method: 'ui_scale_check_result',
-          params: { id: UI_SCALE_CHECK_CALL_ID, target: 'body', effectiveScale: 's3', timeStamp: 2 },
+          params: { id: checkId, target: 'body', effectiveScale: 's3', timeStamp: 2 },
         })
 
         // The generation request reaches the real endpoint; the reply
@@ -785,13 +987,17 @@ describe('ui threads — the composition mount', () => {
         expect(out.some((line) => line.includes('"method":"ui_render"') && line.includes(ASSISTANT_TEXT))).toBe(true)
 
         // The recorded model call carries the USER's vocabulary (never the
-        // shipped defaults) — inspected after the pipeline settles.
-        const body = server.requests.at(-1)?.body as { instructions?: string; model?: string } | undefined
+        // shipped defaults) AND the trigger's own content (the blindness fix)
+        // — inspected after the pipeline settles.
+        const body = server.requests.at(-1)?.body as
+          | { instructions?: string; model?: string; input?: Array<{ content?: string }> }
+          | undefined
         expect(body?.model).toBe('gpt-5.1')
         expect(body?.instructions).toContain('--design-colors-primary')
         expect(body?.instructions).toContain('--design-rounded-md')
         expect(body?.instructions).toContain('Mine.')
         expect(body?.instructions?.includes('--design-typography')).toBe(false)
+        expect(body?.input?.[0]?.content).toContain('a telemetry panel for agent traces')
       } finally {
         runtime.terminate()
         await server.close()
@@ -836,12 +1042,17 @@ describe('ui threads — the composition mount', () => {
 
         dispatchToRuntime(runtime, {
           method: 'ui_event',
-          params: { event: { type: 'render', detail: {} }, timeStamp: 1 },
+          params: { event: { type: 'render', detail: { message: 'a plain panel' } }, timeStamp: 1 },
         })
         await waitForTraces(traces, (s) => s.some((t) => t.selected.type === 'ui_scale_check'))
+        const plainCheckId = (
+          selectionsOf(traces).find((t) => t.selected.type === 'ui_scale_check')?.selected.detail as
+            | { id?: string }
+            | undefined
+        )?.id
         dispatchToRuntime(runtime, {
           method: 'ui_scale_check_result',
-          params: { id: UI_SCALE_CHECK_CALL_ID, target: 'body', effectiveScale: 's4', timeStamp: 2 },
+          params: { id: plainCheckId, target: 'body', effectiveScale: 's4', timeStamp: 2 },
         })
         await waitForTraces(traces, (s) => s.some((t) => t.selected.type === 'ui_render'))
         expect(out.some((line) => line.includes('"method":"ui_render"') && line.includes(ASSISTANT_TEXT))).toBe(true)
