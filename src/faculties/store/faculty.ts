@@ -141,21 +141,36 @@ const validateQuery = ajv.compile(QueryInputSchema)
 // Event dispatch — the wire surface
 // ---------------------------------------------------------------------------
 
-const postResult = ({ id, result, space }: { id: string; result: unknown; space?: string }): void => {
+const postResult = ({
+  id,
+  result,
+  space,
+  ctx,
+}: {
+  id: string
+  result: unknown
+  space?: string
+  ctx?: JsonObject
+}): void => {
   emit({
     type: FACULTY_MESSAGE_KINDS.store_request_result,
     // The uniform envelope: op-runner { ok: true, … } → ok branch (payload =
-    // the rest); { isError: true, … } or a throw → error branch.
+    // the rest); { isError: true, … } or a throw → error branch. The request's
+    // ctx echoes at detail level — the out-of-band join lane (thread
+    // orchestration state round-trips beside ok, never model-facing).
     detail: ((): JsonObject & { id: string } => {
-      if (typeof result === 'object' && result !== null && 'isError' in result) {
-        const { isError, ...rest } = result as { isError: boolean } & JsonObject
-        return { id, ok: false, error: { code: 'error', ...(isError ? rest : {}) } }
-      }
-      if (typeof result === 'object' && result !== null && 'ok' in result) {
-        const { ok, ...rest } = result as { ok: boolean } & JsonObject
-        return ok ? { id, ok: true, result: rest } : { id, ok: false, error: { code: 'error', ...rest } }
-      }
-      return { id, ok: true, result: (result ?? {}) as JsonObject }
+      const base = ((): JsonObject & { id: string } => {
+        if (typeof result === 'object' && result !== null && 'isError' in result) {
+          const { isError, ...rest } = result as { isError: boolean } & JsonObject
+          return { id, ok: false, error: { code: 'error', ...(isError ? rest : {}) } }
+        }
+        if (typeof result === 'object' && result !== null && 'ok' in result) {
+          const { ok, ...rest } = result as { ok: boolean } & JsonObject
+          return ok ? { id, ok: true, result: rest } : { id, ok: false, error: { code: 'error', ...rest } }
+        }
+        return { id, ok: true, result: (result ?? {}) as JsonObject }
+      })()
+      return ctx === undefined ? base : ({ ...base, ctx } as JsonObject & { id: string })
     })(),
     ...(space === undefined ? {} : { space }),
   })
@@ -242,23 +257,24 @@ const OP_RUNNERS = {
 const handleInbound = (message: unknown): void => {
   if (!validateStoreRequestEvent(message)) return
   const event = message as StoreRequestEvent
-  const { id, op, input } = event.detail
+  const { id, op, input, ctx } = event.detail
   const runner = OP_RUNNERS[op]
   if (runner === undefined) {
-    postResult({ id, result: { isError: true, message: `unknown store operation: ${op}` }, space: event.space })
+    postResult({ id, result: { isError: true, message: `unknown store operation: ${op}` }, space: event.space, ctx })
     return
   }
   if (!runner.validate(input)) {
-    postResult({ id, result: { isError: true, message: `invalid input: ${runner.errors()}` }, space: event.space })
+    postResult({ id, result: { isError: true, message: `invalid input: ${runner.errors()}` }, space: event.space, ctx })
     return
   }
   try {
-    postResult({ id, result: runner.run(input as never, event.space ?? ROOT_SPACE), space: event.space })
+    postResult({ id, result: runner.run(input as never, event.space ?? ROOT_SPACE), space: event.space, ctx })
   } catch (err) {
     postResult({
       id,
       result: { isError: true, message: err instanceof Error ? err.message : String(err) },
       space: event.space,
+      ctx,
     })
   }
 }

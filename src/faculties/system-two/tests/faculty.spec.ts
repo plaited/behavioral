@@ -37,6 +37,7 @@ type WireResult = {
   ok: boolean
   result?: SystemTwoOutput
   error?: Record<string, unknown>
+  ctx?: unknown
   space?: string
 }
 
@@ -52,8 +53,8 @@ const spawnModelBehavior = (endpoints: SystemTwoEndpoints) => {
     env: { [SYSTEM_TWO_ENDPOINTS_KEY]: JSON.stringify(endpoints) },
   })
   const messages: { type?: string; detail?: unknown; space?: string }[] = []
-  const respond = (id: string, input: unknown, space?: string): void => {
-    faculty.call({ id, input } as JsonObject, space)
+  const respond = (id: string, input: unknown, space?: string, ctx?: JsonObject): void => {
+    faculty.call({ id, input, ...(ctx === undefined ? {} : { ctx }) } as JsonObject, space)
   }
   const cancel = (id: string): void => {
     faculty.post({ type: FACULTY_MESSAGE_KINDS.system_two_cancel, detail: { id } } as never)
@@ -67,6 +68,43 @@ const spawnModelBehavior = (endpoints: SystemTwoEndpoints) => {
 }
 
 const userMessage = { type: 'message', role: 'user', content: 'Say hello' } as const
+
+describe('model faculty — the ctx join lane', () => {
+  test('request ctx echoes on the result — the thread join lane', async () => {
+    const server = await startOpenResponsesServer()
+    const model = spawnModelBehavior({ mock: { url: server.url } })
+    try {
+      model.respond('call_1', { provider: 'mock', modelId: 'mock-model', input: [userMessage] }, undefined, {
+        echo: { leg: 'generation' },
+        scale: 's3',
+        target: 'body',
+      })
+      const { ok, ctx } = await model.resultFor('call_1')
+      expect(ok).toBe(true)
+      expect(ctx).toEqual({ echo: { leg: 'generation' }, scale: 's3', target: 'body' })
+    } finally {
+      model.terminate()
+      await server.close()
+    }
+  })
+
+  test('request ctx echoes on the error branch too', async () => {
+    const server = await startOpenResponsesServer()
+    const model = spawnModelBehavior({ mock: { url: server.url } })
+    try {
+      // No endpoint for the provider — the typed error result
+      model.respond('call_2', { provider: 'missing', modelId: 'm', input: [userMessage] }, undefined, {
+        echo: { leg: 'generation' },
+      })
+      const { ok, ctx } = await model.resultFor('call_2')
+      expect(ok).toBe(false)
+      expect(ctx).toEqual({ echo: { leg: 'generation' } })
+    } finally {
+      model.terminate()
+      await server.close()
+    }
+  })
+})
 
 describe('model faculty — non-streaming respond', () => {
   test('round-trips a JSON ResponseResource as a result event', async () => {

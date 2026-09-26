@@ -136,6 +136,35 @@ correct first-pass behavior: no browser, no scale fact, no generation. The
 hold is visible in the frontier (`pending_bids` traces show the preflight
 parked with its `generate` block).
 
+### The generation lane → `ui_render`
+
+With the preflight passed, the generation threads request a systemTwo response
+composing the render. The design tenant is an optional input, never a gate —
+with a tenant: the token **vocabulary** (the flattened `--design-*` custom
+property names, never literal values) rides model-facing and the prose
+sections ride as system context (Consumption/F's two lanes); with NO tenant
+(user deleted their `DESIGN.md`, or never had one) generation proceeds plain
+— structural output, no token context, no artifact — and still produces a
+conforming `ui_render`. The scale fact and target ride the request's `ctx`
+(host-supplied, never model-facing; the store and systemTwo wires echo `ctx`
+verbatim on results — the join lane the pipeline state round-trips through).
+
+The model composes only the **html fragment**; the id, target, and swap are
+host-stamped (the model is never trusted with the envelope). The composed
+detail must validate against `CONTROLLER_DETAIL_SCHEMAS`'s `ui_render` schema
+**before the thread requests it** (validate-before-request — the catalog
+pattern; the root guard is the backstop, not the only gate). A non-conforming
+reply is held as data — the draft is selected and visible in traces, never
+emitted.
+
+The custom-properties artifact: a tenant-bearing scan also compiles the
+tokens to a stylesheet (`--design-<token-path>: <value>;` — `light-dark()`
+values pass through verbatim) stored as the `design` collection's `artifact`
+value, compiled from the TENANT only, never from the shipped asset. Generated
+html references the properties, not literals. MINIMAL: the store is the v1
+home; the serving seam (a host stylesheet route or inlined `<style>`) is a
+named later iteration — the loop earns it.
+
 ## Wiring guidance
 
 - **Wiring a multi-page app**: one `Controller` per page, constructed in the

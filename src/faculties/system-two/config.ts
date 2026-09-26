@@ -68,17 +68,22 @@ export const configSystemTwo = (respond: SystemTwoRespond): void => {
   /** In-flight requests, keyed by correlation id. */
   const active = new Map<string, ActiveRequest>()
 
-  const postResult = (id: string, result: unknown, space?: string): void => {
+  const postResult = (id: string, result: unknown, space?: string, ctx?: JsonObject): void => {
     emit({
       type: FACULTY_MESSAGE_KINDS.system_two_request_result,
       // The uniform envelope: { isError: true, … } → error branch; the model
-      // respond output → ok branch.
+      // respond output → ok branch. The request's ctx echoes at detail level —
+      // the out-of-band join lane (thread orchestration state round-trips
+      // beside ok, never model-facing).
       detail: ((): JsonObject & { id: string } => {
-        if (typeof result === 'object' && result !== null && 'isError' in result) {
-          const { isError, ...rest } = result as { isError: boolean } & JsonObject
-          return { id, ok: false, error: { code: 'error', ...(isError ? rest : {}) } }
-        }
-        return { id, ok: true, result: (result ?? {}) as JsonObject }
+        const base = ((): JsonObject & { id: string } => {
+          if (typeof result === 'object' && result !== null && 'isError' in result) {
+            const { isError, ...rest } = result as { isError: boolean } & JsonObject
+            return { id, ok: false, error: { code: 'error', ...(isError ? rest : {}) } }
+          }
+          return { id, ok: true, result: (result ?? {}) as JsonObject }
+        })()
+        return ctx === undefined ? base : ({ ...base, ctx } as JsonObject & { id: string })
       })(),
       ...(space === undefined ? {} : { space }),
     })
@@ -99,12 +104,12 @@ export const configSystemTwo = (respond: SystemTwoRespond): void => {
     // is defense in depth at the process boundary.
     if (!validateSystemTwoRequestEvent(message)) return
     const event = message as SystemTwoRequestEvent
-    const { id, input } = event.detail
+    const { id, input, ctx } = event.detail
     // Input that fails the boundary is error data, not a throw: the id is valid,
     // so the caller learns why nothing ran.
     if (!validateSystemTwoInput(input)) {
       const detail = validateSystemTwoInput.errors?.map((e) => `${e.instancePath} ${e.message}`).join('; ')
-      postResult(id, { isError: true, message: `invalid input: ${detail}` }, event.space)
+      postResult(id, { isError: true, message: `invalid input: ${detail}` }, event.space, ctx)
       return
     }
 
@@ -124,14 +129,24 @@ export const configSystemTwo = (respond: SystemTwoRespond): void => {
     // `respond` never rejects the process: any provider throw becomes result data.
     try {
       const result = await respond(input, { endpoints, signal: controller.signal })
-      postResult(id, result, event.space)
+      postResult(id, result, event.space, ctx)
     } catch (error) {
       if (request.reason === 'timeout')
-        postResult(id, { isError: true, message: `model request timed out after ${FETCH_TIMEOUT_MS}ms` }, event.space)
+        postResult(
+          id,
+          { isError: true, message: `model request timed out after ${FETCH_TIMEOUT_MS}ms` },
+          event.space,
+          ctx,
+        )
       else if (request.reason === 'canceled')
-        postResult(id, { isError: true, message: 'model request canceled' }, event.space)
+        postResult(id, { isError: true, message: 'model request canceled' }, event.space, ctx)
       else
-        postResult(id, { isError: true, message: error instanceof Error ? error.message : String(error) }, event.space)
+        postResult(
+          id,
+          { isError: true, message: error instanceof Error ? error.message : String(error) },
+          event.space,
+          ctx,
+        )
     } finally {
       clearTimeout(request.timer)
       active.delete(id)

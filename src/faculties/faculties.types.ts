@@ -24,7 +24,8 @@ import { FACULTY_MESSAGE_KINDS } from './faculties.constants.ts'
 
 export type SystemTwoRequestEvent = {
   type: typeof FACULTY_MESSAGE_KINDS.system_two_request
-  detail: { id: string; input: JsonObject }
+  /** `ctx` is the optional out-of-band join lane (the you.com MCP `_meta` pattern): orchestration state riding beside `input`, echoed verbatim on the result — never a model-facing field. */
+  detail: { id: string; ctx?: JsonObject; input: JsonObject }
   space?: string
 }
 
@@ -135,7 +136,8 @@ export type StoreOp = 'put' | 'get' | 'delete' | 'query'
 export type StoreRequestEvent = {
   type: typeof FACULTY_MESSAGE_KINDS.store_request
   /** `op` selects the store operation; the backing schema lives inside the worker — schema churn never becomes protocol churn. */
-  detail: { id: string; op: StoreOp; input: JsonObject }
+  /** `ctx` is the optional out-of-band join lane (the you.com MCP `_meta` pattern): orchestration state riding beside `input`, echoed verbatim on the result — never a model-facing field. */
+  detail: { id: string; op: StoreOp; ctx?: JsonObject; input: JsonObject }
   space?: string
 }
 
@@ -246,7 +248,12 @@ export const SystemTwoRequestEventSchema: JSONSchemaType<SystemTwoRequestEvent> 
     type: { type: 'string', const: FACULTY_MESSAGE_KINDS.system_two_request },
     detail: {
       type: 'object',
-      properties: { id: { type: 'string', minLength: 1 }, input: jsonObjectSchema },
+      properties: {
+        id: { type: 'string', minLength: 1 },
+        // The out-of-band join lane — strict shape is the requesting side's.
+        ctx: { type: 'object', required: [], additionalProperties: true, nullable: true },
+        input: jsonObjectSchema,
+      },
       required: ['id', 'input'],
       additionalProperties: false,
     },
@@ -450,6 +457,8 @@ export const StoreRequestEventSchema: JSONSchemaType<StoreRequestEvent> = {
       properties: {
         id: { type: 'string', minLength: 1 },
         op: { type: 'string', enum: ['put', 'get', 'delete', 'query'] },
+        // The out-of-band join lane — strict shape is the requesting side's.
+        ctx: { type: 'object', required: [], additionalProperties: true, nullable: true },
         input: jsonObjectSchema,
       },
       required: ['id', 'op', 'input'],

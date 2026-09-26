@@ -33,11 +33,13 @@ import {
   StoreRequestResultEventSchema,
 } from '../../faculties/faculties.types.ts'
 import { useSystemTwo } from '../../faculties/system-two/config.ts'
+import { ASSISTANT_TEXT, startOpenResponsesServer } from '../../faculties/system-two/tests/fixtures/model-server.ts'
 import { useFaculty } from '../../faculties/use-faculty.ts'
 import { bProgram } from '../b-program.ts'
 import { createHost, dispatchToRuntime } from '../serve.ts'
 import {
   DESIGN_SCAN_SCRIPT,
+  UI_DESIGN_ARTIFACT_KEY,
   UI_DESIGN_COLLECTION,
   UI_DESIGN_CONTEXT_KEY,
   UI_DESIGN_SCAN_CALL_ID,
@@ -389,6 +391,166 @@ describe('ui threads — the scale preflight', () => {
   })
 })
 
+// ─── Slice 3 — the generation lane → ui_render ───────────────────────────────
+
+const generateEvent = (scale = 's3', target = 'body') => ({
+  type: 'generate',
+  detail: { ctx: { scale, target, echo: { check: 'ui-scale-check' } } },
+})
+
+const tenantStoreResult = (value: JsonObject | null) => ({
+  type: 'store_request_result',
+  detail: {
+    id: 'ui-design-context',
+    ok: true,
+    result: { value },
+    ctx: { echo: { scale: 's3', target: 'body', echo: { check: 'ui-scale-check' } } },
+  },
+})
+
+describe('ui threads — the generation lane', () => {
+  test('a generate request fetches the design tenant — the scale+target ride the store ctx echo', () => {
+    const { selected } = runProgram([generateEvent()])
+    const get = selected.find(
+      (s) => s.type === 'store_request' && (s.detail as { op?: string } | undefined)?.op === 'get',
+    )
+    expect(get).toBeDefined()
+    expect(get?.detail).toEqual({
+      id: 'ui-design-context',
+      op: 'get',
+      input: { collection: 'design', key: 'context' },
+      ctx: { echo: { scale: 's3', target: 'body', echo: { check: 'ui-scale-check' } } },
+    })
+  })
+
+  test('a tenant-bearing store result composes the systemTwo request — vocabulary model-facing, scale+target via ctx', () => {
+    const { selected } = runProgram([
+      generateEvent(),
+      tenantStoreResult({
+        tokens: {
+          colors: { primary: 'light-dark(#755576, #E2BAE0)' },
+          typography: { 'body-md': { fontFamily: 'Ropa Sans', fontSize: '14px' } },
+        },
+        sections: { Overview: 'Matte surfaces, notebook discipline.' },
+        warnings: [],
+      }),
+    ])
+    const request = selected.find((s) => s.type === 'system_two_request')
+    expect(request).toBeDefined()
+    expect(request?.detail?.id).toBe('ui-render-generation')
+    expect(request?.detail?.ctx).toEqual({ scale: 's3', target: 'body' })
+    const input = request?.detail?.input as Record<string, unknown>
+    expect(input.provider).toBe('default')
+    const instructions = input.instructions as string
+    expect(instructions).toContain('--design-colors-primary')
+    expect(instructions).toContain('--design-typography-body-md-fontFamily')
+    expect(instructions).toContain('Matte surfaces, notebook discipline.')
+    expect(JSON.stringify(input.input)).toContain('message')
+  })
+
+  test('a null tenant composes the plain request — no vocabulary, no prose', () => {
+    const { selected } = runProgram([generateEvent(), tenantStoreResult(null)])
+    const request = selected.find((s) => s.type === 'system_two_request')
+    expect(request).toBeDefined()
+    const input = request?.detail?.input as Record<string, unknown> | undefined
+    const instructions = input?.instructions as string | undefined
+    expect(instructions?.includes('--design-')).toBe(false)
+    expect(instructions?.includes('Design rationale')).toBe(false)
+  })
+
+  test('the model reply composes a conforming ui_render — validate-before-request', () => {
+    const { selected } = runProgram([
+      {
+        type: 'system_two_request_result',
+        detail: {
+          id: 'ui-render-generation',
+          ok: true,
+          result: {
+            items: [
+              {
+                type: 'message',
+                role: 'assistant',
+                content: [{ type: 'output_text', text: '<p>Hello</p>' }],
+              },
+            ],
+          },
+          ctx: { scale: 's3', target: 'body' },
+        },
+      },
+    ])
+    const draft = selected.find((s) => s.type === 'render_draft')
+    expect(draft).toBeDefined()
+    const render = selected.find((s) => s.type === 'ui_render')
+    expect(render).toBeDefined()
+    expect(render?.detail).toEqual({
+      id: 'ui-render',
+      target: 'body',
+      html: '<p>Hello</p>',
+      swap: 'innerHTML',
+    })
+  })
+
+  test('a non-conforming reply is held as data — the draft never becomes a render', () => {
+    const { selected } = runProgram([
+      {
+        type: 'system_two_request_result',
+        detail: {
+          id: 'ui-render-generation',
+          ok: true,
+          result: { items: [] },
+          ctx: { scale: 's3', target: 'body' },
+        },
+      },
+    ])
+    // The draft IS selected (held as data, visible in traces) — but its
+    // null html fails the render gate, so no ui_render is ever requested.
+    const draft = selected.find((s) => s.type === 'render_draft')
+    expect(draft).toBeDefined()
+    expect((draft?.detail as { html?: string | null } | undefined)?.html).toBe(null)
+    expect(selected.some((s) => s.type === 'ui_render')).toBe(false)
+  })
+})
+
+describe('ui threads — the custom-properties artifact', () => {
+  test('a tenant-bearing scan result compiles the artifact — the values pass through verbatim', () => {
+    const context = {
+      tokens: { colors: { primary: 'light-dark(#755576, #E2BAE0)' }, spacing: { md: '16px' } },
+      sections: null,
+      warnings: [],
+    }
+    const { selected } = runProgram([
+      {
+        type: 'shell_request_result',
+        detail: { id: 'ui-design-scan', result: { status: 'completed', jsonData: context } },
+      },
+    ])
+    const puts = selected.filter(
+      (s) => s.type === 'store_request' && (s.detail as { op?: string } | undefined)?.op === 'put',
+    )
+    expect(puts).toHaveLength(2)
+    const artifact = puts.find((s) => (s.detail as { input?: { key?: string } } | undefined)?.input?.key === 'artifact')
+    const css = (artifact?.detail as { input?: { value?: { css?: string } } } | undefined)?.input?.value?.css as string
+    expect(css).toContain(':root {')
+    expect(css).toContain('--design-colors-primary: light-dark(#755576, #E2BAE0);')
+    expect(css).toContain('--design-spacing-md: 16px;')
+  })
+
+  test('a tenant without tokens compiles no artifact', () => {
+    const rejected = { tokens: null, sections: null, warnings: ['Duplicate section heading: the file is rejected'] }
+    const { selected } = runProgram([
+      {
+        type: 'shell_request_result',
+        detail: { id: 'ui-design-scan', result: { status: 'completed', jsonData: rejected } },
+      },
+    ])
+    const puts = selected.filter(
+      (s) => s.type === 'store_request' && (s.detail as { op?: string } | undefined)?.op === 'put',
+    )
+    expect(puts).toHaveLength(1)
+    expect((puts[0]?.detail as { input?: { key?: string } } | undefined)?.input?.key).toBe('context')
+  })
+})
+
 // ─── The composition mount ────────────────────────────────────────────────────
 
 const selectionsOf = (traces: Trace[]): SelectionTrace[] =>
@@ -552,6 +714,142 @@ describe('ui threads — the composition mount', () => {
         expect((generate?.selected.detail as { ctx?: { target?: string } } | undefined)?.ctx?.target).toBe('body')
       } finally {
         runtime.terminate()
+      }
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  }, 10_000)
+
+  test('the no-lock lane end-to-end: the USER’s vocabulary rides the model call; the reply renders', async () => {
+    const home = tempHome()
+    try {
+      writeFileSync(
+        join(home, 'DESIGN.md'),
+        '---\ncolors:\n  primary: "#0A0A0A"\nrounded:\n  md: 8px\n---\n\n## Overview\n\nMine.\n',
+      )
+      const server = await startOpenResponsesServer()
+      const traces: Trace[] = []
+      const runtime = bProgram({
+        shell: shellWithHome(home),
+        store: storeWithHome(home),
+        systemTwo: useSystemTwo({ endpoints: { default: { url: server.url } } }),
+      })
+      runtime.useTrace((trace) => {
+        traces.push(trace)
+      })
+      const out: string[] = []
+      const host = createHost({
+        runtime,
+        input: new Response('').body as unknown as ReadableStream<Uint8Array>,
+        write: (line) => out.push(line),
+        home,
+      })
+      await host.rpc.done
+      try {
+        // Boot: the tenant AND the compiled artifact land in the store.
+        await waitForTraces(
+          traces,
+          (s) =>
+            s.filter((t) => {
+              if (t.selected.type !== FACULTY_MESSAGE_KINDS.store_request) return false
+              const detail = t.selected.detail as
+                | { op?: string; input?: { collection?: string; key?: string } }
+                | undefined
+              return detail?.op === 'put' && detail.input?.collection === UI_DESIGN_COLLECTION
+            }).length >= 2,
+        )
+        const artifactPut = selectionsOf(traces).find((t) => {
+          if (t.selected.type !== FACULTY_MESSAGE_KINDS.store_request) return false
+          const detail = t.selected.detail as { input?: { key?: string; value?: { css?: string } } } | undefined
+          return detail?.input?.key === UI_DESIGN_ARTIFACT_KEY
+        })
+        expect(artifactPut).toBeDefined()
+        expect(
+          (artifactPut?.selected.detail as { input?: { value?: { css?: string } } } | undefined)?.input?.value?.css,
+        ).toContain('--design-colors-primary: #0A0A0A;')
+
+        // Drive: the render trigger, then the browser's scale reply.
+        dispatchToRuntime(runtime, {
+          method: 'ui_event',
+          params: { event: { type: 'render', detail: {} }, timeStamp: 1 },
+        })
+        await waitForTraces(traces, (s) => s.some((t) => t.selected.type === 'ui_scale_check'))
+        dispatchToRuntime(runtime, {
+          method: 'ui_scale_check_result',
+          params: { id: UI_SCALE_CHECK_CALL_ID, target: 'body', effectiveScale: 's3', timeStamp: 2 },
+        })
+
+        // The generation request reaches the real endpoint; the reply
+        // composes a conforming render, and the serve egress emits it.
+        await waitForTraces(traces, (s) => s.some((t) => t.selected.type === 'ui_render'))
+        expect(out.some((line) => line.includes('"method":"ui_render"') && line.includes(ASSISTANT_TEXT))).toBe(true)
+
+        // The recorded model call carries the USER's vocabulary (never the
+        // shipped defaults) — inspected after the pipeline settles.
+        const body = server.requests.at(-1)?.body as { instructions?: string; model?: string } | undefined
+        expect(body?.model).toBe('gpt-5.1')
+        expect(body?.instructions).toContain('--design-colors-primary')
+        expect(body?.instructions).toContain('--design-rounded-md')
+        expect(body?.instructions).toContain('Mine.')
+        expect(body?.instructions?.includes('--design-typography')).toBe(false)
+      } finally {
+        runtime.terminate()
+        await server.close()
+      }
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  }, 10_000)
+
+  test('no DESIGN.md at all — the pipeline still renders, plain, no artifact', async () => {
+    const home = tempHome()
+    try {
+      const server = await startOpenResponsesServer()
+      const traces: Trace[] = []
+      const runtime = bProgram({
+        shell: shellWithHome(home),
+        store: storeWithHome(home),
+        systemTwo: useSystemTwo({ endpoints: { default: { url: server.url } } }),
+      })
+      runtime.useTrace((trace) => {
+        traces.push(trace)
+      })
+      const out: string[] = []
+      const host = createHost({
+        runtime,
+        input: new Response('').body as unknown as ReadableStream<Uint8Array>,
+        write: (line) => out.push(line),
+        home,
+      })
+      await host.rpc.done
+      try {
+        // Boot: the scan finds no DESIGN.md — no tenant, no artifact, quiet.
+        await Bun.sleep(500)
+        expect(
+          selectionsOf(traces).some(
+            (t) =>
+              t.selected.type === FACULTY_MESSAGE_KINDS.store_request &&
+              (t.selected.detail as { op?: string; input?: { collection?: string } } | undefined)?.input?.collection ===
+                UI_DESIGN_COLLECTION,
+          ),
+        ).toBe(false)
+
+        dispatchToRuntime(runtime, {
+          method: 'ui_event',
+          params: { event: { type: 'render', detail: {} }, timeStamp: 1 },
+        })
+        await waitForTraces(traces, (s) => s.some((t) => t.selected.type === 'ui_scale_check'))
+        dispatchToRuntime(runtime, {
+          method: 'ui_scale_check_result',
+          params: { id: UI_SCALE_CHECK_CALL_ID, target: 'body', effectiveScale: 's4', timeStamp: 2 },
+        })
+        await waitForTraces(traces, (s) => s.some((t) => t.selected.type === 'ui_render'))
+        expect(out.some((line) => line.includes('"method":"ui_render"') && line.includes(ASSISTANT_TEXT))).toBe(true)
+        const body = server.requests.at(-1)?.body as { instructions?: string } | undefined
+        expect(body?.instructions?.includes('--design-')).toBe(false)
+      } finally {
+        runtime.terminate()
+        await server.close()
       }
     } finally {
       rmSync(home, { recursive: true, force: true })

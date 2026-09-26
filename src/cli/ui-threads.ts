@@ -35,6 +35,7 @@ import {
   CONTROLLER_OUTGOING_MESSAGE_TYPES,
   SWAP_MODES,
 } from '../controller/controller.constants.ts'
+import { CONTROLLER_DETAIL_SCHEMAS } from '../controller/controller.schemas.ts'
 import { FACULTY_MESSAGE_KINDS } from '../faculties/faculties.constants.ts'
 
 // ── Vocabulary ───────────────────────────────────────────────────────────────
@@ -50,6 +51,9 @@ export const UI_DESIGN_COLLECTION = 'design'
 
 /** The tenant's store key — one value, the whole scanned context. */
 export const UI_DESIGN_CONTEXT_KEY = 'context'
+
+/** The compiled custom-properties stylesheet's store key (the tenant's tokens → CSS). */
+export const UI_DESIGN_ARTIFACT_KEY = 'artifact'
 
 // ── The tenant contract — schema-data: one shape, three uses (thread gate,
 //    store admission, model-facing vocabulary derivation) ────────────────────
@@ -216,9 +220,12 @@ const designScanBoot: Thread = {
 
 /**
  * design-tenant — a scan result carrying a design context (or a rejected
- * file's warnings) is put into the store as the tenant. The empty shape
- * (missing DESIGN.md) puts nothing. Fail-closed: a malformed result fails
- * the detailSchema gate, never partial admission.
+ * file's warnings) is put into the store as the tenant, and a
+ * tenant-bearing result ALSO compiles the custom-properties stylesheet
+ * artifact (`--design-<token-path>: <value>;` — the light-dark values pass
+ * through verbatim; generated html references the properties, not
+ * literals). The empty shape (missing DESIGN.md) puts nothing. Fail-closed:
+ * a malformed result fails the detailSchema gate, never partial admission.
  */
 const designTenant: Thread = {
   label: 'ui/design-tenant',
@@ -240,6 +247,40 @@ const designTenant: Thread = {
               result: {
                 type: 'object',
                 properties: { jsonData: UI_DESIGN_CONTEXT_SCHEMA },
+                required: ['jsonData'],
+                additionalProperties: true,
+              },
+            },
+            required: ['id', 'result'],
+            additionalProperties: true,
+          },
+        },
+        {
+          // The artifact compile: from the TENANT (the user's tokens), only
+          // when a tenant exists — never from the shipped asset.
+          type: FACULTY_MESSAGE_KINDS.shell_request_result,
+          query: `. as $d | ($d.result.jsonData.tokens) as $t | { id: "ui-design-artifact", op: "put", input: { collection: "${UI_DESIGN_COLLECTION}", key: "${UI_DESIGN_ARTIFACT_KEY}", value: { css: (":root {\n" + ([ ($t | paths(scalars)) as $p | "  --design-" + ($p | join("-")) + ": " + ($t | getpath($p) | tostring) + ";" ] | join("\n")) + "\n}") } } }`,
+          target: FACULTY_MESSAGE_KINDS.store_request,
+          // Only a tenant-bearing result compiles (tokens non-null); the
+          // id gate keeps foreign scan results out.
+          detailSchema: {
+            type: 'object',
+            properties: {
+              id: { type: 'string', const: UI_DESIGN_SCAN_CALL_ID },
+              result: {
+                type: 'object',
+                properties: {
+                  jsonData: {
+                    type: 'object',
+                    properties: {
+                      tokens: { type: 'object', required: [], additionalProperties: true },
+                      sections: { type: 'object', required: [], additionalProperties: true, nullable: true },
+                      warnings: { type: 'array', items: { type: 'string' } },
+                    },
+                    required: ['tokens', 'sections', 'warnings'],
+                    additionalProperties: false,
+                  },
+                },
                 required: ['jsonData'],
                 additionalProperties: true,
               },
@@ -356,5 +397,204 @@ const preflight: Thread = {
   ],
 }
 
+// ── The generation lane — Consumption/F's two lanes: tokens (the vocabulary)
+//    ride model-facing, prose rides system context; the scale fact and target
+//    ride ctx (host-supplied, never model-facing) ──────────────────────────
+
+/** The design-tenant fetch's correlation id — the compose thread joins on it. */
+export const UI_DESIGN_GET_CALL_ID = 'ui-design-context'
+
+/** The systemTwo generation call's correlation id — the render composer joins on it. */
+export const UI_GENERATION_CALL_ID = 'ui-render-generation'
+
+/** The render draft's event type — the model's composition, held as data before the gate. */
+export const UI_RENDER_DRAFT_TYPE = 'render_draft'
+
+/** The composed render detail's id (the pipeline's one render id in v1). */
+export const UI_RENDER_ID = 'ui-render'
+
+/**
+ * The generation endpoint's provider label — the host's endpoint map must
+ * carry it (`useSystemTwo({ endpoints: { default: … } })`). MINIMAL: a
+ * config seam (the composition naming its model) arrives with the
+ * autoresearch loop's first iteration; v1 is the fixed convention.
+ */
+export const UI_GENERATION_PROVIDER = 'default'
+
+/** The generation model id. MINIMAL: same ceiling as {@link UI_GENERATION_PROVIDER}. */
+export const UI_GENERATION_MODEL_ID = 'gpt-5.1'
+
+/** The generation composition contract — the plain lane (no tenant). */
+const GENERATION_INSTRUCTIONS =
+  'Compose the HTML fragment for the requested UI view. Reply with ONLY the HTML fragment — no prose, no code fences, no explanation.'
+
+/**
+ * generation-context — the scale-stamped generate request fetches the design
+ * tenant: the generate ctx rides the store request's `ctx.echo` (the join
+ * lane — the store echoes it verbatim), so the compose stage sees the scale,
+ * the target, AND the tenant from one source event.
+ */
+const generationContext: Thread = {
+  label: 'ui/generation-context',
+  rules: [
+    {
+      transform: [
+        {
+          type: UI_GENERATE_EVENT_TYPE,
+          detailSchema: UI_GENERATE_SCHEMA,
+          query: `. as $d | { id: "${UI_DESIGN_GET_CALL_ID}", op: "get", input: { collection: "${UI_DESIGN_COLLECTION}", key: "${UI_DESIGN_CONTEXT_KEY}" }, ctx: { echo: $d.ctx } }`,
+          target: FACULTY_MESSAGE_KINDS.store_request,
+        },
+      ],
+    },
+  ],
+}
+
+/** The tenant-bearing compose gate: the correlated get result with the ctx echo present. */
+const GENERATION_COMPOSE_SOURCE_SCHEMA = {
+  type: 'object',
+  properties: {
+    id: { type: 'string', const: UI_DESIGN_GET_CALL_ID },
+    ok: { type: 'boolean', const: true },
+    result: {
+      type: 'object',
+      properties: { value: { type: 'object', required: [], additionalProperties: true, nullable: true } },
+      required: ['value'],
+      additionalProperties: true,
+    },
+    ctx: {
+      type: 'object',
+      properties: {
+        echo: {
+          type: 'object',
+          properties: {
+            scale: { type: 'string', minLength: 1 },
+            target: { type: 'string', minLength: 1 },
+          },
+          required: ['scale', 'target'],
+          additionalProperties: true,
+        },
+      },
+      required: ['echo'],
+      additionalProperties: true,
+    },
+  },
+  required: ['id', 'ok', 'result', 'ctx'],
+  additionalProperties: true,
+} as const
+
+/** The systemTwo request composed from the store result — one source, all three inputs. */
+const GENERATION_COMPOSE_QUERY =
+  `. as $d` +
+  ` | ($d.result.value // null) as $v` +
+  ` | (if $v == null then null else ($v.tokens // null) end) as $tokens` +
+  ` | (if $v == null then null else ($v.sections // null) end) as $sections` +
+  ` | (if $tokens == null then [] else [ ($tokens | paths(scalars)) as $p | "--design-" + ($p | join("-")) ] end) as $vocab` +
+  ` | {` +
+  `    id: "${UI_GENERATION_CALL_ID}",` +
+  `    ctx: { scale: $d.ctx.echo.scale, target: $d.ctx.echo.target },` +
+  `    input: {` +
+  `      provider: "${UI_GENERATION_PROVIDER}",` +
+  `      modelId: "${UI_GENERATION_MODEL_ID}",` +
+  `      instructions: (` +
+  `        "${GENERATION_INSTRUCTIONS}"` +
+  `        + (if ($vocab | length) > 0 then "\\n\\nReference these CSS custom properties by name — never literal values: " + ($vocab | join(", ")) else "" end)` +
+  `        + (if $sections == null then "" else "\\n\\nDesign rationale:\\n\\n" + ([ $sections | to_entries[] | "## " + .key + "\\n\\n" + (.value // "") ] | join("\\n\\n")) end)` +
+  `      ),` +
+  `      input: [ { type: "message", role: "user", content: "Compose the HTML fragment for the requested UI view." } ],` +
+  `    },` +
+  `  }`
+
+/**
+ * generation-compose — the tenant-bearing (or null-tenant) store result
+ * composes the systemTwo request. With a tenant the token VOCABULARY (the
+ * flattened `--design-*` property names, never literal values) and the prose
+ * sections ride model-facing; the scale fact and target ride `ctx` (never
+ * model-facing). With NO tenant (the plain-degradation lane) the request
+ * composes plain — the design lane is an optional input, never a gate.
+ */
+const generationCompose: Thread = {
+  label: 'ui/generation-compose',
+  rules: [
+    {
+      transform: [
+        {
+          type: FACULTY_MESSAGE_KINDS.store_request_result,
+          detailSchema: GENERATION_COMPOSE_SOURCE_SCHEMA,
+          query: GENERATION_COMPOSE_QUERY,
+          target: FACULTY_MESSAGE_KINDS.system_two_request,
+        },
+      ],
+    },
+  ],
+}
+
+/**
+ * render-compose — the model reply composes the render draft: the id, target,
+ * and swap are host-stamped (the model is never trusted with the envelope);
+ * only the html is model-composed. An empty/missing reply produces a null
+ * html — held as data at the gate, never a silent render.
+ */
+const renderCompose: Thread = {
+  label: 'ui/render-compose',
+  rules: [
+    {
+      transform: [
+        {
+          type: FACULTY_MESSAGE_KINDS.system_two_request_result,
+          detailSchema: {
+            type: 'object',
+            properties: {
+              id: { type: 'string', const: UI_GENERATION_CALL_ID },
+              ok: { type: 'boolean', const: true },
+              ctx: {
+                type: 'object',
+                properties: { target: { type: 'string', minLength: 1 } },
+                required: ['target'],
+                additionalProperties: true,
+              },
+            },
+            required: ['id', 'ok', 'ctx'],
+            additionalProperties: true,
+          },
+          query: `. as $d | ([ $d.result.items[]? | select(.type == "message") | .content[]? | select(.type == "output_text") | .text ] | join("")) as $text | { id: "${UI_RENDER_ID}", target: $d.ctx.target, html: (if ($text | length) > 0 then $text else null end), swap: "${UI_RENDER_SWAP}" }`,
+          target: UI_RENDER_DRAFT_TYPE,
+        },
+      ],
+    },
+  ],
+}
+
+/**
+ * render-gate — validate-before-request (the catalog pattern): the draft must
+ * conform to the controller's `ui_render` detail schema — CONTROLLER_DETAIL_SCHEMAS's
+ * own schema, derived never hand-mirrored — before the thread requests the
+ * render. The root guard is the backstop; this is the gate. A non-conforming
+ * draft is held as data (selected, visible in traces, never emitted).
+ */
+const renderGate: Thread = {
+  label: 'ui/render-gate',
+  rules: [
+    {
+      transform: [
+        {
+          type: UI_RENDER_DRAFT_TYPE,
+          detailSchema: CONTROLLER_DETAIL_SCHEMAS[CONTROLLER_INCOMING_MESSAGE_TYPES.ui_render],
+          query: `. as $d | { id: $d.id, target: $d.target, html: $d.html, swap: $d.swap }`,
+          target: CONTROLLER_INCOMING_MESSAGE_TYPES.ui_render,
+        },
+      ],
+    },
+  ],
+}
+
 /** The ui_* producer threads — the thread set `bProgram` mounts with shell + store + systemTwo. */
-export const uiThreads: Thread[] = [designScanBoot, designTenant, preflight]
+export const uiThreads: Thread[] = [
+  designScanBoot,
+  designTenant,
+  preflight,
+  generationContext,
+  generationCompose,
+  renderCompose,
+  renderGate,
+]
