@@ -169,7 +169,7 @@ export type RegisteredTransformListener = TransformListener & {
  * - Interrupts cause thread termination
  *
  * @see {@link ThreadSchema} for the tuple that embeds idiom rules
- * @see {@link UseAddThread} for registering a thread from `Idioms[]` rules
+ * @see {@link AddThread} for registering a thread from `Idioms[]` rules
  */
 export type Idioms = {
   [IDIOMS.waitFor]?: BPListener[]
