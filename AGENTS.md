@@ -95,7 +95,10 @@ faculties), plus its `tests/`:
 - `system-one/` — TypeSafe/OpenRouter Decisions; `configSystemOne` +
   `useSystemOne({ endpoint })`, with 429/529 retry; `threads.ts` — the
   admission judgment threads (the BP-native blocking judge over the Decisions
-  lane; the composition mounts it when systemOne is wired)
+  lane; the composition mounts it when systemOne is wired) and the supervision
+  threads (the runtime circuit breaker — the counting supervisor, its
+  block-then-judge verdict, and its recovery; `bProgram({ supervision })`
+  mounts the pack with systemOne when the host names watched types)
 - `shell/` — bun-direct script execution — `run` op TS scripts via `bun run -`,
   `shell` op Bun Shell commands through the wrapper; `rpc` op generic remote
   JSON-RPC (the remote-mcp layering is the threads, not the op);
@@ -149,7 +152,9 @@ traces out), `load-config.ts` (`<BEHAVIORAL_HOME>/config.ts`), and `trace-consum
 **`src/faculties/<faculty>/threads.ts`** — faculty threads: `shell/threads.ts`
 (the ICL threads — skill/plugin scans, catalog/manifest schema gates, links dispatchers
 + stored recipes), `shell/rpc-auth.threads.ts` (the credential vend-and-replay
-spine), and `shell/remote-mcp.threads.ts` (the MCP layering over the rpc op).
+spine), `shell/remote-mcp.threads.ts` (the MCP layering over the rpc op), and
+`system-one/threads.ts` (the admission judgment threads + the supervision
+threads — the runtime circuit breaker, its judgment, and its recovery).
 Threads ship with
 their faculty; `bProgram` mounts the faculty's threads when the faculty and its required
 faculties are on — except `faculties.threads.ts`, the composition's **root guard
